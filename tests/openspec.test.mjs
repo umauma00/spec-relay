@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { main, bypassFiles, STUB_MARKER } from '../scripts/setup.mjs';
 import { checkReview, checkPortReady, checkPortDone } from '../scripts/gate.mjs';
+import { status as progress } from '../scripts/status.mjs';
 import { runOpenspec, probeOpenspec } from '../scripts/openspec.mjs';
 import { tempDir, write, quiet, isolateOpenspec, crlf } from './helpers.mjs';
 
@@ -92,7 +93,12 @@ test('extract -> review gate -> archive -> port', { skip: !hasOpenspec && 'opens
   write(dir, `${change}/review.md`, crlf('\uFEFFReviewer: Uma\n\n## 1. Requirements\n- [x] R1 Add two numbers\n'));
   assert.deepEqual(checkReview(dir, 'extract-calc'), { ok: true, problems: [] });
 
+  const steps = () => progress(dir).todoList.slice(1).map((item) => item.status);
+  assert.deepEqual(steps(), ['completed', 'not-started', 'not-started']);
+  assert.equal(progress(dir).current.step, 'review');
   openspec(dir, 'archive', 'extract-calc', '--yes');
+  // The real archive folder name (YYYY-MM-DD-<change>) and baseline layout.
+  assert.deepEqual(steps(), ['completed', 'completed', 'not-started']);
   assert.match(fs.readFileSync(path.join(dir, 'openspec/specs/calc/spec.md'), 'utf8'), /Requirement: Add two numbers/);
 
   assert.deepEqual(checkPortReady(dir, 'calc'), { ok: true, problems: [] });
@@ -102,4 +108,10 @@ test('extract -> review gate -> archive -> port', { skip: !hasOpenspec && 'opens
   assert.deepEqual(next.artifacts.map((a) => a.id), ['proposal', 'design', 'tasks']);
   write(dir, 'openspec/changes/port-calc/tasks.md', '# Tasks\n\n## 1. Core\n\n- [ ] 1.1 Implement add; verify with its test\n');
   assert.equal(checkPortDone(dir, 'port-calc').ok, false);
+  // No task ticked yet: the design waits for the person's agreement.
+  assert.deepEqual(steps(), ['completed', 'completed', 'not-started']);
+  write(dir, 'openspec/changes/port-calc/tasks.md', '# Tasks\n\n## 1. Core\n\n- [x] 1.1 Implement add; verify with its test\n');
+  for (const file of ['proposal.md', 'design.md']) write(dir, `openspec/changes/port-calc/${file}`, `# ${file}\n`);
+  openspec(dir, 'archive', 'port-calc', '--yes');
+  assert.deepEqual(progress(dir).todoList.map((item) => item.status), ['completed']);
 });
