@@ -269,9 +269,10 @@ export function sourceFiles(root) {
   const git = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', prefix || '.'], { cwd: base, encoding: 'buffer', windowsHide: true });
   if (git.status === 0 && git.stdout) {
     const listed = git.stdout.toString('utf8').split('\0').filter(Boolean);
-    // An empty list from a folder that has files means git does not own it (not a repository root).
-    const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: base, encoding: 'utf8', windowsHide: true });
-    if (top.status === 0 && fs.realpathSync(path.resolve(top.stdout.trim())) === fs.realpathSync(base)) {
+    // Use git's list only when this folder is the repository top. `--show-cdup` is empty there.
+    // Comparing paths instead breaks on Windows (8.3 short names, drive letter case, slashes).
+    const top = spawnSync('git', ['rev-parse', '--show-cdup'], { cwd: base, encoding: 'utf8', windowsHide: true });
+    if (top.status === 0 && top.stdout.trim() === '') {
       return [...new Set(listed.filter((f) => !skip(f) && fs.existsSync(path.join(base, f))))].sort();
     }
   }
