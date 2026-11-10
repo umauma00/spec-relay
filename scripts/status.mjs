@@ -5,15 +5,20 @@
 //   node status.mjs [--format todo|checklist|markdown|json] [--capability PATH]
 //                   [--language ja|en] [--root DIR]
 //
-//   todo       { todoList: [{ id, title, description, status }], checklist, current, problems }
+//   todo       { todoList: [{ id, title, description, status }], checklist, current, parallel, problems }
 //              for the TODO tool. ASCII-only JSON (\uXXXX escapes), so a console
 //              code page on Windows cannot garble the titles.
 //   checklist  the same items as a Markdown checklist for chat, then any problems
 //   markdown   the checklist, then a table of every capability
 //   json       everything, with the per-capability details (the default)
 //
-// The TODO list is a view: one line for the whole migration and the steps of the
-// current capability. It never records or grants an approval; the review gate is
+// The TODO list is a view: one line for the whole migration, the steps of the
+// current capability, and one line for each other capability with an active
+// change (several run at once when the orchestrator works in parallel).
+// `parallel` says how many subagents may run at once, which capabilities are
+// being analyzed or wait for review, and which may be analyzed next without
+// running more than `ahead` capabilities ahead of the person's review (both
+// numbers come from openspec/config.yaml). It never records or grants an approval; the review gate is
 // scripts/gate.mjs. Read-only. Exits 0, 1 when --capability names no known
 // capability, 2 on bad usage.
 //
@@ -23,7 +28,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkboxes, readIf, capabilitySegments, checkReview, baseName, archivedChange, baselineHash } from './gate.mjs';
+import { checkboxes, readIf, capabilitySegments, checkReview, baseName, archivedChange, baselineHash, configValue } from './gate.mjs';
 
 const PLAN = 'openspec/spec-relay/plan.md';
 // Used when a change's schema file cannot be read. The schema's own list wins,
@@ -393,9 +398,10 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
       if (!here && f.status !== 'completed') here = { capability: null, step: f.id, owner: f.waiting ? 'person' : 'agent', ...(f.waiting ? { waiting: true } : {}) };
     });
   }
-  // Before the survey and target design, a capability's steps show only when asked
-  // for (a project that started on an earlier kit version, for example).
-  if (current && (!foundationOpen || capability)) {
+  // Before the survey and target design are both archived, a capability's steps
+  // show only when it has an active change (analyzed during the target design's
+  // review) or when asked for (a project that started on an earlier kit version).
+  if (current && (!foundationOpen || capability || current.active)) {
     const first = todoList.length + 1;
     STEPS.forEach((step, i) => {
       const state = current.steps[step.id];
@@ -410,9 +416,25 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
       if (!here && state.status !== 'completed') here = { capability: current.capability, step: step.id, owner: step.owner, ...(state.waiting ? { waiting: true } : {}) };
     });
   }
+  // Every other capability with an active change gets one line: its first
+  // unfinished step.
+  for (const other of capabilities.filter((c) => c.active && c !== current)) {
+    const step = STEPS.find((st) => other.steps[st.id].status !== 'completed');
+    if (!step) continue;
+    const state = other.steps[step.id];
+    const detail = say(words, state.detail);
+    todoList.push({
+      id: todoList.length + 1,
+      key: `${other.capability}:${step.id}`,
+      title: `${other.capability}: ${words[step.id]}${detail ? (lang === 'ja' ? `【${detail}】` : ` [${detail}]`) : ''}`,
+      description: step.owner === 'person' ? words.person : '',
+      status: state.status,
+    });
+  }
   return {
     plan, total, ported, reviewed,
     current: here,
+    parallel: parallelPlan(root, capabilities, foundation),
     foundation: foundation.map(({ id, status: st }) => ({ id, status: st })),
     active: capabilities.filter((c) => c.active).map((c) => c.capability),
     todoList,
@@ -421,6 +443,29 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
     unknown,
     language: lang,
   };
+}
+
+const setting = (root, label, fallback, max) => {
+  const n = Number(String(configValue(root, label, '')).replace(/\s+#.*$/, '').trim());
+  return Number.isInteger(n) && n >= 1 && n <= max ? n : fallback;
+};
+
+// What the orchestrator may run at once. Analyses run at most `ahead`
+// capabilities in front of the person's review, because the review is the one
+// step that cannot run in parallel: what it finds should reach the next
+// analyses, and a long queue only waits. Extract changes need the archived
+// survey (the glossary and the capability list), not the target design.
+export function parallelPlan(root, capabilities, foundation) {
+  const subagents = setting(root, 'Parallel subagents', 4, 32);
+  const ahead = setting(root, 'Analyses ahead of review', 2, 10);
+  const analyzing = capabilities.filter((c) => c.extract && c.steps.analyze.status !== 'completed').map((c) => c.capability);
+  const awaitingReview = capabilities.filter((c) => (c.extract && c.steps.analyze.status === 'completed') || c.amend).map((c) => c.capability);
+  const surveyDone = foundation.find((f) => f.id === 'survey')?.status === 'completed';
+  const room = Math.max(0, ahead - analyzing.length - awaitingReview.length);
+  const nextToAnalyze = surveyDone
+    ? capabilities.filter((c) => c.planned && c.counted && !c.extract && !c.baseline && !c.extractArchived).slice(0, room).map((c) => c.capability)
+    : [];
+  return { subagents, ahead, analyzing, awaitingReview, nextToAnalyze };
 }
 
 export function checklist(report, { problems = false } = {}) {
@@ -459,7 +504,7 @@ export function main(argv) {
   }
   const report = status(opts.root, { capability: opts.capability, language: language(opts.root, opts.language) });
   const todoList = report.todoList.map(({ id, title, description, status: s }) => ({ id, title, description, status: s }));
-  if (opts.format === 'todo') console.log(ascii(JSON.stringify({ todoList, checklist: checklist(report), current: report.current, problems: report.problems }, null, 2)));
+  if (opts.format === 'todo') console.log(ascii(JSON.stringify({ todoList, checklist: checklist(report), current: report.current, parallel: report.parallel, problems: report.problems }, null, 2)));
   else if (opts.format === 'checklist') console.log(checklist(report, { problems: true }));
   else if (opts.format === 'markdown') console.log(markdown(report));
   else console.log(JSON.stringify({ ...report, checklist: checklist(report) }, null, 2));

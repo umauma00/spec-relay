@@ -38,7 +38,8 @@ export function stubFor(file) {
 const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
 
 const USAGE = `Usage: node scripts/setup.mjs --target DIR --source-language LANG --target-language LANG
-         --target-root DIR [--source-root DIR] [--language LANG] [--skip-init] [--apply]
+         --target-root DIR [--source-root DIR] [--language LANG]
+         [--parallel N] [--ahead N] [--skip-init] [--apply]
 
   --target           repository being migrated (default: current directory)
   --source-language  language of the existing code, e.g. "C#"
@@ -46,16 +47,20 @@ const USAGE = `Usage: node scripts/setup.mjs --target DIR --source-language LANG
   --source-root      directory of the existing code, relative to --target (default: .)
   --target-root      directory for the new implementation, relative to --target
   --language         language OpenSpec artifacts are written in (default: en)
+  --parallel         subagents the orchestrator runs at once, 1-32 (default: 4;
+                     Copilot Business allows 16, Enterprise 32)
+  --ahead            capabilities analyzed ahead of the person's review, 1-10 (default: 2)
   --skip-init        do not run "openspec init" (for tests or a manual init)
   --apply            make the changes; without it only the plan is printed`;
 
 class UsageError extends Error {}
 
 export function parseArgs(argv) {
-  const opts = { target: process.cwd(), sourceRoot: '.', language: 'en', apply: false, skipInit: false };
+  const opts = { target: process.cwd(), sourceRoot: '.', language: 'en', parallel: '4', ahead: '2', apply: false, skipInit: false };
   const keys = {
     '--target': 'target', '--source-language': 'sourceLanguage', '--target-language': 'targetLanguage',
     '--source-root': 'sourceRoot', '--target-root': 'targetRoot', '--language': 'language',
+    '--parallel': 'parallel', '--ahead': 'ahead',
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -74,6 +79,11 @@ export function parseArgs(argv) {
   }
   for (const key of ['sourceLanguage', 'targetLanguage', 'sourceRoot', 'targetRoot', 'language']) {
     if (/[\r\n]/.test(opts[key])) throw new UsageError(`--${key} must be a single line`);
+  }
+  for (const [flag, key, max] of [['--parallel', 'parallel', 32], ['--ahead', 'ahead', 10]]) {
+    const n = Number(opts[key]);
+    if (!/^\d+$/.test(String(opts[key])) || n < 1 || n > max) throw new UsageError(`${flag} must be a whole number from 1 to ${max}`);
+    opts[key] = n;
   }
   for (const key of ['sourceRoot', 'targetRoot']) {
     const flag = key === 'sourceRoot' ? '--source-root' : '--target-root';
@@ -122,6 +132,7 @@ export function renderConfig(opts) {
   const values = {
     SOURCE_LANGUAGE: opts.sourceLanguage, TARGET_LANGUAGE: opts.targetLanguage,
     SOURCE_ROOT: opts.sourceRoot, TARGET_ROOT: opts.targetRoot, ARTIFACT_LANGUAGE: opts.language,
+    PARALLEL: opts.parallel ?? 4, AHEAD: opts.ahead ?? 2,
   };
   return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => {
     if (!(key in values)) throw new Error(`unknown placeholder ${key}`);

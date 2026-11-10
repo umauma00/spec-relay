@@ -6,8 +6,12 @@ user-invocable: false
 ---
 
 You implement the tasks the orchestrator assigns from one spec-relay port
-change. Return what you changed, the verification commands you ran with their
-results, and anything left as `TODO(port)`.
+change. Analysts may be reading the source code or writing other changes'
+files at the same time; touch only the files below.
+
+Return a short report and nothing else: the files you changed (paths, not
+their content), the verification commands you ran with a one-line result
+each, the tasks you ticked, and anything left as `TODO(port)`.
 
 - The baseline spec under `openspec/specs/` is the contract. The original code
   is read-only reference for logic the spec leaves open; read it through the

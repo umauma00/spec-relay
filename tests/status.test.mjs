@@ -195,7 +195,7 @@ test('mismatched and colliding names, a missing baseline and overlapping changes
   write(dir, 'openspec/changes/port-billing-invoice/tasks.md', '- [x] 1.1 a\n- [ ] 1.2 b\n');
   fs.rmSync(path.join(dir, `${EXTRACT}/trace.md`));
   const overlap = status(dir, { capability: 'billing/invoice' });
-  assert.deepEqual(statuses(overlap).slice(1), ['in-progress', 'not-started', 'not-started']);
+  assert.deepEqual(statuses(overlap).slice(1, 4), ['in-progress', 'not-started', 'not-started']);
   // An archived extract whose baseline never appeared.
   write(dir, 'openspec/changes/archive/2026-11-04-extract-billing-payment/source-map.md', '# x\n');
   fs.rmSync(path.join(dir, 'openspec/changes/extract-billing-payment'), { recursive: true });
@@ -246,7 +246,7 @@ test('the CLI prints each format, keeps the TODO JSON ASCII-only and exits 1 for
   } finally { console.log = log; }
   assert.match(out[0], /^[\x00-\x7f]*$/);
   const todo = JSON.parse(out[0]);
-  assert.deepEqual(Object.keys(todo), ['todoList', 'checklist', 'current', 'problems']);
+  assert.deepEqual(Object.keys(todo), ['todoList', 'checklist', 'current', 'parallel', 'problems']);
   assert.deepEqual(Object.keys(todo.todoList[0]), ['id', 'title', 'description', 'status']);
   assert.match(todo.todoList[0].title, /^全体/);
   assert.match(todo.checklist, /← いまここ/);
@@ -323,7 +323,33 @@ test('a port archived before an amendment is not done; -v plan names are reporte
 
   const early = repo();
   fs.rmSync(path.join(early, 'openspec/changes/archive/2026-10-31-target-design'), { recursive: true });
+  // An extract change opened during the target design's review shows its steps.
+  assert.deepEqual(status(early).todoList.map((i) => i.key), ['overall', 'survey', 'target', 'billing/invoice:analyze', 'billing/invoice:review', 'billing/invoice:implement']);
+  fs.rmSync(path.join(early, EXTRACT), { recursive: true });
   assert.deepEqual(status(early).todoList.map((i) => i.key), ['overall', 'survey', 'target']);
   assert.deepEqual(status(early, { capability: 'billing/invoice' }).todoList.map((i) => i.key), ['overall', 'survey', 'target', 'billing/invoice:analyze', 'billing/invoice:review', 'billing/invoice:implement']);
   assert.equal(status(early, { capability: 'billing/invoice' }).current.step, 'target');
+});
+
+test('parallel work: one line per other active capability, and what may be analyzed next', () => {
+  const dir = repo({ plan: PLAN.replace('3. `billing/payment` 入金', '3. `billing/payment` 入金\n4. `billing/tax` 税\n5. `billing/refund` 返金') });
+  write(dir, 'openspec/changes/extract-billing-payment/.openspec.yaml', 'schema: spec-relay-extract\n');
+  write(dir, 'openspec/changes/extract-billing-payment/source-map.md', '# m\n');
+  const report = status(dir);
+  assert.equal(report.current.capability, 'billing/invoice');
+  assert.deepEqual(report.todoList.map((i) => i.key).slice(-1), ['billing/payment:analyze']);
+  assert.equal(report.todoList.at(-1).status, 'in-progress');
+  assert.deepEqual(report.parallel, { subagents: 4, ahead: 2, analyzing: ['billing/payment'], awaitingReview: ['billing/invoice'], nextToAnalyze: [] });
+
+  // The limits come from openspec/config.yaml; a bad value falls back to the default.
+  const config = fs.readFileSync(path.join(dir, 'openspec/config.yaml'), 'utf8');
+  write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Parallel subagents (at once, whole session): 16\n  Analyses ahead of review: 3\n`);
+  assert.deepEqual(status(dir).parallel, { subagents: 16, ahead: 3, analyzing: ['billing/payment'], awaitingReview: ['billing/invoice'], nextToAnalyze: ['billing/tax'] });
+  write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Parallel subagents (at once, whole session): 99\n`);
+  assert.equal(status(dir).parallel.subagents, 4);
+
+  // Nothing is analyzed before the survey is archived.
+  fs.rmSync(path.join(dir, 'openspec/changes/archive'), { recursive: true });
+  write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Analyses ahead of review: 5\n`);
+  assert.deepEqual(status(dir).parallel.nextToAnalyze, []);
 });

@@ -2,7 +2,7 @@
 
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) を使って、コードベースを別のプログラミング言語へ移すための GitHub Copilot 用キットです。元のコードから仕様を起こし、人間がその仕様をレビューし、レビュー済みの仕様をもとに新しい言語で実装します。
 
-> **状態：0.2.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
+> **状態：0.3.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
 
 ## 流れ
 
@@ -59,6 +59,7 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 
 - これは確認だけで、何も書き換えません。内容を見てから、同じコマンドの最後に `--apply` を付けて反映します。
 - PowerShell・コマンドプロンプト・bash のどれでも同じ1行で動きます。キットのパスは `"` で囲んでください（プラグインとして入れた場合は、ホームフォルダーの `.copilot\installed-plugins\` の下にあります）。
+- `--parallel 16` のように、同時に動かすサブエージェントの数を指定できます（既定 4、1〜32）。上限は Copilot の契約で違います（2026-11 時点で Free 2、Pro 4、Max 8、Business 16、Enterprise 32）。レビューより先に解析しておく機能の数は `--ahead`（既定 2）です。あとから変えるときは `openspec/config.yaml` の値を書き換えます。
 
 導入で置かれるもの：
 
@@ -79,7 +80,17 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 - **仕様の修正は読み違いだけ。** 動きそのものを変えたいときは、移行後の別作業にします。
 - **正は markdown、見るのは HTML。** レビューでは `scripts/render.mjs` が成果物を1枚の HTML にします（要件ごとのカード、シナリオ、元コードの該当行、質問と判断、進み具合）。デザインはスクリプトに固定しているので、どのモデルでも同じ見た目になります。判断は markdown（review.md）に記録します。
 - **仕様が契約。** 実装中に元コードと仕様が食い違ったら、AI はどちらかを選ばず人に聞きます。
+- **並列で進めても、レビューは1本。** 解析・照合・実装はサブエージェントが同時に進め、人のレビューは1つずつです。先に解析しておくのは `--ahead` 件までにして、レビュー待ちを溜めません。サブエージェントは割り当てられたファイルだけを書き、オーケストレーターには短い報告だけを返すので、長い移行でもオーケストレーターの文脈が埋まりにくくなっています（[詳しく](docs/WORKFLOW.md#並列での進め方)）。
 - **進捗は Copilot の TODO に出す。** `scripts/status.mjs` が `openspec/` のファイルから進捗を計算し、オーケストレーターが「全体1行 + いまの機能の工程」を TODO リストに出します。報告の先頭にも同じ一覧を出します。TODO のチェックは承認になりません（[詳しく](docs/WORKFLOW.md#進捗の表示copilot-の-todo)）。
+
+## 0.2.0 から更新するとき
+
+0.3.0 で、サブエージェントを並列に動かす手順に変わり、調査スキーマの説明文が1か所変わりました。導入スクリプトをもう一度実行するとスキーマの違いを表示して止まるので、`openspec/schemas/spec-relay-*` を削除してから実行し直してください。`openspec/config.yaml` に同時実行数の2行がない場合は、既定の 4 と 2 で動きます。変えたいときは context に次の2行を足します。
+
+```yaml
+  Parallel subagents (at once, whole session): 16
+  Analyses ahead of review: 2
+```
 
 ## 0.1.0 から更新するとき
 
@@ -97,7 +108,8 @@ openspec-schemas/              移行用の OpenSpec スキーマ
 templates/openspec-config.yaml 移行対象に置く OpenSpec 設定のひな形
 scripts/setup.mjs              導入スクリプト（外部パッケージなし）
 scripts/gate.mjs               承認・実装の前に使う機械的な確認
-scripts/status.mjs             進捗の計算（TODO リスト・チャット用）
+scripts/status.mjs             進捗の計算（TODO リスト・チャット用）と、次に並列で始めてよい作業
+scripts/merge.mjs              サブエージェントが分担して書いた表を1つの成果物にまとめる
 scripts/render.mjs             成果物の markdown をレビュー用の HTML にする（デザイン固定）
 scripts/openspec.mjs           OpenSpec CLI の起動（Windows でシェルを通さない）
 tests/                         node:test のテスト（OpenSpec があれば通しの確認も）

@@ -36,6 +36,13 @@ test('source and target roots must not contain each other, except source root .'
   assert.equal(parseArgs(BASE).sourceRoot, '.');
 });
 
+test('--parallel and --ahead take whole numbers in range', () => {
+  const opts = parseArgs([...BASE, '--parallel', '16', '--ahead', '3']);
+  assert.deepEqual([opts.parallel, opts.ahead], [16, 3]);
+  for (const bad of ['0', '33', '4.5', 'many']) assert.throws(() => parseArgs([...BASE, '--parallel', bad]), /--parallel must be a whole number from 1 to 32/, bad);
+  assert.throws(() => parseArgs([...BASE, '--ahead', '11']), /--ahead must be a whole number from 1 to 10/);
+});
+
 test('a dry run changes nothing', () => {
   const dir = tempDir();
   assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init'])), 0);
@@ -50,6 +57,7 @@ test('apply writes schemas and a filled config, and a second run keeps them', ()
   assert.match(config, /Source language: C#/);
   assert.match(config, /Target root \(new implementation\): ts/);
   assert.match(config, /Artifact language: ja/);
+  assert.match(config, /Parallel subagents \(at once, whole session\): 4\n  Analyses ahead of review: 2\n/);
   assert.doesNotMatch(config, /\{\{/);
   for (const schema of ['spec-relay-extract', 'spec-relay-port']) {
     assert.ok(fs.existsSync(path.join(dir, 'openspec/schemas', schema, 'schema.yaml')));

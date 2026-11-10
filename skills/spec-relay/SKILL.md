@@ -15,7 +15,8 @@ task and returns to it.
 The kit's own files are two directories above this skill:
 [scripts/setup.mjs](../../scripts/setup.mjs),
 [scripts/gate.mjs](../../scripts/gate.mjs),
-[scripts/status.mjs](../../scripts/status.mjs), `openspec-schemas/` and
+[scripts/status.mjs](../../scripts/status.mjs),
+[scripts/merge.mjs](../../scripts/merge.mjs), `openspec-schemas/` and
 `docs/WORKFLOW.md`. `<kit>` below stands for the absolute path of that
 directory; resolve it from this file's own location (installed as a plugin it is
 under `.copilot/installed-plugins/` in the person's home folder).
@@ -69,6 +70,11 @@ need the reasoning behind a step.
   suffix (`port-billing-invoice-v2`). The scripts treat it as the same change.
 - **Review page**: the HTML view of a change's Markdown, made by the
   `spec-relay-view` skill. The Markdown stays the source of truth.
+- **Work folder**: `openspec/spec-relay/work/<change>/`, scratch files that
+  subagents write in parallel (table parts, survey evidence) before
+  `merge.mjs` puts them into an artifact.
+- **Wave**: a set of subagent tasks you start together (see Working in
+  parallel).
 
 ## 0. Setup (once per repository)
 
@@ -80,10 +86,13 @@ need the reasoning behind a step.
 2. If `openspec/config.yaml` already contains `# spec-relay: managed`, setup is
    done; read its context and go to the first unfinished step.
 3. Otherwise ask, one question at a time: the source language (propose what you
-   detect from the files), the target language, the source root, the target root
-   and the language for artifacts (default: the person's language).
+   detect from the files), the target language, the source root, the target root,
+   the language for artifacts (default: the person's language) and how many
+   subagents may run at once (default 4; at the time of writing GitHub Copilot
+   allows 2 on Free, 4 on Pro, 8 on Max, 16 on Business and 32 on Enterprise).
 4. Run `node "<kit>/scripts/setup.mjs" --target . --source-language "..."
-   --target-language "..." --source-root "..." --target-root "..." --language ...`
+   --target-language "..." --source-root "..." --target-root "..." --language ...
+   --parallel <n>`
    without `--apply`, show the plan, and run it again with `--apply` after the
    person agrees. On a conflict, show it and ask how to resolve it; never
    overwrite, move or delete the person's files to get past it.
@@ -92,6 +101,60 @@ need the reasoning behind a step.
    may restore them; run setup again
    after it.
 5. Commit nothing on your own. Suggest a commit when setup is done.
+
+## Working in parallel
+
+The person's review is the one step that never runs in parallel. Run the work
+around it in parallel, so that the next review is ready when the person
+finishes one, and keep your own context small, so that a long migration does
+not wash out these instructions.
+
+1. **Limits.** `node "<kit>/scripts/status.mjs" --format todo` prints
+   `parallel`: `subagents` (how many subagents may run at once in this
+   session, their own subagents included), `ahead` (how many capabilities may
+   be in analysis or waiting for review at once) and `nextToAnalyze` (the
+   capabilities you may start analyzing now). The person sets both numbers in
+   `openspec/config.yaml`.
+2. **Waves.** Start independent tasks together, at most `subagents` at once,
+   and wait for the whole wave before you start the next one. If the host
+   refuses to start a subagent because too many are running, wait for one to
+   finish and start it again; never count a refused task as done. If the host
+   runs subagents one after another, the result is the same, only slower.
+   Write "give this to the `spec-relay-analyst` agent", never a tool name.
+3. **Subagents read and write; you route.** Each task names what to read
+   (folders or files), the exact files to write, the schema file and artifact
+   id to follow (`openspec/schemas/<schema>/schema.yaml`), and anything the
+   person decided that the task needs: subagents see neither this conversation
+   nor the repository instructions. Never paste instructions, templates, source
+   code or artifacts into a task, and never ask for artifacts back: subagents
+   return a short report. Check their work with `openspec validate`,
+   `openspec status --change`, `gate.mjs` and `merge.mjs`, and read an
+   artifact yourself only for what you must tell or ask the person (questions,
+   crosscheck rows that are not `confirmed`, the counts in your report). To
+   list requirement and screen names, search for lines starting with
+   `### Requirement:` and `### Screen:` instead of reading the files.
+4. **One writer per file.** No two subagents of a wave write the same file.
+   Analysts and checkers write only the paths you give them, the implementer
+   only its capability's module. Only you write `review.md`, `plan.md` and
+   `questions.md`, run `openspec` commands, render review pages and archive.
+   Never give a subagent a path under the source root, `openspec/specs/` or
+   `openspec/config.yaml`.
+5. **Tables split across subagents** (inventory, crosscheck): each subagent
+   writes its rows as a Markdown table to its own part file in the work folder,
+   and `node "<kit>/scripts/merge.mjs" --into <artifact> --parts <folder>
+   --clean` merges them into the artifact: a later part replaces the row with
+   the same key, and rows you edited yourself stay.
+6. **Mixed waves** are fine when no file is written twice: the implementer of
+   one port, analysts of the next capabilities and a checker of another can
+   run together.
+7. **Ahead of the review, not further.** Start an extract change only for a
+   capability in `nextToAnalyze`. A longer queue only waits, and what the
+   person finds in one review (a misread pattern, a glossary term, a wish about
+   wording) should reach the next analyses before they are written.
+8. **Pilot first.** Analyze the first capability (`platform`) on its own and
+   bring what its review taught into the tasks of later analysts.
+9. Hand the person reviews of the same context one after another where the
+   order allows, because they share words and data.
 
 ## Reviews: what every human review shares
 
@@ -121,11 +184,21 @@ Read the WHOLE source code base before splitting it, so that the split follows
 the domain, not the folders.
 
 1. `openspec new change survey --schema spec-relay-survey`.
-2. Write inventory, context-map, glossary and capabilities in order, each from
-   `openspec instructions <artifact> --change survey --json`. Every source file
-   must be in the inventory: split the reading by folder across
-   `spec-relay-analyst` subagents (give each a folder list and the
-   instructions) and merge what they return. Legacy code rarely has clean
+2. Write inventory, context-map, glossary and capabilities (schema
+   `spec-relay-survey`) in waves (see Working in parallel). Every source file
+   must be in the inventory.
+   - **Inventory**: split the source folders across `spec-relay-analyst`
+     subagents. Each writes its rows to
+     `openspec/spec-relay/work/survey/inventory/<n>.md` and its evidence to
+     `openspec/spec-relay/work/survey/evidence/<n>.md`. Then run `merge.mjs
+     --into openspec/changes/survey/inventory.md --parts
+     openspec/spec-relay/work/survey/inventory --clean`.
+   - **Context map**: one analyst reads every evidence file and the merged
+     inventory, writes context-map.md and corrects the Context column of
+     inventory.md to the context ids it chose. You read context-map.md: the
+     review needs you to know it.
+   - **Glossary and capabilities**: one wave of two analysts, one file each.
+   Legacy code rarely has clean
    boundaries: propose owners for shared tables, split god classes by method,
    put technical shared parts in `platform`, and give the evidence for each
    boundary. Name capabilities so that OpenSpec and Windows both accept them:
@@ -136,7 +209,8 @@ the domain, not the folders.
    `openspec/changes/archive/` and Windows limits paths to 260 characters.
 3. Write review.md, validate (`openspec validate survey --strict`), then run
    the review (above). `gate.mjs review` also fails while a source file is
-   missing from the inventory.
+   missing from the inventory. While the person reviews, ask the questions the
+   target design needs (step 2) so that it can start right after the archive.
 4. After archiving, write the plan: copy capabilities.md's lists under a
    `## Capabilities` heading in `openspec/spec-relay/plan.md`, keeping the
    `### <context>` headings. `status.mjs` counts only the top-level items that
@@ -155,30 +229,50 @@ the domain, not the folders.
    tests always; B1 logic comparison, B2 screen replay, C screenshots by
    choice). Never write a password, token or connection string into a file;
    sign-in for B2 and C comes from environment variables the person sets.
-3. Write review.md, validate, and run the review (above).
+   Write architecture.md first (yourself or one analyst), then give
+   conventions.md and verification.md to two analysts in one wave, with the
+   person's answers in each task.
+3. Write review.md, validate, and run the review (above). While the person
+   reviews the target design, start analyzing (step 3) the capabilities in
+   `nextToAnalyze`: an extract change needs the archived survey, not the target
+   design.
 
 ## 3. Analyze: extract specs from the source code
 
-Capabilities go in plan order, `platform` first.
+Capabilities go in plan order, `platform` first, only those in
+`nextToAnalyze` (see Working in parallel). Several capabilities run in the same
+waves.
 
 1. **Create the change.** `openspec new change extract-<capability> --schema
    spec-relay-extract`. Use the capability path with `/` replaced by `-` as the
    change name.
-2. **Write the artifacts in order**: source-map, specs, screens, trace,
-   crosscheck, questions, review. For each, run `openspec instructions
-   <artifact> --change extract-<capability> --json` and follow its
-   instruction, template, context and rules. For a large capability, give the
-   reading to the `spec-relay-analyst` subagent with the file list and the
-   instructions, then write the files it returns yourself. Use the terms of
-   the context's glossary.
-3. **Crosscheck.** Give specs, screens.md, trace.md and the cited source files
-   to the `spec-relay-checker` subagent, and nothing else: no notes, no earlier
-   drafts. Write its verdicts to crosscheck.md. Fix every `mismatch` and
-   `unclear` row and have the checker check that row again, or move it to
-   questions.md (`question Q<n>`).
-4. **Validate.** `openspec validate extract-<capability> --strict`. Fix every
-   error and warning, then check that every requirement has a trace entry.
-5. **Report** to the person: the number of requirements and screens, what the
+2. **Draft**: give each capability to one `spec-relay-analyst`: it writes
+   source-map.md, then `specs/<capability>/spec.md`, screens.md and trace.md
+   in the change folder, following the artifacts of schema
+   `spec-relay-extract` and the glossary of the archived survey
+   (`openspec/changes/archive/*-survey*/glossary.md`). For a large capability
+   with many screens, let one analyst write source-map.md first, then give
+   specs and screens to two analysts in one wave and trace.md to one after
+   them.
+3. **Crosscheck.** Give the change's specs, screens.md and trace.md paths to
+   `spec-relay-checker` subagents, and nothing else: no notes, no earlier
+   drafts. For a large capability, split the items into groups (R1-R15,
+   R16-R30, S1-S8) in one wave. Each checker writes
+   `openspec/spec-relay/work/extract-<capability>/crosscheck-<nn>.md`; merge
+   them with `merge.mjs --into
+   openspec/changes/extract-<capability>/crosscheck.md --parts
+   openspec/spec-relay/work/extract-<capability> --clean`. For every
+   `mismatch` and `unclear` row, have an analyst fix the spec, screens or trace
+   and a new checker check that row again (a new part file, merged the same
+   way), or move it to questions.md and write `question Q<n>` as its verdict
+   yourself.
+4. **Questions and review.** Write questions.md from the analysts' reported
+   doubts and the rows moved to questions, then review.md (names by search,
+   not by reading the spec).
+5. **Validate.** `openspec validate extract-<capability> --strict`. Have the
+   analyst fix every error and warning, then check that every requirement has
+   a trace entry.
+6. **Report** to the person: the number of requirements and screens, what the
    crosscheck found and fixed, the questions they must decide, the path of the
    review page, and that step 4 is theirs. Then stop and wait.
 
@@ -206,9 +300,12 @@ port.
    the verification plan and open risks, and start implementing after they
    agree.
 4. Run `openspec instructions apply --change port-<capability> --json` and work
-   through tasks.md. Give a group of tasks to the `spec-relay-implementer`
-   subagent when it helps; check its report and its verification results before
-   accepting the work.
+   through tasks.md. Give groups of tasks to the `spec-relay-implementer`
+   subagent, one at a time; check its report and its verification results
+   before accepting the work. Keep one port active at a time: ports share the
+   target root's build files, and two implementers in one working folder
+   collide. Its waves may also hold analysts and checkers of other
+   capabilities (see Working in parallel).
 5. When the code and the baseline spec disagree, stop and ask the person. Never
    change the spec or the code's behavior to make the two agree on your own. If
    the spec misread the source code, propose an amendment (below).
@@ -226,7 +323,8 @@ fixing a bug, is never an amendment: it is follow-up work after the migration.
 1. `openspec new change amend-<capability> --schema spec-relay-amend` (add
    `-v<n>` for a second amendment of the same capability).
 2. Write reason, specs, trace, crosscheck, impact and review from their
-   instructions. A MODIFIED requirement replaces the whole block, and OpenSpec
+   instructions; the checkers write part files and `merge.mjs` merges them, as
+   in step 3. A MODIFIED requirement replaces the whole block, and OpenSpec
    refuses to archive one that drops a scenario the baseline has, also when the
    requirement is removed and added again: keep every existing scenario name
    and correct its steps.
@@ -245,10 +343,13 @@ keep this list; the analyst, checker and implementer subagents have no TODO tool
 1. Run `node "<kit>/scripts/status.mjs" --format todo` (add `--capability
    <capability>` when you work on a capability other than the one it picks).
    It prints `todoList`: one line for the whole migration, then the survey and
-   target-design steps until both are archived, and after that the analyze,
-   review and implement steps of the current capability, with titles in the
-   artifact language, computed from the files under `openspec/` alone. The JSON
-   is ASCII with `\uXXXX` escapes; read it as JSON.
+   target-design steps until both are archived, the analyze, review and
+   implement steps of the current capability, and one line for each other
+   capability with an active change (the current step of work running in
+   parallel), with titles in the artifact language, computed from the files
+   under `openspec/` alone. Several lines may be in progress at once when
+   subagents work in parallel. The JSON is ASCII with `\uXXXX` escapes; read it
+   as JSON.
 2. Pass it to the TODO tool in the shape that tool takes: VS Code's `todo`
    takes `todoList` as it is (`id`, `title`, `description`, `status`); Copilot
    CLI's `update_todo` takes one Markdown checklist, the `checklist` string.
