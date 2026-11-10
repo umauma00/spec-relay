@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { runOpenspec, probeOpenspec } from './openspec.mjs';
 
 export const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const SCHEMAS = ['spec-relay-extract', 'spec-relay-port'];
+export const SCHEMAS = ['spec-relay-survey', 'spec-relay-target', 'spec-relay-extract', 'spec-relay-amend', 'spec-relay-port'];
 export const CONFIG_MARKER = '# spec-relay: managed';
 // Generic OpenSpec workflows that bypass the spec-relay review gate: anything
 // that applies (ticks the tracked file), archives (including bulk-archive) or

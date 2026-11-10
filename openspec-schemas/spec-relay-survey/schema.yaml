@@ -1,0 +1,139 @@
+name: spec-relay-survey
+version: 1
+description: spec-relay step 1 - read the whole source code base and split it into DDD bounded contexts and capabilities, then gate the map on a human review
+artifacts:
+  - id: inventory
+    generates: inventory.md
+    description: Every source file and the bounded context it belongs to
+    template: inventory.md
+    instruction: |
+      Assign EVERY file under the source root to one bounded context, or mark
+      it excluded. `gate.mjs review` lists the files on disk and fails when one
+      is not covered, so do not sample: read the whole code base. For a large
+      code base, split the reading by folder across `spec-relay-analyst`
+      subagents and merge what they return.
+
+      One table row per file or folder:
+      - **Path**: repository-relative, forward slashes. A path ending in `/`
+        covers every file below it. A more specific row wins over a folder row,
+        so a folder can go to one context and one file in it to another.
+      - **Context**: a context id from context-map.md, or `excluded`.
+      - **Notes**: for `excluded`, why (generated code, vendored library, build
+        output, dead code). For a file whose parts belong to several contexts
+        (a god class, a shared include), name the main context here and list
+        the other contexts with the symbols that go to each.
+
+      The source code is read-only. Never edit, format or move it.
+    requires: []
+
+  - id: context-map
+    generates: context-map.md
+    description: The bounded contexts, what each owns and how they relate
+    template: context-map.md
+    instruction: |
+      Propose the bounded contexts (Domain-Driven Design) of the system as it is
+      today. Legacy code rarely has clean boundaries, so give the evidence for
+      each boundary; the person decides.
+
+      Find boundaries from evidence, strongest first:
+      - Data ownership: which code WRITES which tables, files or queues.
+      - Business language: where the same word means different things, or a
+        group of words is used together (see glossary.md).
+      - Transactions and consistency: what must change together.
+      - Coupling: call graph, shared includes, shared state.
+      - Screens and menus: how users reach the functions.
+
+      Sections:
+      - **Contexts**: one `### Context: <id>` per context. The id is lowercase
+        ASCII kebab-case and becomes the first segment of capability paths
+        (`billing/invoice`). Under it: name in the artifact language, subdomain
+        type (core / supporting / generic), responsibility, owned data, entry
+        points (screens, endpoints, jobs, commands), and evidence.
+      - Put technical parts shared by everything (authentication, sessions,
+        logging, configuration, common layout, date and money helpers) in one
+        `platform` context of type generic. It is modelled and ported first.
+      - **Relationships**: table of upstream, downstream, pattern (shared
+        kernel, customer-supplier, conformist, anti-corruption layer, open host
+        / published language) and the channel (call, table, file, event).
+      - **Shared data**: every table or file written by more than one context,
+        with the owner you propose. In the new system only the owner writes it;
+        the others go through the owner's public API.
+      - **Diagram**: the contexts and relationships as a Mermaid flowchart in a
+        fenced `mermaid` block.
+    requires:
+      - inventory
+
+  - id: glossary
+    generates: glossary.md
+    description: Ubiquitous language of each bounded context
+    template: glossary.md
+    instruction: |
+      For each context, the business terms people and code use: term (in the
+      artifact language), meaning, and the identifiers that stand for it in the
+      source code (table, class, variable names). Under `## Conflicts`, list
+      every term that means different things in different contexts, or
+      different names for the same thing. Write "None" when there are none.
+    requires:
+      - context-map
+
+  - id: capabilities
+    generates: capabilities.md
+    description: The capabilities of each context, in the order they are migrated
+    template: capabilities.md
+    instruction: |
+      Split every context into capabilities: cohesive behaviors one extract
+      change can specify (for example `billing/invoice`). The first path
+      segment is the context id.
+      - One `### <context-id>` heading per context, contexts in migration
+        order: `platform` first, then contexts by dependency (upstream first).
+      - Under each, top-level items in order, each starting with the
+        backticked capability path: `` 1. `billing/invoice` 請求書の作成 ``.
+        Put its source folders or files in indented items below it.
+      - Each path segment is lowercase ASCII kebab-case, never a Windows device
+        name (`con`, `prn`, `aux`, `nul`, `com1`...), short, and no two paths
+        may become the same once `/` is replaced by `-`.
+      When this change is archived, the orchestrator copies these lists under
+      `## Capabilities` in `openspec/spec-relay/plan.md`.
+    requires:
+      - context-map
+
+  - id: review
+    generates: review.md
+    description: Human review checklist of the context map; the change may be archived only when every box is ticked by the reviewer
+    template: review.md
+    instruction: |
+      Build the checklist the HUMAN reviewer works through.
+      - Keep the `Reviewer:` line; the reviewer's name goes there.
+      - One checkbox per context under `## 1. Contexts`, in context-map order:
+        `- [ ] K<n> <context-id>: <name>`.
+      - Under `## 2. Map`, one checkbox each for: the relationships, the owners
+        of shared data, the glossary conflicts, and the capability list and
+        order.
+      - Under `## 3. Coverage`, one checkbox that every source file is in the
+        inventory (`gate.mjs review` also checks this).
+      Do not tick any box. Only the reviewer decides; see the apply instruction.
+    requires:
+      - inventory
+      - context-map
+      - glossary
+      - capabilities
+
+apply:
+  requires: [ review ]
+  tracks: review.md
+  instruction: |
+    Applying this change is the HUMAN REVIEW of the context map. It never
+    edits the source code.
+
+    Render the review page first (`render.mjs --change <change>`) and give the
+    person its path. Walk the reviewer through review.md one item at a time:
+    show the context with its owned data, entry points and evidence, and ask
+    the reviewer to accept it, ask for a change (merge, split, rename, move
+    files), or decide an owner.
+    - Tick a box only after the reviewer explicitly accepts that item in this
+      conversation, or when the reviewer ticked it themselves.
+    - When the reviewer asks for a change, edit the artifacts, untick every
+      item you changed, render again, and ask again.
+    Never tick a box on your own judgment. When every box is ticked and
+    `gate.mjs review` passes, tell the reviewer that archiving fixes the
+    context map for the migration, and archive only after they say so.

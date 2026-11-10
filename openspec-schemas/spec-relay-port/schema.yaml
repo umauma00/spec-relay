@@ -18,6 +18,11 @@ artifacts:
       - **Order**: Why these capabilities now; what they depend on that is
         already ported or still in the source language.
       - **Out of scope**: Anything left for a later port.
+      - **Baseline**: one line per capability, `` `<capability>` sha256:<hash> ``,
+        with the hash printed by `node "<kit>/scripts/gate.mjs" baseline
+        --capability <capability>`. `gate.mjs port-done` fails when the
+        baseline changed after this line was written (an amendment was
+        archived): update the port to the new baseline, then the line.
 
       Port changes carry no spec deltas. Keep `skip_specs: true` in the
       change's `.openspec.yaml`. If the port would need a behavior change,
@@ -29,18 +34,29 @@ artifacts:
     description: How the reviewed behavior maps onto the target language
     template: design.md
     instruction: |
-      Explain HOW to implement the baseline specs in the target language.
+      Explain HOW to implement the baseline specs in the target language,
+      inside the target design of the newest archived `target-design` change
+      (`openspec/changes/archive/*-target-design*/`): its architecture.md,
+      conventions.md and verification.md. Follow them; do not re-decide them.
 
       Sections:
-      - **Structure**: Target modules or files and what each owns.
-      - **Language mapping**: Semantic differences that matter for these specs
-        and the rule chosen for each: numbers and rounding, strings and
-        encodings, dates and time zones, null/optional, errors and exceptions,
-        collections and ordering, concurrency, I/O.
+      - **Structure**: The module of this capability's context (from
+        architecture.md), the files inside it, its public API additions and
+        the events it publishes or consumes. Never reach into another module's
+        internals or write a table another module owns.
+      - **Language mapping**: Only additions to conventions.md that these specs
+        need. If a spec needs a rule that contradicts conventions.md, stop and
+        ask the person.
+      - **Screens**: For each screen in the extract change's screens.md, the
+        target page or form and how labels, layout and messages are kept.
+      - **Verification**: The levels verification.md sets for this context (A
+        always; B1, B2, C as chosen) and what each covers here.
       - **Source references**: For each requirement, the source locations from
         the archived extract change's trace.md
-        (`openspec/changes/archive/*-extract-<capability>/trace.md`). Implementers
-        read the original logic there for details the spec leaves open.
+        (`openspec/changes/archive/*-extract-<capability>/trace.md`), and from
+        any later archived amendment's trace.md, which wins for the
+        requirements it lists. Implementers read the original logic there for
+        details the spec leaves open.
       - **Decisions**: Choices with the alternatives considered.
       - **Risks**: [Risk] -> Mitigation.
 
@@ -60,7 +76,10 @@ artifacts:
       - Every implementation task names the requirement(s) it implements, the
         target file, the source reference to read, and how it is verified.
       - Verification comes from the spec scenarios: each scenario becomes a test
-        in the target language, landed in the same group as its code.
+        in the target language, landed in the same group as its code. Add tasks
+        for the other levels design.md names: B1 record source outputs and
+        compare, B2 replay, C screenshot comparison.
+      - The last group runs the boundary check from conventions.md.
       - Order by dependency. A final group may only run integration checks and
         compare results with the source program when it can run.
     requires:
@@ -78,5 +97,7 @@ apply:
     - Mark a task done only after its verification passes; report the command
       and its result.
     - Write tests from the spec scenarios before or with the code they check.
+    - Write only inside this context's module and its tests; keep the module
+      boundaries of architecture.md, and run the boundary check.
     - Leave a `TODO(port)` comment for anything unresolved and list it in your
       report.

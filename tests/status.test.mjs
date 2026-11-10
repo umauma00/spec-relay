@@ -34,11 +34,16 @@ function repo({ plan = PLAN, review = '- [x] R1 a\n- [ ] R2 b\n- [ ] Q1 c decisi
   write(dir, 'openspec/specs/common/base/spec.md', '## Purpose\n');
   write(dir, 'openspec/changes/archive/2026-11-01-extract-common-base/specs/common/base/spec.md', '## Purpose\n');
   write(dir, 'openspec/changes/archive/2026-11-02-port-common-base/tasks.md', '- [x] 1.1 done\n');
+  // The survey and the target design are done.
+  write(dir, 'openspec/changes/archive/2026-10-30-survey/context-map.md', '### Context: billing\n');
+  write(dir, 'openspec/changes/archive/2026-10-31-target-design/architecture.md', '# a\n');
   // billing/invoice: analyzed, under review.
   write(dir, `${EXTRACT}/.openspec.yaml`, 'schema: spec-relay-extract\n');
   if (artifacts) {
     write(dir, `${EXTRACT}/specs/billing/invoice/spec.md`, SPEC);
     for (const file of ['source-map.md', 'trace.md']) write(dir, `${EXTRACT}/${file}`, '# x\n');
+    write(dir, `${EXTRACT}/screens.md`, '# Screens\nNone\n');
+    write(dir, `${EXTRACT}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 a | confirmed | x |\n| R2 b | confirmed | x |\n');
     write(dir, `${EXTRACT}/questions.md`, '- Q1. c\n');
     write(dir, `${EXTRACT}/review.md`, review.startsWith('Reviewer') ? review : `Reviewer: Uma\n\n${review}`);
   }
@@ -84,7 +89,7 @@ test('the review step says whether the gate passes, and a waiting step is never 
   const passing = status(repo({ review: PASSING }));
   assert.equal(passing.todoList[2].title, 'billing/invoice: Review [reviewed; waiting for approval to archive]');
   const writing = status(repo({ artifacts: false }));
-  assert.equal(writing.todoList[1].title, 'billing/invoice: Analyze [writing artifacts 0/5]');
+  assert.equal(writing.todoList[1].title, 'billing/invoice: Analyze [writing artifacts 0/7]');
   assert.deepEqual(statuses(writing), ['not-started', 'in-progress', 'not-started', 'not-started']);
   for (const report of [ticked, passing, writing]) {
     assert.equal(report.todoList[2].status, 'not-started');
@@ -95,11 +100,11 @@ test('the review step says whether the gate passes, and a waiting step is never 
 test('artifacts are counted from the change schema, so a new artifact needs no code change', () => {
   const dir = repo();
   const schema = fs.readFileSync(path.join(KIT_ROOT, 'openspec-schemas/spec-relay-extract/schema.yaml'), 'utf8')
-    .replace('  - id: trace\n', '  - id: screens\n    generates: screens.md  # new\n    requires: []\n    instruction: |\n      generates: not-an-artifact.md\n\n  - id: trace\n');
+    .replace('  - id: trace\n', '  - id: notes\n    generates: notes.md  # new\n    requires: []\n    instruction: |\n      generates: not-an-artifact.md\n\n  - id: trace\n');
   write(dir, 'openspec/schemas/spec-relay-extract/schema.yaml', schema);
   const report = status(dir);
-  assert.equal(report.todoList[1].title, 'billing/invoice: Analyze [writing artifacts 5/6]');
-  write(dir, `${EXTRACT}/screens.md`, '# screens\n');
+  assert.equal(report.todoList[1].title, 'billing/invoice: Analyze [writing artifacts 7/8]');
+  write(dir, `${EXTRACT}/notes.md`, '# notes\n');
   assert.equal(status(dir).todoList[1].status, 'completed');
 });
 
@@ -164,7 +169,8 @@ test('without a plan, openspec/ alone gives the list; with one, unplanned specs 
   assert.equal(report.current.capability, 'billing/invoice');
   const empty = tempDir();
   fs.mkdirSync(path.join(empty, 'openspec'));
-  assert.deepEqual(status(empty).todoList, [{ id: 1, key: 'overall', title: 'Overall: no capability list in the plan yet', description: '', status: 'not-started' }]);
+  assert.deepEqual(status(empty).todoList.map(({ key, status: st }) => [key, st]), [['overall', 'not-started'], ['survey', 'not-started'], ['target', 'not-started']]);
+  assert.deepEqual(status(empty).current, { capability: null, step: 'survey', owner: 'agent' });
 
   const dir = repo();
   write(dir, 'openspec/specs/auth/spec.md', '## Purpose\n');
@@ -256,4 +262,46 @@ test('it runs as a script from the repository folder', () => {
   const result = spawnSync(process.execPath, [path.join(KIT_ROOT, 'scripts/status.mjs'), '--format', 'todo'], { cwd: dir, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).current.capability, 'billing/invoice');
+});
+
+test('the survey and the target design come before any capability', () => {
+  const dir = tempDir();
+  write(dir, 'openspec/config.yaml', 'context: |\n  Artifact language: ja\n');
+  write(dir, 'openspec/changes/survey/.openspec.yaml', 'schema: spec-relay-survey\n');
+  write(dir, 'openspec/changes/survey/inventory.md', '# i\n');
+  let report = status(dir);
+  assert.deepEqual(report.todoList.map((i) => i.title).slice(1), ['Survey: map the bounded contexts [writing artifacts 1/5]', 'Target design: modules, conventions, verification']);
+  assert.deepEqual(statuses(report), ['not-started', 'in-progress', 'not-started']);
+  for (const f of ['context-map.md', 'glossary.md', 'capabilities.md']) write(dir, `openspec/changes/survey/${f}`, '# x\n');
+  write(dir, 'openspec/changes/survey/review.md', 'Reviewer: Uma\n- [ ] K1 billing\n');
+  report = status(dir);
+  assert.equal(report.todoList[1].title, 'Survey: map the bounded contexts [waiting for review 0/1]');
+  assert.deepEqual(report.current, { capability: null, step: 'survey', owner: 'person', waiting: true });
+  assert.match(checklist(report), /▶ Survey/);
+  fs.mkdirSync(path.join(dir, 'openspec/changes/archive'));
+  fs.renameSync(path.join(dir, 'openspec/changes/survey'), path.join(dir, 'openspec/changes/archive/2026-11-10-survey'));
+  write(dir, 'openspec/changes/archive/2026-11-11-target-design-v2/architecture.md', '# a\n');
+  write(dir, 'openspec/spec-relay/plan.md', '## Capabilities\n### billing\n1. `billing/invoice` 請求書\n');
+  report = status(dir);
+  assert.deepEqual(report.foundation.map((f) => f.status), ['completed', 'completed']);
+  assert.equal(report.current.capability, 'billing/invoice');
+});
+
+test('an amendment holds the review step, and reruns (-v2) count as their base change', () => {
+  const dir = repo();
+  fs.rmSync(path.join(dir, EXTRACT), { recursive: true });
+  write(dir, 'openspec/specs/billing/invoice/spec.md', SPEC);
+  write(dir, 'openspec/changes/archive/2026-11-03-extract-billing-invoice/review.md', 'x');
+  write(dir, 'openspec/changes/archive/2026-11-04-port-billing-invoice/tasks.md', '- [x] 1.1 a\n');
+  write(dir, 'openspec/changes/amend-billing-invoice/.openspec.yaml', 'schema: spec-relay-amend\n');
+  write(dir, 'openspec/changes/amend-billing-invoice/reason.md', '# r\n');
+  let report = status(dir, { capability: 'billing/invoice' });
+  assert.deepEqual(report.todoList.slice(1).map((i) => [i.status, i.title]), [
+    ['completed', 'billing/invoice: Analyze'], ['in-progress', 'billing/invoice: Review [writing artifacts 1/6]'], ['completed', 'billing/invoice: Implement'],
+  ]);
+  fs.renameSync(path.join(dir, 'openspec/changes/amend-billing-invoice'), path.join(dir, 'openspec/changes/archive/2026-11-05-amend-billing-invoice'));
+  write(dir, 'openspec/changes/port-billing-invoice-v2/tasks.md', '- [x] 1.1 a\n- [ ] 1.2 b\n');
+  report = status(dir, { capability: 'billing/invoice' });
+  assert.deepEqual(report.todoList[3].title, 'billing/invoice: Implement [tasks 1/2]');
+  assert.deepEqual(report.active, ['billing/invoice']);
 });
