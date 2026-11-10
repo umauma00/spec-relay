@@ -43,6 +43,13 @@ test('--parallel and --ahead take whole numbers in range', () => {
   assert.throws(() => parseArgs([...BASE, '--ahead', '11']), /--ahead must be a whole number from 1 to 10/);
 });
 
+test('subagent models: one for all roles, a role overrides it, default session', () => {
+  assert.deepEqual(['analystModel', 'checkerModel', 'implementerModel'].map((k) => parseArgs(BASE)[k]), ['session', 'session', 'session']);
+  const opts = parseArgs([...BASE, '--subagent-model', 'claude-sonnet-5.5', '--checker-model', 'Claude Opus 5.5']);
+  assert.deepEqual([opts.analystModel, opts.checkerModel, opts.implementerModel], ['claude-sonnet-5.5', 'Claude Opus 5.5', 'claude-sonnet-5.5']);
+  assert.throws(() => parseArgs([...BASE, '--checker-model', 'a # b']), /--checker-model must be a model name/);
+});
+
 test('a dry run changes nothing', () => {
   const dir = tempDir();
   assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init'])), 0);
@@ -57,7 +64,7 @@ test('apply writes schemas and a filled config, and a second run keeps them', ()
   assert.match(config, /Source language: C#/);
   assert.match(config, /Target root \(new implementation\): ts/);
   assert.match(config, /Artifact language: ja/);
-  assert.match(config, /Parallel subagents \(at once, whole session\): 4\n  Analyses ahead of review: 2\n/);
+  assert.match(config, /Parallel subagents \(at once, whole session\): 4\n  Analyses ahead of review: 2\n  Analyst model: session\n  Checker model: session\n  Implementer model: session\n/);
   assert.doesNotMatch(config, /\{\{/);
   for (const schema of ['spec-relay-extract', 'spec-relay-port']) {
     assert.ok(fs.existsSync(path.join(dir, 'openspec/schemas', schema, 'schema.yaml')));

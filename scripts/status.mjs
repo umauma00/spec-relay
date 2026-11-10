@@ -479,7 +479,12 @@ export function parallelPlan(root, capabilities, foundation, problems = []) {
   const nextToAnalyze = surveyDone
     ? capabilities.filter((c) => c.planned && c.counted && !c.extract && !c.baseline && !c.extractArchived).slice(0, Math.max(0, limit - busy)).map((c) => c.capability)
     : [];
-  return { subagents, ahead, analyzing, inReview, nextToAnalyze };
+  // The model each role should run on; "session" means the orchestrator's own.
+  const models = Object.fromEntries(['analyst', 'checker', 'implementer'].map((role) => {
+    const value = (configValue(root, `${role[0].toUpperCase()}${role.slice(1)} model`, 'session') ?? 'session').replace(/\s+#.*$/, '').trim();
+    return [role, value || 'session'];
+  }));
+  return { subagents, ahead, models, analyzing, inReview, nextToAnalyze };
 }
 
 export function checklist(report, { problems = false } = {}) {

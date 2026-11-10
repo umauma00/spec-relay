@@ -10,6 +10,9 @@ context: |
   Artifact language: {{ARTIFACT_LANGUAGE}}
   Parallel subagents (at once, whole session): {{PARALLEL}}
   Analyses ahead of review: {{AHEAD}}
+  Analyst model: {{ANALYST_MODEL}}
+  Checker model: {{CHECKER_MODEL}}
+  Implementer model: {{IMPLEMENTER_MODEL}}
   Write all artifacts in the artifact language, but keep OpenSpec structural
   headings and SHALL/MUST keywords in English.
   The survey (schema spec-relay-survey) splits the source code into DDD bounded

@@ -339,12 +339,12 @@ test('parallel work: one line per other active capability, and what may be analy
   assert.equal(report.current.capability, 'billing/invoice');
   assert.deepEqual(report.todoList.map((i) => i.key).slice(-1), ['billing/payment:analyze']);
   assert.equal(report.todoList.at(-1).status, 'in-progress');
-  assert.deepEqual(report.parallel, { subagents: 4, ahead: 2, analyzing: ['billing/payment'], inReview: ['billing/invoice'], nextToAnalyze: [] });
+  assert.deepEqual(report.parallel, { subagents: 4, ahead: 2, models: { analyst: 'session', checker: 'session', implementer: 'session' }, analyzing: ['billing/payment'], inReview: ['billing/invoice'], nextToAnalyze: [] });
 
   // The limits come from openspec/config.yaml; a bad value falls back to the default.
   const config = fs.readFileSync(path.join(dir, 'openspec/config.yaml'), 'utf8');
-  write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Parallel subagents (at once, whole session): 16\n  Analyses ahead of review: 3\n`);
-  assert.deepEqual(status(dir).parallel, { subagents: 16, ahead: 3, analyzing: ['billing/payment'], inReview: ['billing/invoice'], nextToAnalyze: ['billing/tax'] });
+  write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Parallel subagents (at once, whole session): 16\n  Analyses ahead of review: 3\n  Analyst model: claude-sonnet-5.5\n  Checker model: Claude Opus 5.5  # a second opinion\n  Implementer model: session\n`);
+  assert.deepEqual(status(dir).parallel, { subagents: 16, ahead: 3, models: { analyst: 'claude-sonnet-5.5', checker: 'Claude Opus 5.5', implementer: 'session' }, analyzing: ['billing/payment'], inReview: ['billing/invoice'], nextToAnalyze: ['billing/tax'] });
   for (const bad of ['99', '"16"', '1e1', '8.0']) {
     write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Parallel subagents (at once, whole session): ${bad}\n`);
     const report = status(dir);

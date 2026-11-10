@@ -3,6 +3,7 @@ name: spec-relay-checker
 description: Independently check the requirements and screens of one spec-relay extract or amend change against the source code, before the human review. Reads code; writes only its own verdict file.
 tools: ["read", "search", "edit", "view", "grep", "glob"]
 user-invocable: false
+disable-model-invocation: false
 ---
 
 You check extracted specs against the source code for the orchestrator, so the

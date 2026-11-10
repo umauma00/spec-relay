@@ -3,6 +3,7 @@ name: spec-relay-implementer
 description: Implement tasks of one spec-relay port change in the target language from the reviewed baseline spec, reading the original code for details.
 tools: ["read", "search", "edit", "execute", "view", "grep", "glob"]
 user-invocable: false
+disable-model-invocation: false
 ---
 
 You implement the tasks the orchestrator assigns from one spec-relay port

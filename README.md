@@ -26,6 +26,9 @@ flowchart LR
 
 GitHub Copilot CLI・VS Code・GitHub Copilot app を想定しています。入口はどれも **`spec-relay-orchestrator`** エージェント1つで、チャットで頼むと AI がコマンドを実行して報告します。
 
+- **VS Code** は Copilot ハーネス（1.143 から既定）で使ってください。旧来の Local ハーネスでは「Run Subagent」を有効にする必要があり、サブエージェントが並列に動くかは公式に書かれていません。
+- **ファイル編集の許可**：解析担当・照合担当・実装担当は自分のファイルを書きます。最初の並列作業の前に、このリポジトリでのファイル編集をセッション中は許可しておくと、サブエージェントが許可待ちで止まりません（Copilot CLI はプロンプトで「このリポジトリでは今後確認しない」、VS Code はフォルダー単位の許可か Assisted、Copilot app は Assisted）。Copilot CLI では、並列に起動した呼び出しのどれか1つを拒否すると、一緒に起動したものも取り消されます。
+
 ## 必要なもの
 
 Windows を主な実行環境として扱います（macOS・Linux でも動きます）。Windows での入れ方と注意点は [docs/WINDOWS.md](docs/WINDOWS.md) にまとめています。
@@ -59,7 +62,16 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 
 - これは確認だけで、何も書き換えません。内容を見てから、同じコマンドの最後に `--apply` を付けて反映します。
 - PowerShell・コマンドプロンプト・bash のどれでも同じ1行で動きます。キットのパスは `"` で囲んでください（プラグインとして入れた場合は、ホームフォルダーの `.copilot\installed-plugins\` の下にあります）。
-- `--parallel 16` のように、同時に動かすサブエージェントの数を指定できます（既定 4、1〜32）。上限は Copilot の契約で違います（2026-11 時点で Free 2、Pro 4、Max 8、Business 16、Enterprise 32）。レビューより先に解析しておく機能の数は `--ahead`（既定 2）です。あとから変えるときは `openspec/config.yaml` の値を書き換えます。
+- 並列化の設定（あとから変えるときは `openspec/config.yaml` の値を書き換えます）：
+
+  | オプション | 中身 | 既定 |
+  |---|---|---|
+  | `--parallel 16` | 同時に動かすサブエージェントの数（1〜32） | 4 |
+  | `--ahead 2` | レビューより先に解析しておく機能の数（1〜10） | 2 |
+  | `--subagent-model "<モデル>"` | サブエージェント（解析・照合・実装担当）のモデル | `session`（オーケストレーターと同じ） |
+  | `--checker-model "<モデル>"` など | 役割ごとのモデル（`--analyst-model`・`--implementer-model` も） | `--subagent-model` と同じ |
+
+  同時実行数の上限は Copilot の契約で違います。Copilot CLI のリファレンス（2026-11-10 時点）では Free 2、Pro 4、Max 8、Business 16、Enterprise と従量課金 32 で、孫のサブエージェントも含めたセッション全体の数です。従量課金でない契約ではこの数を上げられません。VS Code と Copilot app の上限は公式に書かれていません。モデルは、オーケストレーターがサブエージェントに頼むときに指定します。セッションのモデルが Auto のときや、ホストが指定を受け付けないときは、オーケストレーターと同じモデルで動きます。
 
 導入で置かれるもの：
 
@@ -87,11 +99,14 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 
 0.3.0 で、サブエージェントを並列に動かす手順に変わり、survey・extract・amend のスキーマの説明文が変わりました。導入スクリプトをもう一度実行するとスキーマの違いを表示して止まるので、`openspec/schemas/spec-relay-*` を削除してから実行し直してください。`openspec/config.yaml` はそのまま残るので、次の2か所を手で直します。
 
-- context に同時実行数の2行を足す（ない場合は既定の 4 と 2 で動きます）。
+- context に並列化の5行を足す（ない場合は既定の 4・2・`session` で動きます）。
 
   ```yaml
     Parallel subagents (at once, whole session): 16
     Analyses ahead of review: 2
+    Analyst model: session
+    Checker model: session
+    Implementer model: session
   ```
 
 - rules の `raise doubts in questions.md.` を `raise doubts as questions for questions.md.` に変える（questions.md はオーケストレーターだけが書くため）。

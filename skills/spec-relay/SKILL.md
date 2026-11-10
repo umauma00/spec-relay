@@ -87,12 +87,16 @@ need the reasoning behind a step.
    done; read its context and go to the first unfinished step.
 3. Otherwise ask, one question at a time: the source language (propose what you
    detect from the files), the target language, the source root, the target root,
-   the language for artifacts (default: the person's language) and how many
-   subagents may run at once (default 4; at the time of writing GitHub Copilot
-   allows 2 on Free, 4 on Pro, 8 on Max, 16 on Business and 32 on Enterprise).
+   the language for artifacts (default: the person's language), how many
+   subagents may run at once (default 4; the Copilot CLI reference gives 2 on
+   Free, 4 on Pro, 8 on Max, 16 on Business and 32 on Enterprise or
+   usage-based billing, for the whole session), and which model the subagents
+   run on (default `session`, the model of this session; the checker may get
+   another model for a second opinion).
 4. Run `node "<kit>/scripts/setup.mjs" --target . --source-language "..."
    --target-language "..." --source-root "..." --target-root "..." --language ...
-   --parallel <n>`
+   --parallel <n> --subagent-model "<model>"` (add `--checker-model "<model>"`
+   for a different checker model)
    without `--apply`, show the plan, and run it again with `--apply` after the
    person agrees. On a conflict, show it and ask how to resolve it; never
    overwrite, move or delete the person's files to get past it.
@@ -112,15 +116,24 @@ not wash out these instructions.
 1. **Limits.** `node "<kit>/scripts/status.mjs" --format todo` prints
    `parallel`: `subagents` (how many subagents may run at once in this
    session, their own subagents included), `ahead` (how many capabilities may
-   be in analysis or waiting for review at once) and `nextToAnalyze` (the
-   capabilities you may start analyzing now). The person sets both numbers in
-   `openspec/config.yaml`.
-2. **Waves.** Start independent tasks together, at most `subagents` at once,
-   and wait for the whole wave before you start the next one. If the host
+   be in analysis or waiting for review at once), `models` (the model of each
+   role) and `nextToAnalyze` (the capabilities you may start analyzing now).
+   The person sets them in `openspec/config.yaml`.
+2. **Waves.** Start all independent tasks of a wave in one step (as
+   background subagents where the host offers that), at most `subagents` at
+   once, and wait for the whole wave before you start the next one. If the host
    refuses to start a subagent because too many are running, wait for one to
    finish and start it again; never count a refused task as done. If the host
    runs subagents one after another, the result is the same, only slower.
    Write "give this to the `spec-relay-analyst` agent", never a tool name.
+   When `models` names a model for the role (not `session`), ask for that
+   model when you delegate, through the delegation's model option where the
+   host has one. If the host has no such option, or this session's model is
+   Auto, the subagent runs on the session model: tell the person once.
+   Before the first wave, tell the person that subagents edit files: unless
+   they allow file edits for this repository for the session, every subagent
+   waits at a permission prompt, and in Copilot CLI declining one call cancels
+   the others started with it.
 3. **Subagents read and write; you route.** Each task names what to read
    (folders or files), the exact files to write, the schema file and artifact
    id to follow (`openspec/schemas/<schema>/schema.yaml`), and anything the
