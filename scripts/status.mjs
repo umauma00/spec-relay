@@ -23,7 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkboxes, readIf, capabilitySegments, checkReview, baseName } from './gate.mjs';
+import { checkboxes, readIf, capabilitySegments, checkReview, baseName, archivedChange, baselineHash } from './gate.mjs';
 
 const PLAN = 'openspec/spec-relay/plan.md';
 // Used when a change's schema file cannot be read. The schema's own list wins,
@@ -45,6 +45,7 @@ const WORDS = {
     analyze: 'Analyze', review: 'Review', implement: 'Implement', capability: 'Capability', group: 'Group',
     survey: 'Survey: map the bounded contexts', target: 'Target design: modules, conventions, verification',
     amending: (n, of) => `amendment under review ${n}/${of}`,
+    amendedAfterPort: 'the spec was amended after the port; port it again',
     overall: (done, total, reviewed) => `Overall: ${done} of ${total} capabilities ported (${reviewed} with a reviewed spec)`,
     noPlan: 'Overall: no capability list in the plan yet',
     allDone: (total) => `Overall: all ${total} capabilities ported`,
@@ -65,6 +66,7 @@ const WORDS = {
     analyze: '解析', review: 'レビュー', implement: '実装', capability: '機能', group: 'グループ',
     survey: '調査: コンテキストの地図', target: '移行先の設計: モジュール・規約・比べ方',
     amending: (n, of) => `仕様の修正をレビュー中 ${n}/${of}`,
+    amendedAfterPort: '移行後に仕様が修正された・再実装が必要',
     overall: (done, total, reviewed) => `全体: ${total}機能のうち${done}機能が移行済み（仕様確定 ${reviewed}）`,
     noPlan: '全体: 計画に機能の一覧がまだありません',
     allDone: (total) => `全体: ${total}機能すべて移行済み`,
@@ -137,6 +139,7 @@ export const STEPS = [
         if (done === 0) return { status: 'not-started', waiting: true, detail: ['waitingDesign', total] };
         return { status: 'in-progress', detail: ['tasks', done, total] };
       }
+      if (c.portArchived && c.portStale) return { status: 'not-started', detail: ['amendedAfterPort'] };
       return c.portArchived ? { status: 'completed' } : { status: 'not-started' };
     },
   },
@@ -265,6 +268,7 @@ export function collect(root) {
     const key = changeKey(capability);
     if (keys.has(key)) problems.push(`capabilities ${keys.get(key)} and ${capability} share the change names extract-${key} and port-${key}; rename one`);
     else keys.set(key, capability);
+    if (/-v\d+$/.test(key)) problems.push(`capability ${capability} gives change names ending like a rerun suffix (extract-${key}); rename it`);
   }
 
   // Capabilities that only openspec/ knows about come after the plan's, by name.
@@ -295,8 +299,17 @@ export function collect(root) {
       baseline: isFile(path.join(root, 'openspec/specs', ...parts, 'spec.md')),
       extractArchived: archived.includes(`extract-${key}`),
       portArchived: archived.includes(`port-${key}`),
+      portStale: false,
       extract: null, amend: null, port: null,
     };
+    // A port archived before an amendment changed the baseline is not done: the
+    // hash its proposal recorded no longer matches (gate.mjs port-done's check).
+    if (c.portArchived) {
+      const proposal = readIf(path.join(archivedChange(root, `port-${key}`) ?? '', 'proposal.md'), []) ?? '';
+      const now = baselineHash(root, entry.capability);
+      const recorded = [...proposal.matchAll(/`([^`]+)`\s*sha256:\s*([0-9a-f]{64})/gi)].find(([, cap]) => changeKey(capabilitySegments(cap).join('/')) === key);
+      c.portStale = Boolean(recorded && now && recorded[2].toLowerCase() !== now);
+    }
     for (const kind of ['extract', 'amend']) {
       if (!active.includes(`${kind}-${key}`)) continue;
       const name = activeDir.get(`${kind}-${key}`);
@@ -372,18 +385,23 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
   const todoList = [{ id: 1, key: 'overall', title: overallTitle, description: '', status: finished ? 'completed' : 'not-started' }];
   let here = null;
   // Until the survey and the target design are archived, they are the work.
-  if (foundation.some((f) => f.status !== 'completed')) {
+  const foundationOpen = foundation.some((f) => f.status !== 'completed');
+  if (foundationOpen) {
     foundation.forEach((f, i) => {
       const detail = say(words, f.detail);
       todoList.push({ id: i + 2, key: f.id, title: `${words[f.id]}${detail ? (lang === 'ja' ? `【${detail}】` : ` [${detail}]`) : ''}`, description: f.waiting ? words.person : '', status: f.status });
       if (!here && f.status !== 'completed') here = { capability: null, step: f.id, owner: f.waiting ? 'person' : 'agent', ...(f.waiting ? { waiting: true } : {}) };
     });
-  } else if (current) {
+  }
+  // Before the survey and target design, a capability's steps show only when asked
+  // for (a project that started on an earlier kit version, for example).
+  if (current && (!foundationOpen || capability)) {
+    const first = todoList.length + 1;
     STEPS.forEach((step, i) => {
       const state = current.steps[step.id];
       const detail = say(words, state.detail);
       todoList.push({
-        id: i + 2,
+        id: first + i,
         key: `${current.capability}:${step.id}`,
         title: `${current.capability}: ${words[step.id]}${detail ? (lang === 'ja' ? `【${detail}】` : ` [${detail}]`) : ''}`,
         description: step.owner === 'person' ? words.person : '',

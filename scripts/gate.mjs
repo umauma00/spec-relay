@@ -11,6 +11,7 @@
 // Prints { ok, problems } as JSON and exits 0 when ok, 1 when not, 2 on bad usage.
 // Run it from the repository root (or pass --root DIR). Files may use CRLF line
 // endings and a UTF-8 BOM; UTF-16 files are rejected.
+import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -142,15 +143,25 @@ export function screenNames(text) {
 
 // Every requirement and screen needs a crosscheck row whose verdict is
 // `confirmed` or `question Q<n>`.
-function checkCrosscheck(dir, requirements, screens, problems) {
+// `questions` is the set of question ids with a review item, or null when the
+// change has no questions (an amendment), where only `confirmed` passes. The
+// whole verdict cell must be the verdict, and an item may have one row only.
+function checkCrosscheck(dir, requirements, screens, problems, questions = null) {
   const text = readIf(path.join(dir, 'crosscheck.md'), problems);
   if (text === null) { problems.push('crosscheck.md is missing'); return; }
-  const rows = tableRows(text).map(([item = '', verdict = '']) => ({ item: plain(item), verdict: norm(verdict) }));
+  const rows = tableRows(text).map(([item = '', verdict = '']) => ({ item: plain(item), verdict: norm(verdict).replace(/[.。]$/, '') }));
+  const fix = questions ? 'fix and check again, or move it to questions.md as "question Q<n>"' : 'fix and check again';
   for (const [letter, names, what] of [['R', requirements, 'requirement'], ['S', screens, 'screen']]) {
     for (const name of names) {
-      const row = rows.find((r) => withoutId(r.item, letter) === norm(name));
-      if (!row) problems.push(`${what} has no crosscheck row: "${name}"`);
-      else if (!/^(confirmed|question q\d+)\b/.test(row.verdict)) problems.push(`crosscheck of ${what} "${name}" is "${row.verdict || 'blank'}"; resolve it (fix and check again, or move it to questions.md as "question Q<n>")`);
+      const found = rows.filter((r) => withoutId(r.item, letter) === norm(name));
+      if (found.length === 0) { problems.push(`${what} has no crosscheck row: "${name}"`); continue; }
+      if (found.length > 1) { problems.push(`${what} has more than one crosscheck row: "${name}"; keep only the current verdict`); continue; }
+      const { verdict } = found[0];
+      const q = verdict.match(/^question (q\d+)$/);
+      if (q && questions) {
+        const id = `Q${Number(q[1].slice(1))}`;
+        if (!questions.has(id)) problems.push(`crosscheck of ${what} "${name}" points to ${id}, which is not in questions.md with a review item`);
+      } else if (verdict !== 'confirmed') problems.push(`crosscheck of ${what} "${name}" is "${verdict || 'blank'}"; resolve it (${fix})`);
     }
   }
 }
@@ -174,8 +185,11 @@ function checkExtract(dir, boxes, problems) {
   const screensText = readIf(path.join(dir, 'screens.md'), problems);
   if (screensText === null) problems.push('screens.md is missing (write "None" when the capability has no screens)');
   const screens = screenNames(screensText);
+  // A heading the gate does not read (## Screen:, ### 画面:) would need no review.
+  if (screensText && screens.length === 0 && !/^none\.?$/i.test(stripComments(screensText).replace(/^#.*$/gm, '').trim())) {
+    problems.push('screens.md has no "### Screen: <name>" heading; write each screen under one, or only "None" when there are no screens');
+  }
   problems.push(...requireItems(boxes, 'S', screens, 'screen', 'screens.md'));
-  checkCrosscheck(dir, requirements.map((r) => r.name), screens, problems);
 
   const questions = readIf(path.join(dir, 'questions.md'), problems);
   if (questions === null) problems.push('questions.md is missing');
@@ -184,6 +198,8 @@ function checkExtract(dir, boxes, problems) {
     const m = box.plain.match(/^Q(\d+)\b/i);
     if (m) qItems.set(`Q${Number(m[1])}`, box.plain);
   }
+  const asked = new Set((questions === null ? [] : questionIds(questions)).filter((id) => qItems.has(id)));
+  checkCrosscheck(dir, requirements.map((r) => r.name), screens, problems, asked);
   for (const id of questions === null ? [] : questionIds(questions)) {
     const item = qItems.get(id);
     if (!item) { problems.push(`question has no review item: ${id}`); continue; }
@@ -194,7 +210,8 @@ function checkExtract(dir, boxes, problems) {
 
 function checkAmend(dir, boxes, problems) {
   const reason = readIf(path.join(dir, 'reason.md'), problems);
-  if (reason === null || !stripComments(reason).replace(/^#.*$/gm, '').trim()) problems.push('reason.md gives no reason');
+  const said = stripComments(reason ?? '').replace(/^#.*$/gm, '').replace(/^\s*(?:[-*+]|\d+[.)])\s*(?:(?:MODIFIED|ADDED|REMOVED)\s*\/?\s*)*:?\s*$/gim, '').trim();
+  if (reason === null || !said) problems.push('reason.md gives no reason');
   const requirements = specRequirements(dir, problems);
   for (const { name, where } of requirements) problems.push(...requireItems(boxes, 'R', [name], 'requirement', where));
   // REMOVED requirements have no behavior left to check.
@@ -228,23 +245,48 @@ const relPath = (p) => p.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/
 // Files under the source root the inventory must cover. Kit and tool folders are
 // not source code: .git, openspec/, the target root and OpenSpec's generated
 // Copilot files.
+const cleanValue = (v) => v.replace(/\s+#.*$/, '').trim().replace(/^(["'`])(.*)\1$/, '$2').trim();
+
+// Files under the source root the inventory must cover, or null when the source
+// root is not a folder inside the repository. In a git repository these are the
+// files git tracks or would track (so .vs/, desktop.ini and other ignored local
+// files do not count); otherwise every file on disk. Kit and tool folders are
+// never source code: .git, openspec/, the target root and OpenSpec's generated
+// Copilot files.
 export function sourceFiles(root) {
-  const source = relPath(configValue(root, 'Source root', '.'));
-  const target = relPath(configValue(root, 'Target root', '')).replace(/\/$/, '');
-  const skip = (rel) => rel === '.git' || rel === 'openspec' || (target && rel === target)
-    || /^\.github\/(skills\/openspec-|prompts\/opsx-)/.test(rel);
+  const source = relPath(cleanValue(configValue(root, 'Source root', '.'))).replace(/\/$/, '');
+  const target = relPath(cleanValue(configValue(root, 'Target root', ''))).replace(/\/$/, '');
+  const base = path.resolve(root);
+  const sourceDir = path.resolve(base, source || '.');
+  const rel = path.relative(base, sourceDir);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  try { if (!fs.statSync(sourceDir).isDirectory()) return null; } catch { return null; }
+  const prefix = rel ? `${rel.split(path.sep).join('/')}/` : '';
+  const skip = (file) => file === '.git' || file.startsWith('.git/') || file === 'openspec' || file.startsWith('openspec/')
+    || (target && (file === target || file.startsWith(`${target}/`)))
+    || /^\.github\/(skills\/openspec-|prompts\/opsx-)/.test(file);
+
+  const git = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', prefix || '.'], { cwd: base, encoding: 'buffer', windowsHide: true });
+  if (git.status === 0 && git.stdout) {
+    const listed = git.stdout.toString('utf8').split('\0').filter(Boolean);
+    // An empty list from a folder that has files means git does not own it (not a repository root).
+    const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: base, encoding: 'utf8', windowsHide: true });
+    if (top.status === 0 && fs.realpathSync(path.resolve(top.stdout.trim())) === fs.realpathSync(base)) {
+      return [...new Set(listed.filter((f) => !skip(f) && fs.existsSync(path.join(base, f))))].sort();
+    }
+  }
   const out = [];
-  const visit = (rel) => {
+  const visit = (dirRel) => {
     let entries = [];
-    try { entries = fs.readdirSync(path.join(root, rel), { withFileTypes: true }); } catch { return; }
+    try { entries = fs.readdirSync(path.join(base, dirRel), { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
-      const child = rel && rel !== '.' ? `${rel}/${e.name}` : e.name;
+      const child = dirRel ? `${dirRel}/${e.name}` : e.name;
       if (skip(child)) continue;
       if (e.isDirectory()) visit(child);
       else if (e.isFile()) out.push(child);
     }
   };
-  visit(source === '' || source === '.' ? '' : source.replace(/\/$/, ''));
+  visit(prefix.replace(/\/$/, ''));
   return out.sort();
 }
 
@@ -256,9 +298,14 @@ function checkSurvey(root, dir, boxes, problems) {
     if (!boxes.some((b) => new RegExp(`^K\\d+\\s*[.:)-]?\\s*${id}(?![\\w-])`, 'i').test(b.plain))) problems.push(`context has no review item: ${id}`);
   }
   const known = new Set([...contexts, 'excluded']);
-  const rows = tableRows(readIf(path.join(dir, 'inventory.md'), problems)).map(([p = '', context = '']) => ({ path: relPath(plain(p)), context: plain(context).toLowerCase() })).filter((r) => r.path);
+  // Paths keep every character (my_module, Copy (1).php, [id].php); only code marks go.
+  const rows = tableRows(readIf(path.join(dir, 'inventory.md'), problems)).map(([p = '', context = '']) => ({ path: relPath(p.trim().replace(/^`(.*)`$/, '$1').trim()), context: plain(context).toLowerCase() })).filter((r) => r.path);
   for (const row of rows.filter((r) => !known.has(r.context))) problems.push(`inventory row "${row.path}" names an unknown context "${row.context}"`);
-  const uncovered = sourceFiles(root).filter((file) => !rows.some((r) => r.path === file || (r.path.endsWith('/') && file.startsWith(r.path))));
+  const files = sourceFiles(root);
+  if (files === null) {
+    problems.push(`the source root "${configValue(root, 'Source root', '.')}" in openspec/config.yaml is not a folder inside the repository`);
+  } else if (files.length === 0) problems.push('the source root holds no files');
+  const uncovered = (files ?? []).filter((file) => !rows.some((r) => r.path === file || (r.path.endsWith('/') && file.startsWith(r.path))));
   for (const file of uncovered.slice(0, 20)) problems.push(`source file not in the inventory: ${file}`);
   if (uncovered.length > 20) problems.push(`...and ${uncovered.length - 20} more source files not in the inventory`);
 
@@ -272,20 +319,26 @@ function checkSurvey(root, dir, boxes, problems) {
   for (const cap of caps) {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)+$/.test(cap)) { problems.push(`capability "${cap}" is not <context>/<name> in lowercase kebab-case`); continue; }
     if (!contexts.includes(cap.split('/')[0])) problems.push(`capability "${cap}" starts with an unknown context`);
-    if (/-v\d+$/.test(cap)) problems.push(`capability "${cap}" ends like a rerun suffix (-v<n>); rename it`);
     const key = cap.split('/').join('-');
+    if (/-v\d+$/.test(key)) problems.push(`capability "${cap}" gives the change name extract-${key}, which ends like a rerun suffix (-v<n>); rename it`);
     if (keys.has(key)) problems.push(`capabilities ${keys.get(key)} and ${cap} get the same change name`);
     keys.set(key, cap);
   }
 }
 
-function checkTarget(root, dir, problems) {
+function checkTarget(root, dir, boxes, problems) {
   const survey = archivedChange(root, 'survey');
   if (!survey) { problems.push('no archived survey change; review and archive the survey first'); return; }
   const contexts = contextIds(readIf(path.join(survey, 'context-map.md'), problems));
   for (const [file, what] of [['architecture.md', 'module'], ['verification.md', 'verification levels']]) {
     const firsts = tableRows(readIf(path.join(dir, file), problems)).map(([first = '']) => plain(first).toLowerCase());
     for (const id of contexts.filter((c) => !firsts.includes(c))) problems.push(`${file} has no ${what} row for context ${id}`);
+  }
+  // One review item per module (A<n>) and per context's verification levels (E<n>).
+  for (const [letter, what] of [['A', 'module'], ['E', 'verification levels']]) {
+    for (const id of contexts) {
+      if (!boxes.some((b) => new RegExp(`^${letter}\\d+\\s*[.:)-]?\\s*\\W*${id}(?![\\w-])`, 'i').test(b.plain))) problems.push(`the ${what} of context ${id} has no review item (${letter}<n> ${id})`);
+    }
   }
 }
 
@@ -299,7 +352,7 @@ export function checkReview(root, change) {
   if (schema === 'spec-relay-extract') checkExtract(dir, boxes, problems);
   else if (schema === 'spec-relay-amend') checkAmend(dir, boxes, problems);
   else if (schema === 'spec-relay-survey') checkSurvey(root, dir, boxes, problems);
-  else if (schema === 'spec-relay-target') checkTarget(root, dir, problems);
+  else if (schema === 'spec-relay-target') checkTarget(root, dir, boxes, problems);
   else problems.push(`schema ${schema} has no review gate`);
   return { ok: problems.length === 0, problems };
 }
@@ -346,6 +399,10 @@ export function checkPortDone(root, change) {
   const proposal = readIf(path.join(dir, 'proposal.md'), problems) ?? '';
   const recorded = [...stripComments(proposal).matchAll(/`([^`]+)`\s*sha256:\s*([0-9a-f]{64})/gi)];
   if (recorded.length === 0) problems.push('proposal.md records no baseline hash ("- `<capability>` sha256:<hash>" under ## Baseline; get it with gate.mjs baseline)');
+  const own = baseName(change).replace(/^port-/, '');
+  if (recorded.length && !recorded.some(([, capability]) => capabilitySegments(capability).join('-') === own)) {
+    problems.push(`proposal.md records no baseline hash for this change's own capability (${own.replace(/-/g, '/')} or similar); add it with gate.mjs baseline`);
+  }
   for (const [, capability, hash] of recorded) {
     const now = baselineHash(root, capability);
     if (now === null) problems.push(`no baseline spec for ${capability}`);

@@ -97,7 +97,7 @@ artifacts:
     instruction: |
       For EVERY requirement in the specs, list where the source code implements
       it: repository-relative path with forward slashes, symbol, and line range
-      when stable. Phase 3
+      when stable. Step 5
       implementers read the original logic through this file, so make each
       reference precise enough to open directly.
 

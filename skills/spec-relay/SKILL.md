@@ -227,8 +227,9 @@ fixing a bug, is never an amendment: it is follow-up work after the migration.
    `-v<n>` for a second amendment of the same capability).
 2. Write reason, specs, trace, crosscheck, impact and review from their
    instructions. A MODIFIED requirement replaces the whole block, and OpenSpec
-   refuses to archive one that drops a scenario the baseline has: keep every
-   existing scenario name and correct its steps.
+   refuses to archive one that drops a scenario the baseline has, also when the
+   requirement is removed and added again: keep every existing scenario name
+   and correct its steps.
 3. Run the review (above). Archiving merges the delta into the baseline.
 4. Then do what impact.md says: an active port adds the tasks, updates its
    implementation and records the new baseline hash (`gate.mjs port-done`
@@ -286,5 +287,10 @@ keep this list; the analyst, checker and implementer subagents have no TODO tool
   active amendment holds the capability in review.
 - `node "<kit>/scripts/status.mjs" --format markdown` shows every capability's
   phase in one table.
+- A project started on kit 0.1.0 has baselines but no survey or target design.
+  Run the survey and the target design first (existing baselines and archived
+  changes stay as they are; put their capabilities into the survey's list
+  unchanged), because `gate.mjs port-ready` needs both. Until then,
+  `status.mjs --capability <capability>` still shows that capability's steps.
 - On resume, read the plan and these commands, refresh the TODO list, tell the
   person where things stand, and continue the first unfinished step.

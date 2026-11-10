@@ -106,7 +106,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
     'architecture.md': '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| calc | ts/calc |\n',
     'conventions.md': '# Conventions\n',
     'verification.md': '| Context | A |\n|---|---|\n| platform | yes |\n| calc | yes |\n',
-    'review.md': 'Reviewer: Uma\n\n- [x] A0 style\n',
+    'review.md': 'Reviewer: Uma\n\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 calc\n- [x] E1 platform: levels\n- [x] E2 calc: levels\n',
   });
   assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
   openspec(dir, 'archive', 'target-design', '--yes');

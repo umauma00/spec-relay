@@ -30,7 +30,13 @@ artifacts:
       spec, at `specs/<capability-path>/spec.md`:
       - `## MODIFIED Requirements` with the WHOLE corrected requirement (header
         `### Requirement: <exact existing name>`, description and every
-        scenario). OpenSpec replaces the requirement with this block.
+        scenario). OpenSpec replaces the requirement with this block, and
+        refuses to archive a block that drops a scenario the baseline has
+        (also when the requirement is removed and added again). So keep every
+        existing scenario under its existing name and correct its steps; a
+        scenario that describes behavior the code does not have is rewritten
+        to describe what the code does in that situation. New scenarios may be
+        added.
       - `## ADDED Requirements` for behavior the baseline missed.
       - `## REMOVED Requirements` with `### Requirement: <exact name>` and a
         `**Reason**:` line, for behavior the source code does not have.
@@ -75,9 +81,9 @@ artifacts:
         corrected requirement. Its proposal.md records the baseline hash, so
         `gate.mjs port-done` fails until the port is updated to the new
         baseline (`gate.mjs baseline --capability <capability>`).
-      - **Archived port**: a new port change of the same name
-        (`port-<capability>`) implements the corrected requirements after this
-        amendment is archived.
+      - **Archived port**: a new port change with a rerun suffix
+        (`port-<capability>-v2`, `-v3`...) implements the corrected
+        requirements after this amendment is archived.
       - **None**: nothing to update.
     requires:
       - crosscheck

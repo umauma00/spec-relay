@@ -119,6 +119,37 @@ test('trace cells with several references', () => {
     { file: 'src/b.php', symbol: 'f', from: 5, to: 5 },
     { file: 'lib/c.py', symbol: '', from: null, to: null },
   ]);
+  assert.deepEqual(parseRefs('src/a.php:120-125'), [{ file: 'src/a.php', symbol: '', from: 120, to: 125 }]);
+  assert.deepEqual(parseRefs('src/Billing.cs:Billing::Total:3-9'), [{ file: 'src/Billing.cs', symbol: 'Billing::Total', from: 3, to: 9 }]);
+  assert.deepEqual(parseRefs('src\\請求 書\\a.php:f:4'), [{ file: 'src/請求 書/a.php', symbol: 'f', from: 4, to: 4 }]);
+});
+
+test('network paths, rooted paths and backslashes never become links or images', () => {
+  for (const src of ['\\\\host\\share\\a.png', '/\\host/a.png', '/etc/a.png', '//host/a.png']) {
+    const out = inline(`![x](${src}) [y](${src})`);
+    assert.doesNotMatch(out, /<img|<a /, src);
+  }
+});
+
+test('a lone CR or U+2028 in a heading does not hang the renderer', () => {
+  assert.match(markdown('# Title\rnext\n#\tx\n'), /<h1>Title<\/h1>/);
+  assert.match(markdown('# A\u2028B'), /<h1>A<\/h1>/);
+});
+
+test('images in a change are rebased to the page; links out of the repository are not read', () => {
+  const dir = repo();
+  write(dir, 'openspec/spec-relay/screens/a.png', 'png');
+  write(dir, `${CHANGE}/source-map.md`, '# Source map\n\n![shot](../../spec-relay/screens/a.png) ![out](../../../../outside.png)\n');
+  render({ root: dir, change: 'extract-billing-invoice' });
+  const page = html(dir, 'extract-billing-invoice');
+  assert.match(page, /<img src="\.\.\/screens\/a\.png"/);
+  assert.doesNotMatch(page, /outside\.png"/);
+  const outside = tempDir();
+  fs.writeFileSync(path.join(outside, 'secret.txt'), 'SECRET');
+  try { fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(dir, 'src/link.php')); } catch { return; }
+  write(dir, `${CHANGE}/trace.md`, '| Requirement | Source | Tests |\n|---|---|---|\n| Total | src/link.php:x:1 | none |\n');
+  render({ root: dir, change: 'extract-billing-invoice' });
+  assert.doesNotMatch(html(dir, 'extract-billing-invoice'), /SECRET/);
 });
 
 test('a single file renders, and bad usage exits 2', () => {

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { status, checklist, markdown, planCapabilities, language, main } from '../scripts/status.mjs';
 import { KIT_ROOT } from '../scripts/setup.mjs';
+import { baselineHash } from '../scripts/gate.mjs';
 import { tempDir, write, quiet, crlf } from './helpers.mjs';
 
 const PLAN = `# Plan
@@ -304,4 +305,25 @@ test('an amendment holds the review step, and reruns (-v2) count as their base c
   report = status(dir, { capability: 'billing/invoice' });
   assert.deepEqual(report.todoList[3].title, 'billing/invoice: Implement [tasks 1/2]');
   assert.deepEqual(report.active, ['billing/invoice']);
+});
+
+test('a port archived before an amendment is not done; -v plan names are reported; --capability shows steps early', () => {
+  const dir = repo();
+  fs.rmSync(path.join(dir, EXTRACT), { recursive: true });
+  write(dir, 'openspec/specs/billing/invoice/spec.md', SPEC);
+  write(dir, 'openspec/changes/archive/2026-11-03-extract-billing-invoice/review.md', 'x');
+  const hash = baselineHash(dir, 'billing/invoice');
+  write(dir, 'openspec/changes/archive/2026-11-04-port-billing-invoice/proposal.md', `- \`billing/invoice\` sha256:${hash}\n`);
+  assert.equal(status(dir, { capability: 'billing/invoice' }).todoList[3].status, 'completed');
+  write(dir, 'openspec/specs/billing/invoice/spec.md', `${SPEC}\n### Requirement: c\nThe system SHALL c.\n`);
+  const stale = status(dir, { capability: 'billing/invoice' }).todoList[3];
+  assert.deepEqual([stale.status, stale.title], ['not-started', 'billing/invoice: Implement [the spec was amended after the port; port it again]']);
+
+  has(status(repo({ plan: '## Capabilities\n- `api/v1`\n' })), 'ending like a rerun suffix');
+
+  const early = repo();
+  fs.rmSync(path.join(early, 'openspec/changes/archive/2026-10-31-target-design'), { recursive: true });
+  assert.deepEqual(status(early).todoList.map((i) => i.key), ['overall', 'survey', 'target']);
+  assert.deepEqual(status(early, { capability: 'billing/invoice' }).todoList.map((i) => i.key), ['overall', 'survey', 'target', 'billing/invoice:analyze', 'billing/invoice:review', 'billing/invoice:implement']);
+  assert.equal(status(early, { capability: 'billing/invoice' }).current.step, 'target');
 });

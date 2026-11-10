@@ -84,9 +84,15 @@ export const escapeHtml = (s) => String(s)
 const safeHref = (href) => {
   const h = href.trim();
   if (/^https?:\/\//i.test(h)) return h;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(h) || h.startsWith('//')) return null; // javascript:, data:, file:, ...
+  // javascript:, data:, file:, protocol-relative and rooted paths, and any
+  // backslash: on a file:// page \\host\share would reach a network share.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(h) || h.startsWith('/') || h.includes('\\')) return null;
   return h;
 };
+
+// Relative images in the Markdown are written relative to their file; the page
+// lives elsewhere (openspec/spec-relay/views), so render() sets how to rebase them.
+let imageSource = (src) => src;
 
 export function inline(text) {
   const codes = [];
@@ -94,7 +100,8 @@ export function inline(text) {
   s = escapeHtml(s);
   s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (all, alt, src) => {
     const url = safeHref(src.replace(/&amp;/g, '&'));
-    return url === null || /^https?:/i.test(url) ? alt : `<img src="${escapeHtml(url)}" alt="${alt}" loading="lazy">`;
+    const local = url === null || /^https?:/i.test(url) ? null : imageSource(url);
+    return local ? `<img src="${escapeHtml(local)}" alt="${alt}" loading="lazy">` : alt;
   });
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (all, label, href) => {
     const url = safeHref(href.replace(/&amp;/g, '&'));
@@ -114,7 +121,7 @@ const splitRow = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').spl
 // Renders the Markdown subset the kit's templates use: headings, paragraphs,
 // lists (nested, with task boxes), GFM tables, fenced code, quotes and rules.
 export function markdown(text, { headingOffset = 0 } = {}) {
-  const lines = stripComments(text.replace(/^﻿/, '')).split(/\r?\n/);
+  const lines = stripComments(text.replace(/^﻿/, '')).split(/\r\n|[\r\n\u2028\u2029]/);
   const out = [];
   let i = 0;
   const isTableStart = (k) => /^\s*\|/.test(lines[k] ?? '') && /^\s*\|?\s*:?-{2,}/.test(lines[k + 1] ?? '');
@@ -165,6 +172,8 @@ export function markdown(text, { headingOffset = 0 } = {}) {
     const para = [];
     while (i < lines.length && lines[i].trim() && !LIST.test(lines[i]) && !/^(#{1,6})\s/.test(lines[i])
       && !/^\s*(```|~~~|>)/.test(lines[i]) && !isTableStart(i)) { para.push(lines[i].trim()); i += 1; }
+    // A line no rule above took (an odd heading such as "#\tx") still moves on.
+    if (para.length === 0) { para.push(line.trim()); i += 1; }
     out.push(`<p>${inline(para.join(' '))}</p>`);
   }
   return out.join('\n');
@@ -216,7 +225,8 @@ function decodeSource(buffer) {
 function walk(dir) {
   let entries = [];
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
-  return entries.sort((a, b) => a.name.localeCompare(b.name))
+  // Plain code-point order, so the page does not depend on the machine's locale.
+  return entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     .flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]));
 }
 
@@ -272,11 +282,18 @@ export function parseTrace(text) {
 
 // "src/a/Invoice.cs:Invoice.Total:10-42" -> { file, symbol, from, to }. Several
 // references may share a cell, separated by <br>, ";" or ",".
+// The path ends at the first ".ext" followed by ":" or the end, so paths may hold
+// spaces, non-ASCII letters or backslashes, and symbols may hold "::".
 export function parseRefs(cell) {
   const refs = [];
-  for (const part of cell.replace(/`/g, '').split(/<br\s*\/?>|;|,(?=\s*[\w./-]+\.\w+:)/i)) {
-    const m = part.trim().match(/^([\w.\/@~+-]+\.\w+)(?::([^:]+?))?(?::(\d+)(?:\s*-\s*(\d+))?)?\s*$/);
-    if (m) refs.push({ file: m[1], symbol: m[2] ?? '', from: m[3] ? Number(m[3]) : null, to: m[4] ? Number(m[4]) : (m[3] ? Number(m[3]) : null) });
+  for (const part of cell.replace(/`/g, '').split(/<br\s*\/?>|;|,(?=\s*[^,:;]+\.[A-Za-z0-9]+:)/i)) {
+    const m = part.trim().match(/^([^:<>"|?*]+?\.[A-Za-z0-9]+)(?::(.*))?$/);
+    if (!m) continue;
+    const file = m[1].trim().replace(/\\/g, '/');
+    const rest = (m[2] ?? '').trim();
+    const lines = rest.match(/^(?:(.*?):)?(\d+)(?:\s*[-–]\s*(\d+))?$/);
+    if (lines) refs.push({ file, symbol: (lines[1] ?? '').trim(), from: Number(lines[2]), to: Number(lines[3] ?? lines[2]) });
+    else refs.push({ file, symbol: rest, from: null, to: null });
   }
   return refs;
 }
@@ -284,9 +301,15 @@ export function parseRefs(cell) {
 // A path named in the Markdown, resolved inside the repository: never outside
 // the root and never inside .git. Null when it is not allowed.
 function insideRoot(root, file) {
-  const abs = path.resolve(root, file);
-  const rel = path.relative(path.resolve(root), abs);
-  if (!rel || rel.startsWith('..') || path.isAbsolute(rel) || rel.split(/[\\/]/)[0] === '.git') return null;
+  const allowed = (base, abs) => {
+    const rel = path.relative(base, abs);
+    return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel) && rel.split(/[\\/]/)[0].toLowerCase() !== '.git';
+  };
+  const base = path.resolve(root);
+  const abs = path.resolve(base, file);
+  if (!allowed(base, abs)) return null;
+  // A symbolic link inside the repository may point outside it.
+  try { if (!allowed(fs.realpathSync(base), fs.realpathSync(abs))) return null; } catch { /* missing: the caller reports it */ }
   return abs;
 }
 
@@ -1173,7 +1196,13 @@ export function render({ root = process.cwd(), change, file, out, lang, now = ne
   } else return { ok: false, problems: ['pass --change NAME or --file PATH'] };
 
   const resolved = path.resolve(root, out ?? path.join(views, `${name}.html`));
-  const html = build(path.dirname(resolved));
+  const docDir = change ? findChange(root, change).dir : path.dirname(path.resolve(root, file));
+  imageSource = (src) => {
+    const abs = insideRoot(root, path.join(path.relative(path.resolve(root), docDir), src));
+    return abs ? path.relative(path.dirname(resolved), abs).split(path.sep).map(encodeURIComponent).join('/') : null;
+  };
+  let html;
+  try { html = build(path.dirname(resolved)); } finally { imageSource = (src) => src; }
   fs.mkdirSync(path.dirname(resolved), { recursive: true });
   if (path.dirname(resolved) === views && !fs.existsSync(path.join(views, '.gitignore'))) {
     fs.writeFileSync(path.join(views, '.gitignore'), '# Generated by spec-relay render.mjs; the Markdown is the source of truth.\n*\n');

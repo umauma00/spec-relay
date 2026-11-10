@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { checkReview, checkPortReady, checkPortDone, baselineHash, archivedChange, sourceFiles, main } from '../scripts/gate.mjs';
 import { quiet } from './helpers.mjs';
@@ -230,10 +231,13 @@ test('the target-design gate needs a module and verification levels for every co
   fs.renameSync(path.join(dir, SURVEY), path.join(dir, 'openspec/changes/archive/2026-11-01-survey'));
   const T = 'openspec/changes/target-design';
   write(dir, `${T}/.openspec.yaml`, 'schema: spec-relay-target\n');
-  write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A0 style\n');
+  write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform: levels\n- [x] E2 `billing`: levels\n');
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n');
   write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
   assert.deepEqual(checkReview(dir, 'target-design').problems, ['architecture.md has no module row for context billing']);
+  write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A1 platform\n- [x] E1 platform\n');
+  assert.match(checkReview(dir, 'target-design').problems.join(), /module of context billing has no review item/);
+  write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform: levels\n- [x] E2 `billing`: levels\n');
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| `billing` | ts/billing |\n');
   assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
 });
@@ -268,4 +272,78 @@ test('gate baseline prints the hash', () => {
   try { assert.equal(main(['baseline', '--capability', 'calc', '--root', dir]), 0); } finally { console.log = log; }
   assert.equal(JSON.parse(logs[0]).sha256, baselineHash(dir, 'calc'));
   assert.equal(quiet(() => main(['baseline', '--capability', 'nope', '--root', dir])), 1);
+});
+
+test('crosscheck verdicts: the whole cell, one row per item, questions that exist', () => {
+  const bad = {
+    'confirmed? No: mismatch': /is "confirmed\? no: mismatch"/,
+    'confirmed partially; scenario 2 mismatch': /is "confirmed partially/,
+    'question Q9': /points to Q9, which is not in questions.md/,
+  };
+  for (const [verdict, expected] of Object.entries(bad)) {
+    const problems = checkReview(repo(GOOD, { crosscheck: CROSSCHECK.replace('| R2 Reject text | confirmed', `| R2 Reject text | ${verdict}`) }), 'extract-calc').problems.join();
+    assert.match(problems, expected, verdict);
+  }
+  assert.ok(checkReview(repo(GOOD, { crosscheck: CROSSCHECK.replace('| R2 Reject text | confirmed', '| R2 Reject text | Confirmed.') }), 'extract-calc').ok);
+  const twice = repo(GOOD, { crosscheck: `${CROSSCHECK}| R2 Reject text | mismatch | later |\n` });
+  assert.match(checkReview(twice, 'extract-calc').problems.join(), /more than one crosscheck row: "Reject text"/);
+});
+
+test('screens.md needs readable screen headings or only None', () => {
+  for (const screens of ['## Screen: Login\n', '### 画面: ログイン\n']) {
+    assert.match(checkReview(repo(GOOD, { screens }), 'extract-calc').problems.join(), /no "### Screen: <name>" heading/, screens);
+  }
+  assert.ok(checkReview(repo(GOOD, { screens: '# Screens\n<!-- c -->\nNone\n' }), 'extract-calc').ok);
+});
+
+test('inventory paths keep their characters; a bad source root fails', () => {
+  const dir = survey({ inventory: '| Path | Context | Notes |\n|---|---|---|\n| `src/my_module/file_a.php` | billing | |\n| src/Copy (1).php | billing | |\n| src/[id].php | billing | |\n| src/billing/ | billing | |\n| src/common/ | platform | |\n| vendor/ | excluded | |\n' });
+  for (const f of ['src/my_module/file_a.php', 'src/Copy (1).php', 'src/[id].php']) write(dir, f, 'x');
+  assert.deepEqual(checkReview(dir, 'survey'), { ok: true, problems: [] });
+  for (const root of ['srcc', '../legacy', 'C:\\\\work\\\\legacy']) {
+    write(dir, 'openspec/config.yaml', `context: |\n  Source root (read-only): ${root}\n`);
+    assert.match(checkReview(dir, 'survey').problems.join(), /is not a folder inside the repository/, root);
+  }
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only): "src"  # quoted\n');
+  assert.equal(checkReview(dir, 'survey').ok, true);
+});
+
+test('in a git repository, ignored and untracked-ignored files need no inventory row', { skip: spawnSync('git', ['--version']).status !== 0 && 'git not installed' }, () => {
+  const dir = survey();
+  write(dir, '.gitignore', '.vs/\ndesktop.ini\n');
+  write(dir, '.vs/settings.json', '{}');
+  write(dir, 'desktop.ini', 'x');
+  fs.rmSync(path.join(dir, '.git'), { recursive: true });
+  assert.equal(spawnSync('git', ['init', '-q'], { cwd: dir }).status, 0);
+  const files = sourceFiles(dir);
+  assert.ok(!files.some((f) => f.startsWith('.vs/') || f === 'desktop.ini'), files.join());
+  assert.ok(files.includes('.gitignore'));
+  assert.ok(files.includes('src/billing/invoice.php'));
+});
+
+test('capability names whose change name ends like a rerun are refused', () => {
+  const dir = survey();
+  write(dir, `${SURVEY}/capabilities.md`, '### billing\n1. `billing/v1`\n');
+  assert.match(checkReview(dir, 'survey').problems.join(), /ends like a rerun suffix/);
+});
+
+test('an untouched reason template is no reason; amendments accept only confirmed', () => {
+  const dir = tempDir();
+  const A = 'openspec/changes/amend-calc';
+  write(dir, `${A}/.openspec.yaml`, 'schema: spec-relay-amend\n');
+  write(dir, `${A}/reason.md`, fs.readFileSync(path.join(import.meta.dirname, '../openspec-schemas/spec-relay-amend/templates/reason.md'), 'utf8'));
+  write(dir, `${A}/specs/calc/spec.md`, '## MODIFIED Requirements\n\n### Requirement: Add two numbers\nThe system SHALL truncate.\n');
+  write(dir, `${A}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | question Q1 | x |\n');
+  write(dir, `${A}/review.md`, 'Reviewer: Uma\n- [x] R1 Add two numbers\n');
+  const problems = checkReview(dir, 'amend-calc').problems.join();
+  assert.match(problems, /reason.md gives no reason/);
+  assert.match(problems, /is "question q1"; resolve it \(fix and check again\)/);
+});
+
+test('port-done needs the hash of its own capability', () => {
+  const dir = tempDir();
+  write(dir, 'openspec/specs/calc/other/spec.md', SPEC);
+  write(dir, 'openspec/changes/port-calc-add/tasks.md', '- [x] 1.1 a\n');
+  write(dir, 'openspec/changes/port-calc-add/proposal.md', `- \`calc/other\` sha256:${baselineHash(dir, 'calc/other')}\n`);
+  assert.match(checkPortDone(dir, 'port-calc-add').problems.join(), /no baseline hash for this change's own capability/);
 });
