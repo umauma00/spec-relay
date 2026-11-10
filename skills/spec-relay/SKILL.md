@@ -86,10 +86,11 @@ need the reasoning behind a step.
    source directories of each, and write it to the plan after the person agrees
    to the list. Start with a small capability that has few dependencies.
    In the plan, list the capabilities in order under a `## Capabilities`
-   heading, one list item each, starting with the backticked capability path:
-   `` 1. `billing/invoice` 請求書 (src/billing) ``. `status.mjs` reads this
-   list (items under deeper headings below it count too); put other notes,
-   such as follow-up work, under another `##` heading.
+   heading, one top-level list item each, starting with the backticked
+   capability path: `` 1. `billing/invoice` 請求書 ``. Put its source folders
+   in indented items below it. `status.mjs` counts only these top-level items
+   (deeper headings below `## Capabilities`, such as one per group, are fine);
+   put other notes, such as follow-up work, under another `##` heading.
    Name capabilities so that OpenSpec and Windows both accept them: each
    path segment is lowercase ASCII kebab-case (`billing/invoice`, not
    `Billing_Invoice` or `請求`; put the Japanese name in the plan beside it),
@@ -164,21 +165,25 @@ keep this list; the analyst and implementer subagents have no TODO tool.
 
 1. Run `node "<kit>/scripts/status.mjs" --format todo` (add `--capability
    <capability>` when you work on a capability other than the one it picks).
-   It returns `todoList`: one line for the whole migration and the analyze,
+   It prints `todoList`: one line for the whole migration and the analyze,
    review and implement steps of the current capability, with titles in the
-   artifact language, computed from the files under `openspec/` alone.
-2. Pass the items to the TODO tool in the shape that tool takes. VS Code's
-   `todo` takes the list as it is (`id`, `title`, `description`, `status`).
-   Copilot CLI's `update_todo` takes one Markdown checklist: pass the output of
-   `--format checklist`. Replace the whole list each time; do not add the
-   spec-relay items twice, and keep items the person added themselves.
+   artifact language, computed from the files under `openspec/` alone. The JSON
+   is ASCII with `\uXXXX` escapes; read it as JSON.
+2. Pass it to the TODO tool in the shape that tool takes: VS Code's `todo`
+   takes `todoList` as it is (`id`, `title`, `description`, `status`); Copilot
+   CLI's `update_todo` takes one Markdown checklist, the `checklist` string.
+   Pass the items, titles and statuses exactly as printed. Never set a status
+   yourself, not even for the step you are doing, and never add the
+   spec-relay items twice. If the person keeps items of their own in the list,
+   keep those after the printed ones.
 3. Do it at the start, on resume, when a step starts or ends, and right before
    you report and wait for the person (phase 1 report, review, port design,
    archive questions). Run the command again each time instead of editing the
    list by hand, so it always matches the files.
-4. A step that waits for the person stays not started with the reason in its
-   title (`【レビュー待ち 3/8】`); only the step you are working on is in
-   progress. Never mark a step done to tidy the list.
+4. If `problems` is not empty, tell the person what it says and fix what is
+   yours to fix (for example a plan without a `## Capabilities` list). A
+   step that waits for the person shows as not started with the reason in its
+   title (`【レビュー待ち 3/8】`); that is expected.
 5. The TODO list is only a view. A ticked item never approves anything: review
    approval is still the person's word in this conversation plus a passing
    `gate.mjs`.

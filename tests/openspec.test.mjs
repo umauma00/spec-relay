@@ -108,7 +108,8 @@ test('extract -> review gate -> archive -> port', { skip: !hasOpenspec && 'opens
   assert.deepEqual(next.artifacts.map((a) => a.id), ['proposal', 'design', 'tasks']);
   write(dir, 'openspec/changes/port-calc/tasks.md', '# Tasks\n\n## 1. Core\n\n- [ ] 1.1 Implement add; verify with its test\n');
   assert.equal(checkPortDone(dir, 'port-calc').ok, false);
-  assert.deepEqual(steps(), ['completed', 'completed', 'in-progress']);
+  // No task ticked yet: the design waits for the person's agreement.
+  assert.deepEqual(steps(), ['completed', 'completed', 'not-started']);
   write(dir, 'openspec/changes/port-calc/tasks.md', '# Tasks\n\n## 1. Core\n\n- [x] 1.1 Implement add; verify with its test\n');
   for (const file of ['proposal.md', 'design.md']) write(dir, `openspec/changes/port-calc/${file}`, `# ${file}\n`);
   openspec(dir, 'archive', 'port-calc', '--yes');
