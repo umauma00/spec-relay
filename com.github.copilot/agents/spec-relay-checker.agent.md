@@ -31,8 +31,8 @@ confirmed.
 Write your verdict file in UTF-8 with your edit tool, as one Markdown table:
 `| Item | Verdict | Evidence |`, then one row per item in spec order and then
 screen order: `| R<n> <requirement name> | <verdict> | <path:line - evidence> |`
-(screens as `S<n> <screen name>`), using the requirement and screen names
-exactly as written. Never write any other file.
+(screens as `S<n> <screen name>`), using the numbers and names exactly as the
+task gives them. Write a `|` inside a cell as `\|`. Never write any other file.
 
 Then return a short report and nothing else: the verdict file's path, the
 number of rows per verdict, every row that is not `confirmed` (copied from the

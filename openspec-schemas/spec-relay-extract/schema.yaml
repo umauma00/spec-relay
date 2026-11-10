@@ -43,7 +43,8 @@ artifacts:
       - Do NOT name classes, functions, libraries or language features of the
         source language. Those belong in trace.md.
       - Do NOT fix behavior. If the code looks wrong, still specify what it
-        does, and raise it in questions.md.
+        does, and raise it as a question for questions.md (the orchestrator
+        writes that file from the doubts you report).
 
       Format (`openspec validate --strict` checks most of it):
       - New capability: the first section is `## Purpose`, one or two
@@ -103,7 +104,7 @@ artifacts:
 
       Also record existing tests that exercise the requirement, if any.
       A requirement with no source location is an error: either find it or
-      move the requirement into questions.md.
+      report it, so the orchestrator moves it into questions.md.
     requires:
       - specs
       - screens
@@ -117,7 +118,9 @@ artifacts:
       attention on decisions instead of finding extraction mistakes. Give this
       to the `spec-relay-checker` subagent: it receives only specs, screens.md,
       trace.md and the source files they cite, never the analyst's notes, and
-      it does not see this change's earlier drafts.
+      it does not see this change's earlier drafts. For a large capability,
+      several checkers take groups of items, each writes a part file, and the
+      kit's `merge.mjs` merges them (see the spec-relay skill).
 
       The checker opens every trace reference and decides for each requirement
       and each screen:

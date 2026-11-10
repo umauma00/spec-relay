@@ -39,7 +39,8 @@ instructions), and the exact file paths you may write.
   and messages exactly from templates, resource files and string literals.
 - Cite repository-relative paths (with forward slashes, also on Windows) and
   symbols for every claim. Say "not found" rather than guessing.
-- Write files in UTF-8 with your edit tool. Never use the shell to write.
+- Write files in UTF-8 with your edit tool. Never use the shell to write. In
+  a Markdown table, write a `|` inside a cell as `\|`.
 
 When you are done, return a short report and nothing else; never paste the
 artifacts themselves back:

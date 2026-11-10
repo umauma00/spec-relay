@@ -22,6 +22,6 @@ context: |
 
 rules:
   specs:
-    - Specify what the source code does today, even when it looks wrong; raise doubts in questions.md.
+    - Specify what the source code does today, even when it looks wrong; raise doubts as questions for questions.md.
   tasks:
     - Every task cites the requirement, the target file and the source reference it reads.

@@ -137,10 +137,17 @@ not wash out these instructions.
    Analysts and checkers write only the paths you give them, the implementer
    only its capability's module. Only you write `review.md`, `plan.md` and
    `questions.md`, run `openspec` commands, render review pages and archive.
-   Never give a subagent a path under the source root, `openspec/specs/` or
-   `openspec/config.yaml`.
+   Never give a subagent a path under the source root (when the source root is
+   `.`, give only paths under `openspec/` and the target root), under
+   `openspec/specs/`, or `openspec/config.yaml`.
+   In a git repository, note `git status --porcelain` before a wave and run it
+   again after it. If a
+   path changed that you did not assign (above all under the source root,
+   `openspec/specs/` or a `review.md`), stop, tell the person which, and do
+   not use that wave's results until they decide.
 5. **Tables split across subagents** (inventory, crosscheck): each subagent
-   writes its rows as a Markdown table to its own part file in the work folder,
+   writes its rows as a Markdown table to its own part file in the work folder
+   (a `|` inside a cell written as `\|`),
    and `node "<kit>/scripts/merge.mjs" --into <artifact> --parts <folder>
    --clean` merges them into the artifact: a later part replaces the row with
    the same key, and rows you edited yourself stay.
@@ -151,7 +158,8 @@ not wash out these instructions.
    capability in `nextToAnalyze`. A longer queue only waits, and what the
    person finds in one review (a misread pattern, a glossary term, a wish about
    wording) should reach the next analyses before they are written.
-8. **Pilot first.** Analyze the first capability (`platform`) on its own and
+8. **Pilot first.** Analyze the first capability (`platform`) on its own
+   (`nextToAnalyze` holds one capability until the first is reviewed) and
    bring what its review taught into the tasks of later analysts.
 9. Hand the person reviews of the same context one after another where the
    order allows, because they share words and data.
@@ -189,10 +197,12 @@ the domain, not the folders.
    must be in the inventory.
    - **Inventory**: split the source folders across `spec-relay-analyst`
      subagents. Each writes its rows to
-     `openspec/spec-relay/work/survey/inventory/<n>.md` and its evidence to
-     `openspec/spec-relay/work/survey/evidence/<n>.md`. Then run `merge.mjs
-     --into openspec/changes/survey/inventory.md --parts
-     openspec/spec-relay/work/survey/inventory --clean`.
+     `openspec/spec-relay/work/<change>/inventory/<n>.md` and its evidence to
+     `openspec/spec-relay/work/<change>/evidence/<n>.md`, where `<change>` is
+     this survey change's name (`survey`, or `survey-v2` for a rerun, so an
+     earlier run's evidence is never read again). Then run `merge.mjs --into
+     openspec/changes/<change>/inventory.md --parts
+     openspec/spec-relay/work/<change>/inventory --clean`.
    - **Context map**: one analyst reads every evidence file and the merged
      inventory, writes context-map.md and corrects the Context column of
      inventory.md to the context ids it chose. You read context-map.md: the
@@ -256,15 +266,17 @@ waves.
    them.
 3. **Crosscheck.** Give the change's specs, screens.md and trace.md paths to
    `spec-relay-checker` subagents, and nothing else: no notes, no earlier
-   drafts. For a large capability, split the items into groups (R1-R15,
-   R16-R30, S1-S8) in one wave. Each checker writes
+   drafts. Give each checker its items as numbered names (`R1 <name>`,
+   `S1 <name>`, numbered in spec and screens.md order, from your search), so
+   the numbers match review.md. For a large capability, split the items into
+   groups (R1-R15, R16-R30, S1-S8) in one wave. Each checker writes
    `openspec/spec-relay/work/extract-<capability>/crosscheck-<nn>.md`; merge
    them with `merge.mjs --into
    openspec/changes/extract-<capability>/crosscheck.md --parts
    openspec/spec-relay/work/extract-<capability> --clean`. For every
    `mismatch` and `unclear` row, have an analyst fix the spec, screens or trace
-   and a new checker check that row again (a new part file, merged the same
-   way), or move it to questions.md and write `question Q<n>` as its verdict
+   and a new checker check that row again (a part file with a higher number,
+   such as `crosscheck-02.md`, merged the same way), or move it to questions.md and write `question Q<n>` as its verdict
    yourself.
 4. **Questions and review.** Write questions.md from the analysts' reported
    doubts and the rows moved to questions, then review.md (names by search,
@@ -322,9 +334,9 @@ fixing a bug, is never an amendment: it is follow-up work after the migration.
 
 1. `openspec new change amend-<capability> --schema spec-relay-amend` (add
    `-v<n>` for a second amendment of the same capability).
-2. Write reason, specs, trace, crosscheck, impact and review from their
-   instructions; the checkers write part files and `merge.mjs` merges them, as
-   in step 3. A MODIFIED requirement replaces the whole block, and OpenSpec
+2. Give reason, specs and trace to one `spec-relay-analyst` (schema
+   `spec-relay-amend`), then the crosscheck to checkers as in step 3 (part
+   files merged by `merge.mjs`). Write impact.md and review.md yourself. A MODIFIED requirement replaces the whole block, and OpenSpec
    refuses to archive one that drops a scenario the baseline has, also when the
    requirement is removed and added again: keep every existing scenario name
    and correct its steps.

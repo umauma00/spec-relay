@@ -74,8 +74,8 @@ export function questionIds(text) {
 }
 
 // Drops Markdown emphasis, brackets and comment markers so "**Q1**" and "[Q1]" read as "Q1".
-const plain = (s) => s.replace(/<!--|-->/g, ' ').replace(/[*_`[\]()]/g, '').replace(/\s+/g, ' ').trim();
-const norm = (s) => plain(s).toLowerCase();
+export const plain = (s) => s.replace(/<!--|-->/g, ' ').replace(/[*_`[\]()]/g, '').replace(/\s+/g, ' ').trim();
+export const norm = (s) => plain(s).toLowerCase();
 
 // A change's schema from its .openspec.yaml; a change without one is read as an
 // extract change, the only kind the first version of the kit had.

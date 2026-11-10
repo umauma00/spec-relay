@@ -66,7 +66,8 @@ artifacts:
       Same as the extract change's crosscheck, for the MODIFIED and ADDED
       requirements only: give them with trace.md and the cited source files to
       the `spec-relay-checker` subagent, one row per requirement
-      (`R<n> <name>`), and resolve every row that is not `confirmed`.
+      (`R<n> <name>`), and resolve every row that is not `confirmed`. The
+      checker writes a part file that the kit's `merge.mjs` merges.
     requires:
       - trace
 

@@ -16,7 +16,7 @@
 // current capability, and one line for each other capability with an active
 // change (several run at once when the orchestrator works in parallel).
 // `parallel` says how many subagents may run at once, which capabilities are
-// being analyzed or wait for review, and which may be analyzed next without
+// being analyzed or are in review, and which may be analyzed next without
 // running more than `ahead` capabilities ahead of the person's review (both
 // numbers come from openspec/config.yaml). It never records or grants an approval; the review gate is
 // scripts/gate.mjs. Read-only. Exits 0, 1 when --capability names no known
@@ -92,8 +92,9 @@ const WORDS = {
 
 // Each step returns { status, detail?, waiting? }. status is one of the three
 // states every host supports. Work that waits for the person stays not-started
-// with the reason in `detail`, so at most one step is in progress and a waiting
-// step never looks as if the agent were busy with it. `marks` names the summary
+// with the reason in `detail`, so a waiting step never looks as if the agent
+// were busy with it. Several steps are in progress only when subagents work on
+// several capabilities at once. `marks` names the summary
 // count a completed step adds to.
 export const FOUNDATION = [
   { id: 'survey', change: 'survey', schema: 'spec-relay-survey' },
@@ -434,7 +435,7 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
   return {
     plan, total, ported, reviewed,
     current: here,
-    parallel: parallelPlan(root, capabilities, foundation),
+    parallel: parallelPlan(root, capabilities, foundation, problems),
     foundation: foundation.map(({ id, status: st }) => ({ id, status: st })),
     active: capabilities.filter((c) => c.active).map((c) => c.capability),
     todoList,
@@ -445,27 +446,38 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
   };
 }
 
-const setting = (root, label, fallback, max) => {
-  const n = Number(String(configValue(root, label, '')).replace(/\s+#.*$/, '').trim());
-  return Number.isInteger(n) && n >= 1 && n <= max ? n : fallback;
-};
+// A limit from openspec/config.yaml: a whole number in range, else the default
+// (with a problem when a value is there but cannot be used).
+function setting(root, label, fallback, max, problems) {
+  const raw = configValue(root, label, null);
+  if (raw === null) return fallback;
+  const value = raw.replace(/\s+#.*$/, '').trim();
+  if (/^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= max) return Number(value);
+  problems.push(`openspec/config.yaml: "${label}" is "${value}"; use a whole number from 1 to ${max} (using ${fallback})`);
+  return fallback;
+}
 
 // What the orchestrator may run at once. Analyses run at most `ahead`
 // capabilities in front of the person's review, because the review is the one
 // step that cannot run in parallel: what it finds should reach the next
-// analyses, and a long queue only waits. Extract changes need the archived
-// survey (the glossary and the capability list), not the target design.
-export function parallelPlan(root, capabilities, foundation) {
-  const subagents = setting(root, 'Parallel subagents', 4, 32);
-  const ahead = setting(root, 'Analyses ahead of review', 2, 10);
+// analyses, and a long queue only waits. Until the first capability is
+// reviewed (the pilot), only one is analyzed at a time. Extract changes need
+// the archived survey (the glossary and the capability list), not the target
+// design. `inReview` counts amendments from the moment they are opened.
+export function parallelPlan(root, capabilities, foundation, problems = []) {
+  const subagents = setting(root, 'Parallel subagents', 4, 32, problems);
+  const ahead = setting(root, 'Analyses ahead of review', 2, 10, problems);
   const analyzing = capabilities.filter((c) => c.extract && c.steps.analyze.status !== 'completed').map((c) => c.capability);
-  const awaitingReview = capabilities.filter((c) => (c.extract && c.steps.analyze.status === 'completed') || c.amend).map((c) => c.capability);
+  const inReview = capabilities.filter((c) => (c.extract && c.steps.analyze.status === 'completed') || c.amend).map((c) => c.capability);
   const surveyDone = foundation.find((f) => f.id === 'survey')?.status === 'completed';
-  const room = Math.max(0, ahead - analyzing.length - awaitingReview.length);
+  const piloted = capabilities.some((c) => c.baseline || c.extractArchived);
+  const limit = piloted ? ahead : 1;
+  const busy = analyzing.length + inReview.length;
+  if (busy > ahead) problems.push(`${busy} capabilities are in analysis or review, more than the ${ahead} allowed ahead of the review; finish reviews before starting new analyses`);
   const nextToAnalyze = surveyDone
-    ? capabilities.filter((c) => c.planned && c.counted && !c.extract && !c.baseline && !c.extractArchived).slice(0, room).map((c) => c.capability)
+    ? capabilities.filter((c) => c.planned && c.counted && !c.extract && !c.baseline && !c.extractArchived).slice(0, Math.max(0, limit - busy)).map((c) => c.capability)
     : [];
-  return { subagents, ahead, analyzing, awaitingReview, nextToAnalyze };
+  return { subagents, ahead, analyzing, inReview, nextToAnalyze };
 }
 
 export function checklist(report, { problems = false } = {}) {

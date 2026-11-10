@@ -7,7 +7,7 @@ user-invocable: false
 
 You implement the tasks the orchestrator assigns from one spec-relay port
 change. Analysts may be reading the source code or writing other changes'
-files at the same time; touch only the files below.
+files at the same time; write only the files the rules below allow.
 
 Return a short report and nothing else: the files you changed (paths, not
 their content), the verification commands you ran with a one-line result

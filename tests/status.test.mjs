@@ -339,14 +339,26 @@ test('parallel work: one line per other active capability, and what may be analy
   assert.equal(report.current.capability, 'billing/invoice');
   assert.deepEqual(report.todoList.map((i) => i.key).slice(-1), ['billing/payment:analyze']);
   assert.equal(report.todoList.at(-1).status, 'in-progress');
-  assert.deepEqual(report.parallel, { subagents: 4, ahead: 2, analyzing: ['billing/payment'], awaitingReview: ['billing/invoice'], nextToAnalyze: [] });
+  assert.deepEqual(report.parallel, { subagents: 4, ahead: 2, analyzing: ['billing/payment'], inReview: ['billing/invoice'], nextToAnalyze: [] });
 
   // The limits come from openspec/config.yaml; a bad value falls back to the default.
   const config = fs.readFileSync(path.join(dir, 'openspec/config.yaml'), 'utf8');
   write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Parallel subagents (at once, whole session): 16\n  Analyses ahead of review: 3\n`);
-  assert.deepEqual(status(dir).parallel, { subagents: 16, ahead: 3, analyzing: ['billing/payment'], awaitingReview: ['billing/invoice'], nextToAnalyze: ['billing/tax'] });
-  write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Parallel subagents (at once, whole session): 99\n`);
-  assert.equal(status(dir).parallel.subagents, 4);
+  assert.deepEqual(status(dir).parallel, { subagents: 16, ahead: 3, analyzing: ['billing/payment'], inReview: ['billing/invoice'], nextToAnalyze: ['billing/tax'] });
+  for (const bad of ['99', '"16"', '1e1', '8.0']) {
+    write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Parallel subagents (at once, whole session): ${bad}\n`);
+    const report = status(dir);
+    assert.equal(report.parallel.subagents, 4, bad);
+    has(report, `"Parallel subagents" is "${bad}"`);
+  }
+  // More in flight than allowed is reported.
+  write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Analyses ahead of review: 1\n`);
+  has(status(dir), '2 capabilities are in analysis or review, more than the 1 allowed');
+
+  // The pilot: until one capability is reviewed, one analysis at a time.
+  const fresh = repo({ plan: PLAN });
+  for (const rel of ['openspec/specs', 'openspec/changes/archive/2026-11-01-extract-common-base', 'openspec/changes/archive/2026-11-02-port-common-base', EXTRACT]) fs.rmSync(path.join(fresh, rel), { recursive: true });
+  assert.deepEqual(status(fresh).parallel.nextToAnalyze, ['common/base']);
 
   // Nothing is analyzed before the survey is archived.
   fs.rmSync(path.join(dir, 'openspec/changes/archive'), { recursive: true });
