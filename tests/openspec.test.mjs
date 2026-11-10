@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { main, BYPASS_FILES } from '../scripts/setup.mjs';
+import { main, bypassFiles } from '../scripts/setup.mjs';
 import { checkReview, checkPortReady, checkPortDone } from '../scripts/gate.mjs';
 import { tempDir, write, quiet } from './helpers.mjs';
 
@@ -49,14 +49,16 @@ test('setup runs openspec init, keeps the config and removes the gate-bypassing 
   for (const schema of ['spec-relay-extract', 'spec-relay-port']) openspec(dir, 'schema', 'validate', schema);
   assert.match(fs.readFileSync(path.join(dir, 'openspec/config.yaml'), 'utf8'), /spec-relay: managed[\s\S]*Source language: Python/);
   assert.ok(fs.existsSync(path.join(dir, '.github/skills/openspec-propose/SKILL.md')));
-  for (const rel of BYPASS_FILES) assert.ok(!fs.existsSync(path.join(dir, rel)), `${rel} should be removed`);
-  assert.ok(!fs.existsSync(path.join(dir, '.github/skills/openspec-apply-change')));
+  assert.deepEqual(bypassFiles(dir), []);
+  for (const rel of ['.github/skills/openspec-apply-change', '.github/skills/openspec-archive-change', '.github/prompts/opsx-archive.prompt.md']) {
+    assert.ok(!fs.existsSync(path.join(dir, rel)), `${rel} should be removed`);
+  }
 
   // `openspec update` brings them back; running setup again removes them again.
   openspec(dir, 'update');
-  assert.ok(BYPASS_FILES.some((rel) => fs.existsSync(path.join(dir, rel))));
+  assert.ok(bypassFiles(dir).length >= 6, 'openspec update should restore the workflows');
   assert.equal(quiet(() => main(['--target', dir, ...SETUP, '--apply'])), 0);
-  for (const rel of BYPASS_FILES) assert.ok(!fs.existsSync(path.join(dir, rel)), `${rel} should be removed again`);
+  assert.deepEqual(bypassFiles(dir), []);
 });
 
 test('extract -> review gate -> archive -> port', { skip: !hasOpenspec && 'openspec CLI not installed' }, () => {

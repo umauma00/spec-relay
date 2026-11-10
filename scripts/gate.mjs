@@ -12,12 +12,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const CHECKBOX = /^\s*[-*]\s+\[(.?)\]\s*(.*)$/;
+// Same shapes OpenSpec 1.17.0 counts as tasks and requirements, so the gate never
+// sees fewer items than `openspec instructions apply` or `openspec archive` do.
+const CHECKBOX = /^\s*(?:[-*+]|\d+[.)])\s+\[(.?)\]\s*(.*)$/;
+const REQUIREMENT = /^###\s*Requirement:\s*(.+?)\s*$/i;
+const FENCE = /^\s*(```|~~~)/;
+const PLACEHOLDER = /^(<.*>|tbd|todo|tba|n\/a|-|\.\.\.|…)?$/i;
 const ticked = (mark) => mark.trim().toLowerCase() === 'x';
 const stripComments = (text) => text.replace(/<!--[\s\S]*?-->/g, '');
 
 function readIf(file) {
-  try { return fs.readFileSync(file, 'utf8'); } catch { return null; }
+  try { return fs.statSync(file).isFile() ? fs.readFileSync(file, 'utf8') : null; } catch { return null; }
 }
 
 function walk(dir) {
@@ -26,22 +31,36 @@ function walk(dir) {
   return entries.flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]));
 }
 
+// Lines outside fenced code blocks. HTML comments are kept on purpose: OpenSpec
+// counts boxes and requirements inside them too.
+function unfencedLines(text) {
+  let fenced = false;
+  return text.split(/\r?\n/).filter((line) => {
+    if (FENCE.test(line)) { fenced = !fenced; return false; }
+    return !fenced;
+  });
+}
+
 export function checkboxes(text) {
-  return stripComments(text).split(/\r?\n/).map((line) => line.match(CHECKBOX)).filter(Boolean)
-    .map(([, mark, body]) => ({ done: ticked(mark), body: body.trim() }));
+  return unfencedLines(text).map((line) => line.match(CHECKBOX)).filter(Boolean)
+    .map(([, mark, body]) => ({ done: ticked(mark), body: body.trim(), plain: plain(body) }));
 }
 
 export function requirementNames(text) {
-  return [...stripComments(text).matchAll(/^###\s+Requirement:\s*(.+?)\s*$/gm)].map((m) => m[1]);
+  return unfencedLines(text).map((line) => line.match(REQUIREMENT)).filter(Boolean).map((m) => m[1]);
 }
 
 export function questionIds(text) {
   const ids = new Set();
-  for (const m of stripComments(text).matchAll(/^\s*(?:[-*]\s+|#+\s+)?\**(Q\d+)\b/gm)) ids.add(m[1]);
+  for (const line of unfencedLines(stripComments(text))) {
+    for (const m of line.matchAll(/\bQ(\d+)\b/gi)) ids.add(`Q${Number(m[1])}`);
+  }
   return [...ids];
 }
 
-const norm = (s) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+// Drops Markdown emphasis, brackets and comment markers so "**Q1**" and "[Q1]" read as "Q1".
+const plain = (s) => s.replace(/<!--|-->/g, ' ').replace(/[*_`[\]()]/g, '').replace(/\s+/g, ' ').trim();
+const norm = (s) => plain(s).toLowerCase();
 
 export function checkReview(root, change) {
   const problems = [];
@@ -51,7 +70,7 @@ export function checkReview(root, change) {
   if (review === null) return { ok: false, problems: ['review.md is missing'] };
 
   const reviewer = stripComments(review).match(/^Reviewer:[ \t]*(.*)$/m);
-  if (!reviewer || !reviewer[1].trim()) problems.push('review.md names no reviewer ("Reviewer: <name>")');
+  if (!reviewer || PLACEHOLDER.test(reviewer[1].trim())) problems.push('review.md names no reviewer ("Reviewer: <name>")');
 
   const boxes = checkboxes(review);
   if (boxes.length === 0) problems.push('review.md has no checklist items');
@@ -59,32 +78,42 @@ export function checkReview(root, change) {
 
   const specs = walk(path.join(dir, 'specs')).filter((f) => f.endsWith('.md'));
   if (specs.length === 0) problems.push('the change has no spec files');
-  const rLines = boxes.filter((b) => /^R\d+\b/.test(b.body)).map((b) => norm(b.body.replace(/^R\d+\s*/, '')));
+  const rItems = boxes.filter((b) => /^R\d+\b/i.test(b.plain)).map((b) => norm(b.plain.replace(/^R\d+\s*[.:)-]?\s*/i, '')));
   for (const file of specs) {
     for (const name of requirementNames(fs.readFileSync(file, 'utf8'))) {
-      if (!rLines.some((line) => line.startsWith(norm(name)))) {
-        problems.push(`requirement has no review item: "${name}" (${path.relative(dir, file)})`);
+      const count = rItems.filter((item) => item === norm(name)).length;
+      if (count !== 1) {
+        problems.push(`requirement has ${count === 0 ? 'no' : 'more than one'} review item: "${name}" (${path.relative(dir, file)})`);
       }
     }
   }
 
   const questions = readIf(path.join(dir, 'questions.md'));
-  const qLines = new Map(boxes.filter((b) => /^Q\d+\b/.test(b.body)).map((b) => [b.body.match(/^(Q\d+)/)[1], b.body]));
+  if (questions === null) problems.push('questions.md is missing');
+  const qItems = new Map();
+  for (const box of boxes) {
+    const m = box.plain.match(/^Q(\d+)\b/i);
+    if (m) qItems.set(`Q${Number(m[1])}`, box.plain);
+  }
   for (const id of questions === null ? [] : questionIds(questions)) {
-    const line = qLines.get(id);
-    if (!line) { problems.push(`question has no review item: ${id}`); continue; }
-    const decision = line.match(/decision:\s*(.*)$/i);
-    if (!decision || !decision[1].trim()) problems.push(`question has no recorded decision: ${id}`);
+    const item = qItems.get(id);
+    if (!item) { problems.push(`question has no review item: ${id}`); continue; }
+    const decision = item.match(/decision:\s*(.*)$/i);
+    if (!decision || PLACEHOLDER.test(decision[1].trim())) problems.push(`question has no recorded decision: ${id}`);
   }
   return { ok: problems.length === 0, problems };
 }
 
+export const capabilitySegments = (capability) => capability.split(/[\\/]+/).filter((part) => part && part !== '.');
+
 export function checkPortReady(root, capability) {
   const problems = [];
-  if (!readIf(path.join(root, 'openspec/specs', capability, 'spec.md'))) {
-    problems.push(`no baseline spec at openspec/specs/${capability}/spec.md; archive its reviewed extract change first`);
+  const parts = capabilitySegments(capability);
+  if (parts.length === 0 || parts.includes('..')) return { ok: false, problems: [`not a capability path: ${capability}`] };
+  if (!readIf(path.join(root, 'openspec/specs', ...parts, 'spec.md'))) {
+    problems.push(`no baseline spec at openspec/specs/${parts.join('/')}/spec.md; archive its reviewed extract change first`);
   }
-  const extract = `extract-${capability.replace(/\//g, '-')}`;
+  const extract = `extract-${parts.join('-')}`;
   if (fs.existsSync(path.join(root, 'openspec/changes', extract))) {
     problems.push(`extract change ${extract} is still active; finish its review and archive it first`);
   }

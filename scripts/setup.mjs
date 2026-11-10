@@ -17,15 +17,10 @@ import { fileURLToPath } from 'node:url';
 export const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SCHEMAS = ['spec-relay-extract', 'spec-relay-port'];
 export const CONFIG_MARKER = '# spec-relay: managed';
-// Generic OpenSpec workflows that bypass the spec-relay review gate.
-export const BYPASS_FILES = [
-  '.github/skills/openspec-apply-change/SKILL.md',
-  '.github/skills/openspec-archive-change/SKILL.md',
-  '.github/skills/openspec-sync-specs/SKILL.md',
-  '.github/prompts/opsx-apply.prompt.md',
-  '.github/prompts/opsx-archive.prompt.md',
-  '.github/prompts/opsx-sync.prompt.md',
-];
+// Generic OpenSpec workflows that bypass the spec-relay review gate: anything
+// that applies (ticks the tracked file), archives (including bulk-archive) or
+// syncs specs. Matched by name so opt-in profile workflows are covered too.
+const BYPASS_NAME = /apply|archive|sync/;
 const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
 
 const USAGE = `Usage: node scripts/setup.mjs --target DIR --source-language LANG --target-language LANG
@@ -85,7 +80,11 @@ export function parseArgs(argv) {
   return opts;
 }
 
-const fold = (name) => (CASE_INSENSITIVE_FS ? name.toLowerCase() : name);
+// Windows ignores trailing dots and spaces in names ("openspec." is openspec/).
+const fold = (name) => {
+  const trimmed = process.platform === 'win32' ? name.replace(/[. ]+$/, '') : name;
+  return CASE_INSENSITIVE_FS ? trimmed.toLowerCase() : trimmed;
+};
 // Splits on both separators so "a\\b" is checked the same way on every platform.
 const segments = (rel) => rel.split(/[\\/]+/).filter((part) => part && part !== '.');
 const isPrefix = (a, b) => a.length <= b.length && a.every((part, i) => fold(part) === fold(b[i]));
@@ -138,7 +137,26 @@ function initConflicts(target) {
   return found;
 }
 
-const isOpenspecGenerated = (text) => /generatedBy:|openspec /.test(text);
+// The OpenSpec workflow files in a repository that bypass the review gate.
+// Skills are recognised by OpenSpec's generatedBy metadata, prompts by name and
+// by invoking the openspec CLI. Every removal is shown in the dry run first.
+export function bypassFiles(target) {
+  const found = [];
+  const read = (file) => { try { return fs.readFileSync(file, 'utf8'); } catch { return ''; } };
+  let names = [];
+  try { names = fs.readdirSync(path.join(target, '.github/skills')); } catch { /* absent */ }
+  for (const name of names.filter((n) => n.startsWith('openspec-') && BYPASS_NAME.test(n))) {
+    const file = path.join(target, '.github/skills', name, 'SKILL.md');
+    if (/generatedBy:/.test(read(file))) found.push(file);
+  }
+  names = [];
+  try { names = fs.readdirSync(path.join(target, '.github/prompts')); } catch { /* absent */ }
+  for (const name of names.filter((n) => /^opsx-.*\.prompt\.md$/.test(n) && BYPASS_NAME.test(n))) {
+    const file = path.join(target, '.github/prompts', name);
+    if (/\bopenspec /.test(read(file))) found.push(file);
+  }
+  return found;
+}
 
 // Returns [{ action: 'create' | 'keep' | 'remove' | 'conflict', path, content?, reason? }]
 // and whether `openspec init` will run.
@@ -176,12 +194,10 @@ export function plan(opts) {
       steps.push({ action: 'conflict', path: file, reason: 'openspec init would replace, remove or edit it; back it up and move it away first' });
     }
   }
-  for (const rel of BYPASS_FILES) {
-    const file = path.join(opts.target, rel);
-    if (runInit) steps.push({ action: 'remove', path: file, reason: 'installed by openspec init; bypasses the review gate' });
-    else if (exists(file) && isOpenspecGenerated(fs.readFileSync(file, 'utf8'))) {
-      steps.push({ action: 'remove', path: file, reason: 'generic OpenSpec workflow; bypasses the review gate' });
-    }
+  // Before a first init nothing can match (existing openspec-*/opsx-* files are
+  // conflicts above); after init, main() looks again and removes what init added.
+  for (const file of bypassFiles(opts.target)) {
+    steps.push({ action: 'remove', path: file, reason: 'generic OpenSpec workflow; bypasses the review gate' });
   }
   return { steps, runInit, managed };
 }
@@ -208,6 +224,7 @@ export function main(argv) {
   if (willInit) console.log('run      openspec init --tools github-copilot (adds OpenSpec skills and prompts under .github/)');
   else console.log(`skip     openspec init (${managed ? 'already set up; run "openspec update" to refresh, then this setup again' : '--skip-init'})`);
   removals.forEach(show);
+  if (willInit) console.log('remove   the apply, archive and sync workflows openspec init adds (they bypass the review gate)');
   if (steps.some((s) => s.action === 'conflict')) {
     console.error('\nStopped: resolve the conflicts above, then run setup again. Nothing was changed.');
     return 2;
@@ -217,15 +234,26 @@ export function main(argv) {
     return 3;
   }
   if (!opts.apply) { console.log('\nDry run. Add --apply to make these changes.'); return 0; }
-  for (const step of steps.filter((s) => s.action === 'create')) {
+  const created = steps.filter((s) => s.action === 'create');
+  for (const step of created) {
     fs.mkdirSync(path.dirname(step.path), { recursive: true });
     fs.writeFileSync(step.path, step.content);
   }
-  if (willInit) runInit(opts);
-  for (const step of removals) {
-    fs.rmSync(step.path, { force: true });
-    const dir = path.dirname(step.path);
+  if (willInit) {
+    try {
+      runInit(opts);
+    } catch (error) {
+      // Undo this run's files so the next run is a first run again (the config
+      // marker would otherwise make it skip init).
+      for (const step of created) fs.rmSync(step.path, { force: true });
+      throw new Error(`${error.message}. The files this run created were removed; fix the problem and run setup again.`);
+    }
+  }
+  for (const file of willInit ? bypassFiles(opts.target) : removals.map((s) => s.path)) {
+    fs.rmSync(file, { force: true });
+    const dir = path.dirname(file);
     if (path.basename(path.dirname(dir)) === 'skills' && exists(dir) && fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+    if (willInit) console.log(`removed  ${path.relative(opts.target, file)}`);
   }
   console.log('\nspec-relay is set up. Select the spec-relay orchestrator agent to start phase 1.');
   return 0;

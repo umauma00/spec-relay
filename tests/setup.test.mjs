@@ -95,3 +95,35 @@ test('running the script through a symlink still runs it', { skip: process.platf
   assert.equal(result.status, 0);
   assert.match(result.stdout, /Usage:/);
 });
+
+function fakeOpenspec(initExit) {
+  const bin = tempDir('spec-relay-bin-');
+  write(bin, 'openspec', `#!/bin/sh\n[ "$1" = "--version" ] && { echo 1.17.0; exit 0; }\nexit ${initExit}\n`);
+  fs.chmodSync(path.join(bin, 'openspec'), 0o755);
+  return bin;
+}
+
+test('a failed openspec init removes the files the run created, so a re-run starts over', { skip: process.platform === 'win32' && 'POSIX shell stub' }, () => {
+  const dir = tempDir();
+  const bin = fakeOpenspec(1);
+  const result = spawnSync(process.execPath, [path.join(KIT_ROOT, 'scripts/setup.mjs'), '--target', dir, ...BASE, '--apply'],
+    { encoding: 'utf8', env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` } });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /were removed/);
+  assert.ok(!fs.existsSync(path.join(dir, 'openspec/config.yaml')));
+  assert.equal(plan(parseArgs(['--target', dir, ...BASE])).runInit, true);
+});
+
+test('a re-run removes only OpenSpec-generated apply/archive/sync workflows', () => {
+  const dir = tempDir();
+  quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply']));
+  write(dir, '.github/prompts/opsx-apply.prompt.md', 'Run openspec instructions apply\n');
+  write(dir, '.github/prompts/opsx-archive.prompt.md', 'my own notes\n');
+  write(dir, '.github/skills/openspec-archive-change/SKILL.md', 'metadata:\n  generatedBy: "1.17.0"\n');
+  write(dir, '.github/skills/openspec-propose/SKILL.md', 'metadata:\n  generatedBy: "1.17.0"\n');
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--apply'])), 0);
+  assert.ok(!fs.existsSync(path.join(dir, '.github/prompts/opsx-apply.prompt.md')));
+  assert.ok(!fs.existsSync(path.join(dir, '.github/skills/openspec-archive-change')));
+  assert.ok(fs.existsSync(path.join(dir, '.github/prompts/opsx-archive.prompt.md')));
+  assert.ok(fs.existsSync(path.join(dir, '.github/skills/openspec-propose/SKILL.md')));
+});
