@@ -12,6 +12,8 @@ results, and anything left as `TODO(port)`.
 - The baseline spec under `openspec/specs/` is the contract. The original code
   is read-only reference for logic the spec leaves open; read it through the
   source references in the change's design.md.
+- Before anything else, check that the baseline spec exists at
+  `openspec/specs/<capability>/spec.md`. If it does not, stop and report it.
 - Write files only under the target root named in `openspec/config.yaml`.
   Never edit the source root, `openspec/specs/` or the change's artifacts other
   than ticking the tasks you completed in tasks.md.

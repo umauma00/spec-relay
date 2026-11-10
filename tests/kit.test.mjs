@@ -41,12 +41,12 @@ test('agents have names matching their files and valid relative links', () => {
   }
 });
 
-test('the skill is hidden and points at kit files that exist', () => {
+test('the skill is hidden and the kit files it names exist', () => {
   const text = read('skills/spec-relay/SKILL.md');
   const meta = frontmatter(text);
   assert.equal(meta.name, 'spec-relay');
   assert.equal(meta['user-invocable'], 'false');
-  for (const rel of ['scripts/setup.mjs', 'docs/WORKFLOW.md', 'openspec-schemas']) {
+  for (const rel of ['scripts/setup.mjs', 'scripts/gate.mjs', 'docs/WORKFLOW.md', 'openspec-schemas']) {
     assert.ok(text.includes(rel.split('/').pop()), `skill does not mention ${rel}`);
     assert.ok(fs.existsSync(path.join(KIT_ROOT, rel)), `${rel} is missing`);
   }

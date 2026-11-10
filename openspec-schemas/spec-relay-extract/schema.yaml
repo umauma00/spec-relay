@@ -41,15 +41,17 @@ artifacts:
       - Do NOT fix behavior. If the code looks wrong, still specify what it
         does, and raise it in questions.md.
 
-      Format (the OpenSpec CLI validates it):
-      - New capability: the first section is `## Purpose` (50+ characters).
+      Format (`openspec validate --strict` checks most of it):
+      - New capability: the first section is `## Purpose`, one or two
+        sentences of at least 50 characters.
       - `### Requirement: <name>` with SHALL/MUST, one behavior per requirement,
         description at most 500 characters.
       - Every requirement has at least one `#### Scenario: <name>` (exactly four
         hashes) with a **WHEN** or **GIVEN** step and a **THEN** step.
       - Use concrete values taken from the code or its tests in scenarios.
 
-      Write one `specs/<capability-path>/spec.md` per capability in source-map.md.
+      An extract change covers one capability: write exactly one
+      `specs/<capability-path>/spec.md`, using the capability path from the plan.
     requires:
       - source-map
 
@@ -94,6 +96,8 @@ artifacts:
     template: review.md
     instruction: |
       Build the checklist the HUMAN reviewer works through (phase 2).
+      `gate.mjs review` checks this structure before the change may be archived.
+      - Keep the `Reviewer:` line; the reviewer's name goes there.
       - One checkbox per requirement: `- [ ] R<n> <requirement name>` under
         `## 1. Requirements`, in spec order.
       - One checkbox per question: `- [ ] Q<n> <short title>: decision: ...`
@@ -121,8 +125,8 @@ apply:
     - Tick a box only after the reviewer explicitly accepts that item in this
       conversation, or when the reviewer ticked it themselves.
     - When the reviewer asks for a change, edit specs/trace/questions first,
-      show the result, and ask again.
-    - Write the reviewer's decision next to each question.
+      untick every item you changed, show the result, and ask again.
+    - Write the reviewer's decision after `decision:` on each question line.
     Never tick a box on your own judgment. When every box is ticked, tell the
     reviewer that archiving the change makes the spec the migration baseline,
     and archive only after they say so.

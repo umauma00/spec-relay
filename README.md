@@ -26,7 +26,7 @@ GitHub Copilot CLI・VS Code・GitHub Copilot app を想定しています。入
 ## 必要なもの
 
 - Node.js 22.12 以上（OpenSpec の要件）
-- [OpenSpec CLI](https://github.com/Fission-AI/OpenSpec)（`npm install -g @fission-ai/openspec@latest`。1.17.0 で確認）
+- [OpenSpec CLI](https://github.com/Fission-AI/OpenSpec) 1.17.0（`npm install -g @fission-ai/openspec@1.17.0`。テストはこの版で実行）
 - GitHub Copilot（CLI・VS Code・Copilot app のいずれか）
 
 ## 導入
@@ -62,14 +62,16 @@ node <spec-relay>/scripts/setup.mjs ...同じ引数... --apply
 | `openspec/schemas/spec-relay-extract/` | 工程 1・2 のスキーマとテンプレート |
 | `openspec/schemas/spec-relay-port/` | 工程 3 のスキーマとテンプレート |
 | `openspec/config.yaml` | 移行元・移行先の言語とフォルダー（全成果物の生成に使われる） |
-| `.github/skills/openspec-*`、`.github/prompts/opsx-*` | `openspec init --tools github-copilot` が置く OpenSpec 標準のスキルとコマンド |
+| `.github/skills/openspec-*`、`.github/prompts/opsx-*` | `openspec init --tools github-copilot` が置く OpenSpec 標準のスキルとコマンド（propose・explore・update） |
 
-内容の違う既存ファイルは上書きせず、衝突を表示して止まります。
+- 内容の違う既存ファイルがあると、上書きせずに衝突を表示して止まります。`openspec init` が置き換え・削除・編集するファイル（既存の `opsx-*`・`openspec-*`、`openspec/AGENTS.md` など）が既にある場合も、同じく止まります。
+- OpenSpec 標準の apply・archive・sync（スキルとコマンド）は、レビューの確認を通らずにチェックや archive ができてしまうため、導入スクリプトが取り除きます。`openspec update` を実行すると戻るので、その後にもう一度導入スクリプトを実行してください。
 
 ## 守っていること
 
 - **元のコードは書き換えない。** すべてのエージェントにとって読み取り専用です。
-- **仕様の確定は人が決める。** AI は人がチャットで認めた項目だけをチェックし、明示的な承認なしに archive しません。archive の前に、未チェックの項目が残っていないことをコマンドで確かめます。
+- **仕様の確定は人が決める。** AI は人がチャットで認めた項目だけをチェックし、明示的な承認なしに archive しません。archive の前に `scripts/gate.mjs review` で、すべての要件と質問がチェックリストにあり、チェック済みで、質問への判断とレビュー担当の名前が書かれていることを確かめます（`openspec archive --yes` 自体はこれを確かめません）。
+- **実装の前後も確かめる。** port は、ベースライン仕様があることを `gate.mjs port-ready` で確かめてから始め、すべてのタスクの完了を `gate.mjs port-done` で確かめてから archive します。
 - **仕様が契約。** 実装中に元コードと仕様が食い違ったら、AI はどちらかを選ばず人に聞きます。
 
 ## リポジトリの構成
@@ -82,6 +84,7 @@ skills/spec-relay/SKILL.md     オーケストレーターの手順
 openspec-schemas/              移行用の OpenSpec スキーマ
 templates/openspec-config.yaml 移行対象に置く OpenSpec 設定のひな形
 scripts/setup.mjs              導入スクリプト（外部パッケージなし）
+scripts/gate.mjs               承認・実装の前に使う機械的な確認
 tests/                         node:test のテスト（OpenSpec があれば通しの確認も）
 docs/WORKFLOW.md               流れと設計の説明、今後の課題
 ```
@@ -89,8 +92,10 @@ docs/WORKFLOW.md               流れと設計の説明、今後の課題
 ## 開発
 
 ```bash
-npm install -g @fission-ai/openspec@latest   # 通しのテストに使う（なければそのテストは skip）
+npm install -g @fission-ai/openspec@1.17.0   # 通しのテストに使う（なければそのテストは skip と表示）
 npm test
 ```
+
+ライセンスはまだ決めていません（LICENSE は未配置）。
 
 構成と考え方は [code-migration-kit-with-github-copilot](https://github.com/umauma00/code-migration-kit-with-github-copilot) を参考にしています。違いは [docs/WORKFLOW.md](docs/WORKFLOW.md#先行例code-migration-kit-with-github-copilotから引き継いだこと) にあります。

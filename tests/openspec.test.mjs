@@ -2,10 +2,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { main } from '../scripts/setup.mjs';
+import { main, BYPASS_FILES } from '../scripts/setup.mjs';
+import { checkReview, checkPortReady, checkPortDone } from '../scripts/gate.mjs';
+import { tempDir, write, quiet } from './helpers.mjs';
 
 const env = { ...process.env, OPENSPEC_TELEMETRY: '0', NO_COLOR: '1' };
 const shell = process.platform === 'win32';
@@ -17,19 +18,14 @@ function openspec(cwd, ...args) {
   return result.stdout;
 }
 
+const SETUP = ['--source-language', 'Python', '--target-language', 'TypeScript', '--target-root', 'ts'];
+
 function setUp() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-relay-e2e-'));
-  const { log } = console; console.log = () => {};
-  try {
-    assert.equal(main(['--target', dir, '--source-language', 'Python', '--target-language', 'TypeScript', '--target-root', 'ts', '--skip-init', '--apply']), 0);
-  } finally { console.log = log; }
+  const dir = tempDir('spec-relay-e2e-');
+  // Runs the real `openspec init`, with the process env (telemetry is off in CI).
+  assert.equal(quiet(() => main(['--target', dir, ...SETUP, '--apply'])), 0);
   return dir;
 }
-
-const write = (dir, rel, text) => {
-  fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
-  fs.writeFileSync(path.join(dir, rel), text);
-};
 
 const SPEC = `# Spec Delta
 
@@ -48,9 +44,19 @@ The system SHALL return the sum of its two inputs.
 - **THEN** the result is 3
 `;
 
-test('both schemas validate', { skip: !hasOpenspec && 'openspec CLI not installed' }, () => {
+test('setup runs openspec init, keeps the config and removes the gate-bypassing workflows', { skip: !hasOpenspec && 'openspec CLI not installed' }, () => {
   const dir = setUp();
   for (const schema of ['spec-relay-extract', 'spec-relay-port']) openspec(dir, 'schema', 'validate', schema);
+  assert.match(fs.readFileSync(path.join(dir, 'openspec/config.yaml'), 'utf8'), /spec-relay: managed[\s\S]*Source language: Python/);
+  assert.ok(fs.existsSync(path.join(dir, '.github/skills/openspec-propose/SKILL.md')));
+  for (const rel of BYPASS_FILES) assert.ok(!fs.existsSync(path.join(dir, rel)), `${rel} should be removed`);
+  assert.ok(!fs.existsSync(path.join(dir, '.github/skills/openspec-apply-change')));
+
+  // `openspec update` brings them back; running setup again removes them again.
+  openspec(dir, 'update');
+  assert.ok(BYPASS_FILES.some((rel) => fs.existsSync(path.join(dir, rel))));
+  assert.equal(quiet(() => main(['--target', dir, ...SETUP, '--apply'])), 0);
+  for (const rel of BYPASS_FILES) assert.ok(!fs.existsSync(path.join(dir, rel)), `${rel} should be removed again`);
 });
 
 test('extract -> review gate -> archive -> port', { skip: !hasOpenspec && 'openspec CLI not installed' }, () => {
@@ -61,23 +67,26 @@ test('extract -> review gate -> archive -> port', { skip: !hasOpenspec && 'opens
   write(dir, `${change}/specs/calc/spec.md`, SPEC);
   write(dir, `${change}/trace.md`, '# Trace\n');
   write(dir, `${change}/questions.md`, '# Questions\n');
-  write(dir, `${change}/review.md`, '# Review\n\n## 1. Requirements\n- [ ] R1 Add two numbers\n');
+  write(dir, `${change}/review.md`, '# Review\n\nReviewer: Uma\n\n## 1. Requirements\n- [ ] R1 Add two numbers\n');
 
   const status = JSON.parse(openspec(dir, 'status', '--change', 'extract-calc', '--json'));
   assert.ok(status.artifacts.every((a) => a.status === 'done'), JSON.stringify(status.artifacts));
   openspec(dir, 'validate', 'extract-calc', '--strict');
 
-  // The review gate the skill checks before archiving.
-  const remaining = () => JSON.parse(openspec(dir, 'instructions', 'apply', '--change', 'extract-calc', '--json')).progress.remaining;
-  assert.equal(remaining(), 1);
-  write(dir, `${change}/review.md`, '# Review\n\n## 1. Requirements\n- [x] R1 Add two numbers\n');
-  assert.equal(remaining(), 0);
+  // The review gate the skill runs before archiving.
+  assert.equal(checkReview(dir, 'extract-calc').ok, false);
+  assert.equal(checkPortReady(dir, 'calc').ok, false);
+  write(dir, `${change}/review.md`, '# Review\n\nReviewer: Uma\n\n## 1. Requirements\n- [x] R1 Add two numbers\n');
+  assert.deepEqual(checkReview(dir, 'extract-calc'), { ok: true, problems: [] });
 
   openspec(dir, 'archive', 'extract-calc', '--yes');
   assert.match(fs.readFileSync(path.join(dir, 'openspec/specs/calc/spec.md'), 'utf8'), /Requirement: Add two numbers/);
 
+  assert.deepEqual(checkPortReady(dir, 'calc'), { ok: true, problems: [] });
   openspec(dir, 'new', 'change', 'port-calc', '--schema', 'spec-relay-port');
   assert.match(fs.readFileSync(path.join(dir, 'openspec/changes/port-calc/.openspec.yaml'), 'utf8'), /skip_specs: true/);
   const next = JSON.parse(openspec(dir, 'status', '--change', 'port-calc', '--json'));
   assert.deepEqual(next.artifacts.map((a) => a.id), ['proposal', 'design', 'tasks']);
+  write(dir, 'openspec/changes/port-calc/tasks.md', '# Tasks\n\n## 1. Core\n\n- [ ] 1.1 Implement add; verify with its test\n');
+  assert.equal(checkPortDone(dir, 'port-calc').ok, false);
 });
