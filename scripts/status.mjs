@@ -473,7 +473,9 @@ export function parallelPlan(root, capabilities, foundation, problems = []) {
   const piloted = capabilities.some((c) => c.baseline || c.extractArchived);
   const limit = piloted ? ahead : 1;
   const busy = analyzing.length + inReview.length;
-  if (busy > ahead) problems.push(`${busy} capabilities are in analysis or review, more than the ${ahead} allowed ahead of the review; finish reviews before starting new analyses`);
+  // Amendments are not started from nextToAnalyze, so only extract changes can overrun the limit.
+  const extracts = capabilities.filter((c) => c.extract).length;
+  if (extracts > ahead) problems.push(`${extracts} extract changes are in analysis or review, more than the ${ahead} allowed ahead of the review; finish reviews before starting new analyses`);
   const nextToAnalyze = surveyDone
     ? capabilities.filter((c) => c.planned && c.counted && !c.extract && !c.baseline && !c.extractArchived).slice(0, Math.max(0, limit - busy)).map((c) => c.capability)
     : [];

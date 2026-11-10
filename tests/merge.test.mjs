@@ -123,6 +123,19 @@ test('a part whose header differs is a problem; a target without a table gets on
   assert.match(read(dir, 'openspec/changes/survey/glossary.md'), /^Nothing yet\n\n\| Item \| Verdict \| Evidence \|\n/);
 });
 
+test('paths keep every character; a translated crosscheck header is still keyed by id', () => {
+  const dir = repo();
+  write(dir, 'openspec/spec-relay/work/survey/p.md', '| Path | Context | Notes |\n|---|---|---|\n| src/a_b.cs | x | |\n| src/ab.cs | x | |\n| pages/[id].tsx | x | |\n| pages/id.tsx | x | |\n| app/(shop)/page.tsx | x | |\n| app/shop/page.tsx | x | |\n| `src/c.cs` | x | |\n| src/c.cs | x | dup |\n');
+  const inv = merge(dir, { into: 'openspec/changes/survey/inventory.md', parts: ['openspec/spec-relay/work/survey/p.md'] });
+  assert.deepEqual([inv.ok, inv.rows, inv.replaced], [true, 7, 1]);
+
+  const into = 'openspec/changes/extract-billing-invoice/crosscheck.md';
+  write(dir, into, '| 項目 | 判定 | 根拠 |\n|---|---|---|\n| R1 作成する | confirmed | a |\n');
+  write(dir, 'openspec/spec-relay/work/extract-billing-invoice/01.md', '| 項目 | 判定 | 根拠 |\n|---|---|---|\n| **R1** 作成する | mismatch | b |\n| R1 削除する | confirmed | c |\n');
+  const clash = merge(dir, { into, parts: ['openspec/spec-relay/work/extract-billing-invoice'] });
+  assert.match(clash.problems.join('\n'), /R1 names "R1 削除する".*if the name was changed on purpose, delete the old row/);
+});
+
 test('keys and order', () => {
   assert.deepEqual(rowKey('| r3 Name | x |', true), { key: 'R3', name: 'name' });
   assert.deepEqual(rowKey('| `.\\src\\a.cs` | x |', false), { key: 'src/a.cs', name: null });

@@ -85,12 +85,16 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 
 ## 0.2.0 から更新するとき
 
-0.3.0 で、サブエージェントを並列に動かす手順に変わり、調査スキーマの説明文が1か所変わりました。導入スクリプトをもう一度実行するとスキーマの違いを表示して止まるので、`openspec/schemas/spec-relay-*` を削除してから実行し直してください。`openspec/config.yaml` に同時実行数の2行がない場合は、既定の 4 と 2 で動きます。変えたいときは context に次の2行を足します。
+0.3.0 で、サブエージェントを並列に動かす手順に変わり、survey・extract・amend のスキーマの説明文が変わりました。導入スクリプトをもう一度実行するとスキーマの違いを表示して止まるので、`openspec/schemas/spec-relay-*` を削除してから実行し直してください。`openspec/config.yaml` はそのまま残るので、次の2か所を手で直します。
 
-```yaml
-  Parallel subagents (at once, whole session): 16
-  Analyses ahead of review: 2
-```
+- context に同時実行数の2行を足す（ない場合は既定の 4 と 2 で動きます）。
+
+  ```yaml
+    Parallel subagents (at once, whole session): 16
+    Analyses ahead of review: 2
+  ```
+
+- rules の `raise doubts in questions.md.` を `raise doubts as questions for questions.md.` に変える（questions.md はオーケストレーターだけが書くため）。
 
 ## 0.1.0 から更新するとき
 

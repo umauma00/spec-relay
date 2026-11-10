@@ -353,7 +353,7 @@ test('parallel work: one line per other active capability, and what may be analy
   }
   // More in flight than allowed is reported.
   write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Analyses ahead of review: 1\n`);
-  has(status(dir), '2 capabilities are in analysis or review, more than the 1 allowed');
+  has(status(dir), '2 extract changes are in analysis or review, more than the 1 allowed');
 
   // The pilot: until one capability is reviewed, one analysis at a time.
   const fresh = repo({ plan: PLAN });

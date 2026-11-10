@@ -140,17 +140,21 @@ not wash out these instructions.
    Never give a subagent a path under the source root (when the source root is
    `.`, give only paths under `openspec/` and the target root), under
    `openspec/specs/`, or `openspec/config.yaml`.
-   In a git repository, note `git status --porcelain` before a wave and run it
-   again after it. If a
-   path changed that you did not assign (above all under the source root,
-   `openspec/specs/` or a `review.md`), stop, tell the person which, and do
-   not use that wave's results until they decide.
+   Before and after every wave, run `node "<kit>/scripts/gate.mjs" guard` (one
+   hash over every active change's `review.md`, `openspec/specs/` and
+   `openspec/config.yaml`) and, in a git repository, `git status --porcelain
+   --untracked-files=all` (which shows changed tracked source files and new
+   files). If the hash changed, or a path changed that you did not assign,
+   stop, tell the person what changed, and do not use that wave's results
+   until they decide.
 5. **Tables split across subagents** (inventory, crosscheck): each subagent
    writes its rows as a Markdown table to its own part file in the work folder
    (a `|` inside a cell written as `\|`),
    and `node "<kit>/scripts/merge.mjs" --into <artifact> --parts <folder>
    --clean` merges them into the artifact: a later part replaces the row with
-   the same key, and rows you edited yourself stay.
+   the same key, and rows you edited yourself stay. If merge reports one
+   `R<n>` with two names because a requirement was renamed on purpose, delete
+   the old row from the artifact and merge again.
 6. **Mixed waves** are fine when no file is written twice: the implementer of
    one port, analysts of the next capabilities and a checker of another can
    run together.

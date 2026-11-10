@@ -7,6 +7,9 @@
 //   node gate.mjs port-ready --capability <capability>     before creating a port change
 //   node gate.mjs port-done --change port-<capability>     before archiving a port change
 //   node gate.mjs baseline --capability <capability>       the baseline hash a port records
+//   node gate.mjs guard                                    one hash over the files no subagent may write
+//                                                          (every active change's review.md, openspec/specs/,
+//                                                          openspec/config.yaml), to compare before and after a wave
 //
 // Prints { ok, problems } as JSON and exits 0 when ok, 1 when not, 2 on bad usage.
 // Run it from the repository root (or pass --root DIR). Files may use CRLF line
@@ -370,6 +373,24 @@ export function baselineHash(root, capability) {
 
 export const capabilitySegments = (capability) => capability.split(/[\\/]+/).filter((part) => part && part !== '.');
 
+// The files subagents must never write, hashed so the orchestrator can compare
+// the value before and after a wave of subagents. Git cannot show a tick in an
+// untracked or already modified review.md; this can.
+export function guardHash(root) {
+  const changes = path.join(root, 'openspec/changes');
+  const files = [];
+  try {
+    for (const e of fs.readdirSync(changes, { withFileTypes: true })) {
+      if (e.isDirectory() && e.name !== 'archive') files.push(path.join(changes, e.name, 'review.md'));
+    }
+  } catch { /* no changes yet */ }
+  files.push(...walk(path.join(root, 'openspec/specs')), path.join(root, 'openspec/config.yaml'));
+  const lines = files.filter((f) => { try { return fs.statSync(f).isFile(); } catch { return false; } })
+    .map((f) => `${path.relative(root, f).split(path.sep).join('/')}\0${crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex')}`)
+    .sort();
+  return { ok: true, sha256: crypto.createHash('sha256').update(lines.join('\n')).digest('hex'), files: lines.length };
+}
+
 export function checkPortReady(root, capability) {
   const problems = [];
   const parts = capabilitySegments(capability);
@@ -428,6 +449,7 @@ export function main(argv) {
   if (command === 'review' && opts.change) result = checkReview(opts.root, opts.change);
   else if (command === 'port-ready' && opts.capability) result = checkPortReady(opts.root, opts.capability);
   else if (command === 'port-done' && opts.change) result = checkPortDone(opts.root, opts.change);
+  else if (command === 'guard') result = guardHash(opts.root);
   else if (command === 'baseline' && opts.capability) {
     const sha256 = baselineHash(opts.root, opts.capability);
     result = sha256 ? { ok: true, capability: opts.capability, sha256 } : { ok: false, problems: [`no baseline spec for ${opts.capability}`] };
@@ -438,7 +460,7 @@ export function main(argv) {
 }
 
 function usage() {
-  console.error('Usage: node gate.mjs review --change NAME | port-ready --capability PATH | port-done --change NAME | baseline --capability PATH [--root DIR]');
+  console.error('Usage: node gate.mjs review --change NAME | port-ready --capability PATH | port-done --change NAME | baseline --capability PATH | guard [--root DIR]');
   return 2;
 }
 

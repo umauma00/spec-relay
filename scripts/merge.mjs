@@ -57,10 +57,11 @@ export function tables(lines) {
 // recheck that changes the evidence replaces the row; other tables by their
 // first cell read as a path (forward slashes, no leading ./).
 export function rowKey(line, byId) {
-  const first = plain(visible(cellsOf(line)[0] ?? ''));
-  const id = byId ? first.match(ID) : null;
+  const cell = visible(cellsOf(line)[0] ?? '');
+  const id = byId ? plain(cell).match(ID) : null;
   if (id) return { key: `${id[1].toUpperCase()}${Number(id[2])}`, name: norm(id[3]) };
-  return { key: first.replace(/\\/g, '/').replace(/^(\.\/)+/, ''), name: null };
+  // Paths keep every character (my_module.php, [id].tsx, (shop)/page.tsx), as gate.mjs reads them.
+  return { key: cell.replace(/^`(.*)`$/, '$1').trim().replace(/\\/g, '/').replace(/^(\.\/)+/, ''), name: null };
 }
 
 const isPlaceholder = (line) => cellsOf(line).every((c) => visible(c) === '');
@@ -155,14 +156,14 @@ export function merge(root, { into, parts, clean = false }) {
   }
   if (problems.length) return { ok: false, problems };
 
-  const byId = table.names[0] === 'item';
+  const byId = table.names[0] === 'item' || path.basename(into).toLowerCase() === 'crosscheck.md';
   const rows = new Map();
   const claim = (row, where) => {
     const { key, name } = rowKey(row, byId);
     if (!key) { problems.push(`${where}: row has an empty first cell: ${row}`); return null; }
     const old = rows.get(key);
     if (old && name && old.name && old.name !== name) {
-      problems.push(`${where}: ${key} names "${plain(visible(cellsOf(row)[0]))}", but ${old.where} names it "${plain(visible(cellsOf(old.row)[0]))}"; renumber the items or fix the name`);
+      problems.push(`${where}: ${key} names "${plain(visible(cellsOf(row)[0]))}", but ${old.where} names it "${plain(visible(cellsOf(old.row)[0]))}"; renumber the items or fix the name; if the name was changed on purpose, delete the old row from ${old.where === path.basename(into) ? into : old.where} and merge again`);
       return null;
     }
     return { key, name, old };

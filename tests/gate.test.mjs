@@ -347,3 +347,20 @@ test('port-done needs the hash of its own capability', () => {
   write(dir, 'openspec/changes/port-calc-add/proposal.md', `- \`calc/other\` sha256:${baselineHash(dir, 'calc/other')}\n`);
   assert.match(checkPortDone(dir, 'port-calc-add').problems.join(), /no baseline hash for this change's own capability/);
 });
+
+test('guard hashes review.md of active changes, baseline specs and the config, nothing else', async () => {
+  const { guardHash } = await import('../scripts/gate.mjs');
+  const dir = tempDir();
+  write(dir, 'openspec/config.yaml', 'x\n');
+  write(dir, 'openspec/specs/a/b/spec.md', '## Purpose\n');
+  write(dir, 'openspec/changes/extract-a/review.md', '- [ ] R1 a\n');
+  write(dir, 'openspec/changes/extract-a/spec.md', 'draft\n');
+  write(dir, 'openspec/changes/archive/2026-01-01-x/review.md', '- [x] old\n');
+  const before = guardHash(dir);
+  assert.equal(before.files, 3);
+  write(dir, 'openspec/changes/extract-a/spec.md', 'draft 2\n');
+  write(dir, 'openspec/changes/archive/2026-01-01-x/review.md', 'changed\n');
+  assert.equal(guardHash(dir).sha256, before.sha256, 'artifacts and archives may change');
+  write(dir, 'openspec/changes/extract-a/review.md', '- [x] R1 a\n');
+  assert.notEqual(guardHash(dir).sha256, before.sha256, 'a tick changes the hash');
+});
