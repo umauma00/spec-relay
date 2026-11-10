@@ -9,3 +9,6 @@
 
 ## Out of scope
 - <!-- left for a later port -->
+
+## Baseline
+- `<!-- capability -->` sha256:<!-- from gate.mjs baseline -->

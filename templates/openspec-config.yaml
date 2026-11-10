@@ -10,9 +10,13 @@ context: |
   Artifact language: {{ARTIFACT_LANGUAGE}}
   Write all artifacts in the artifact language, but keep OpenSpec structural
   headings and SHALL/MUST keywords in English.
+  The survey (schema spec-relay-survey) splits the source code into DDD bounded
+  contexts and capabilities; the target design (schema spec-relay-target)
+  decides the modules, conventions and verification of the new system.
   Extract changes (schema spec-relay-extract) describe current behavior of the
   source code. Port changes (schema spec-relay-port) implement archived
-  baseline specs in the target language without changing behavior.
+  baseline specs in the target language without changing behavior. Amend
+  changes (schema spec-relay-amend) correct a baseline that misread the code.
 
 rules:
   specs:

@@ -28,7 +28,7 @@ test('plugin, marketplace and package versions match', () => {
 test('agents have names matching their files and valid relative links', () => {
   const dir = 'com.github.copilot/agents';
   const files = fs.readdirSync(path.join(KIT_ROOT, dir));
-  assert.deepEqual(files.sort(), ['spec-relay-analyst.agent.md', 'spec-relay-implementer.agent.md', 'spec-relay-orchestrator.agent.md']);
+  assert.deepEqual(files.sort(), ['spec-relay-analyst.agent.md', 'spec-relay-checker.agent.md', 'spec-relay-implementer.agent.md', 'spec-relay-orchestrator.agent.md']);
   for (const file of files) {
     const text = read(path.join(dir, file));
     const meta = frontmatter(text);
@@ -50,4 +50,13 @@ test('the skill is hidden and the kit files it names exist', () => {
     assert.ok(text.includes(rel.split('/').pop()), `skill does not mention ${rel}`);
     assert.ok(fs.existsSync(path.join(KIT_ROOT, rel)), `${rel} is missing`);
   }
+});
+
+test('the view skill names the renderer, which exists', () => {
+  const text = read('skills/spec-relay-view/SKILL.md');
+  const meta = frontmatter(text);
+  assert.equal(meta.name, 'spec-relay-view');
+  assert.ok(meta.description);
+  assert.ok(text.includes('scripts/render.mjs'));
+  assert.ok(fs.existsSync(path.join(KIT_ROOT, 'scripts/render.mjs')));
 });

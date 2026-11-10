@@ -1,0 +1,125 @@
+name: spec-relay-amend
+version: 1
+description: spec-relay amendment - correct a baseline spec that misread the source code, re-review only what changed, then update the ports that depend on it
+artifacts:
+  - id: reason
+    generates: reason.md
+    description: What the baseline got wrong about the source code, with evidence
+    template: reason.md
+    instruction: |
+      An amendment corrects a baseline spec (`openspec/specs/<capability>/`)
+      that does not describe what the source code does. It never changes the
+      behavior: a wish to fix a bug or improve something is follow-up work after
+      the migration, not an amendment. If that is what is asked, stop and tell
+      the person.
+
+      Sections:
+      - **Found by**: how the mistake surfaced (port test, crosscheck, person).
+      - **What the baseline says**: the requirement(s) and the wording.
+      - **What the source code does**: with path:line evidence for every claim.
+      - **Requirements affected**: the requirement names to modify, add or
+        remove.
+    requires: []
+
+  - id: specs
+    generates: "specs/**/*.md"
+    description: Delta of the baseline spec - only the corrected requirements
+    template: spec.md
+    instruction: |
+      Write the correction as an OpenSpec delta of the capability's baseline
+      spec, at `specs/<capability-path>/spec.md`:
+      - `## MODIFIED Requirements` with the WHOLE corrected requirement (header
+        `### Requirement: <exact existing name>`, description and every
+        scenario). OpenSpec replaces the requirement with this block, and
+        refuses to archive a block that drops a scenario the baseline has
+        (also when the requirement is removed and added again). So keep every
+        existing scenario under its existing name and correct its steps; a
+        scenario that describes behavior the code does not have is rewritten
+        to describe what the code does in that situation. New scenarios may be
+        added.
+      - `## ADDED Requirements` for behavior the baseline missed.
+      - `## REMOVED Requirements` with `### Requirement: <exact name>` and a
+        `**Reason**:` line, for behavior the source code does not have.
+      Same rules as the extract change: language-neutral, SHALL/MUST, concrete
+      scenarios, current behavior only. Include only the requirements listed
+      in reason.md.
+    requires:
+      - reason
+
+  - id: trace
+    generates: trace.md
+    description: Source references of the corrected requirements
+    template: trace.md
+    instruction: |
+      For every MODIFIED or ADDED requirement, where the source code
+      implements it (path:symbol:lines) and existing tests. For REMOVED
+      requirements write "removed". Ports read this file together with the
+      extract change's trace.md; this file wins for the requirements it lists.
+    requires:
+      - specs
+
+  - id: crosscheck
+    generates: crosscheck.md
+    description: Independent AI check of the corrected requirements
+    template: crosscheck.md
+    instruction: |
+      Same as the extract change's crosscheck, for the MODIFIED and ADDED
+      requirements only: give them with trace.md and the cited source files to
+      the `spec-relay-checker` subagent, one row per requirement
+      (`R<n> <name>`), and resolve every row that is not `confirmed`.
+    requires:
+      - trace
+
+  - id: impact
+    generates: impact.md
+    description: Ports that depend on the corrected requirements and what they must do
+    template: impact.md
+    instruction: |
+      List the port changes of this capability (`openspec list --json`, and
+      `openspec/changes/archive/*-port-<capability>`):
+      - **Active port**: the tasks to add or reopen in its tasks.md for each
+        corrected requirement. Its proposal.md records the baseline hash, so
+        `gate.mjs port-done` fails until the port is updated to the new
+        baseline (`gate.mjs baseline --capability <capability>`).
+      - **Archived port**: a new port change with a rerun suffix
+        (`port-<capability>-v2`, `-v3`...) implements the corrected
+        requirements after this amendment is archived.
+      - **None**: nothing to update.
+    requires:
+      - crosscheck
+
+  - id: review
+    generates: review.md
+    description: Human review checklist of the corrected requirements only
+    template: review.md
+    instruction: |
+      Build the checklist the HUMAN reviewer works through.
+      - Keep the `Reviewer:` line.
+      - Under `## 1. Requirements`, one checkbox per requirement in the delta
+        (`- [ ] R<n> <requirement name>`), in delta order, MODIFIED, ADDED and
+        REMOVED alike.
+      - Under `## 2. Impact`, one checkbox that the port updates in impact.md
+        are right.
+      Do not tick any box.
+    requires:
+      - reason
+      - specs
+      - trace
+      - crosscheck
+      - impact
+
+apply:
+  requires: [ review ]
+  tracks: review.md
+  instruction: |
+    Applying this change is the HUMAN REVIEW of the correction. It never edits
+    the source code or target code.
+
+    Render the review page (`render.mjs --change <change>`) and give the person
+    its path. Walk the reviewer through each corrected requirement: show the
+    old wording from the baseline, the new wording, the evidence and the
+    crosscheck verdict, and ask them to accept it or ask for a change.
+    - Tick a box only after the reviewer explicitly accepts that item in this
+      conversation, or when the reviewer ticked it themselves.
+    When every box is ticked and `gate.mjs review` passes, archive only after
+    the reviewer says so. Archiving merges the delta into the baseline spec.

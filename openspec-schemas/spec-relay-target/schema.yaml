@@ -1,0 +1,131 @@
+name: spec-relay-target
+version: 1
+description: spec-relay step 2 - decide once how the new system is built (modules per bounded context, conventions, verification), then gate it on a human review
+artifacts:
+  - id: architecture
+    generates: architecture.md
+    description: Module structure of the new system, one module per bounded context
+    template: architecture.md
+    instruction: |
+      Design the structure of the new system from the archived survey's
+      context-map.md (`openspec/changes/archive/*-survey*/context-map.md`, the
+      newest one). Every port follows this design, so decide it once here.
+
+      Default style: a modular monolith in the manner of Spring Modulith. Use
+      another style only when the person asks for it, and write down why.
+      - One module per bounded context, plus `platform`. A module's folder is
+        its context id.
+      - A module exposes a public API (and the domain events it publishes) and
+        hides everything else. Other modules use only that API or subscribe to
+        those events; they never reach into another module's internals or its
+        tables.
+      - Each table or file has exactly one owning module (from the survey's
+        shared data). Only the owner writes it.
+      - Dependencies between modules follow the context map's relationships
+        and form no cycle. An anti-corruption layer from the map becomes an
+        adapter inside the downstream module.
+      - The boundaries are checked by an automated test that runs with the
+        other tests. Pick the tool of the target language, for example: Java -
+        Spring Modulith `ApplicationModules.verify()` (or ArchUnit); TypeScript
+        - dependency-cruiser or eslint-plugin-boundaries, with an `index.ts` per
+        module as its public API; Python - import-linter contracts; C# -
+        ArchUnitNET or NetArchTest. Name the exact command.
+
+      Sections:
+      - **Style**: the style and, if not the default, why.
+      - **Modules**: table of context, module path under the target root,
+        public API, events published, depends on.
+      - **Data ownership**: table of table/file and owning module.
+      - **Boundary check**: tool, rules and the command that runs them.
+      - **Layout**: the folder tree of the target root.
+    requires: []
+
+  - id: conventions
+    generates: conventions.md
+    description: Rules every port follows - language mapping, frameworks, coding style, commands
+    template: conventions.md
+    instruction: |
+      Decide the rules that every port change follows, so that ports of
+      different capabilities stay consistent. A port's design.md may only add
+      to these rules for its own capability, never contradict them.
+      - **Runtime and frameworks**: language version, frameworks and main
+        libraries, with the reason for each.
+      - **Language mapping**: the semantic differences between the source and
+        target languages and the rule for each: numbers, decimal and rounding;
+        strings, encodings (legacy Shift_JIS or EUC-JP data becomes what?) and
+        collation; dates, times and time zones; null and optional values;
+        errors and exceptions; collections and ordering; concurrency; I/O.
+      - **Coding conventions**: naming, error handling, logging, tests.
+      - **Commands**: build, test, lint and the boundary check, as one-line
+        commands that run in PowerShell on Windows.
+    requires:
+      - architecture
+
+  - id: verification
+    generates: verification.md
+    description: How each context proves the new code behaves like the old one
+    template: verification.md
+    instruction: |
+      Choose, per context, how the port proves it behaves like the source
+      program. Ask the person; offer the lightest level that is enough.
+      - **A - scenario tests** (every context, required): each spec scenario
+        becomes a test in the target language.
+      - **B1 - logic comparison**: call the source code's logic directly,
+        without screens or sign-in (C#: xUnit or NUnit; PHP: PHPUnit; or a
+        small runner script), record inputs and outputs as data files, and run
+        the same inputs through the new code. For contexts with calculations
+        and business rules. Needs the source code to build and run locally.
+      - **B2 - screen operation replay**: record browser operations with
+        Playwright and replay them against the old and the new system. Only for
+        important flows; needs both systems running.
+      - **C - screenshot comparison**: capture the screens of screens.md in the
+        old and the new system and compare them. For screens whose design must
+        stay the same.
+
+      Sections:
+      - **Levels**: table of context, A (always yes), B1, B2, C, notes.
+      - **Running the source program**: what is needed to run it for B1, B2 or
+        C, or "not runnable" (then only A applies).
+      - **Sign-in**: for B2 and C, the test account comes from environment
+        variables the person sets (name the variables). Never write a
+        password, token or connection string into any file.
+      - **Recorded data**: where recorded inputs, outputs and screenshots live
+        (under the target root's tests), and how to re-record them.
+    requires:
+      - architecture
+
+  - id: review
+    generates: review.md
+    description: Human review checklist of the target design
+    template: review.md
+    instruction: |
+      Build the checklist the HUMAN reviewer works through.
+      - Keep the `Reviewer:` line.
+      - Under `## 1. Architecture`: one checkbox for the style, one per module
+        (`- [ ] A<n> <module>`), one for data ownership, one for the boundary
+        check.
+      - Under `## 2. Conventions`: one checkbox per section of conventions.md.
+      - Under `## 3. Verification`: one checkbox per context's levels, and one
+        for sign-in and recorded data.
+      Do not tick any box. Only the reviewer decides.
+    requires:
+      - architecture
+      - conventions
+      - verification
+
+apply:
+  requires: [ review ]
+  tracks: review.md
+  instruction: |
+    Applying this change is the HUMAN REVIEW of the target design. It writes no
+    code.
+
+    Render the review page (`render.mjs --change <change>`) and give the person
+    its path. Walk the reviewer through review.md one item at a time and ask
+    them to accept it or ask for a change.
+    - Tick a box only after the reviewer explicitly accepts that item in this
+      conversation, or when the reviewer ticked it themselves.
+    - When the reviewer asks for a change, edit the artifacts, untick every
+      item you changed, render again, and ask again.
+    When every box is ticked and `gate.mjs review` passes, archive only after
+    the reviewer says so.

@@ -23,13 +23,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkboxes, readIf, capabilitySegments, checkReview } from './gate.mjs';
+import { checkboxes, readIf, capabilitySegments, checkReview, baseName, archivedChange, baselineHash } from './gate.mjs';
 
 const PLAN = 'openspec/spec-relay/plan.md';
 // Used when a change's schema file cannot be read. The schema's own list wins,
 // so an artifact added to a schema later is counted without touching this file.
 const DEFAULT_ARTIFACTS = {
-  'spec-relay-extract': ['source-map.md', 'specs/**/*.md', 'trace.md', 'questions.md', 'review.md'],
+  'spec-relay-survey': ['inventory.md', 'context-map.md', 'glossary.md', 'capabilities.md', 'review.md'],
+  'spec-relay-target': ['architecture.md', 'conventions.md', 'verification.md', 'review.md'],
+  'spec-relay-extract': ['source-map.md', 'specs/**/*.md', 'screens.md', 'trace.md', 'crosscheck.md', 'questions.md', 'review.md'],
+  'spec-relay-amend': ['reason.md', 'specs/**/*.md', 'trace.md', 'crosscheck.md', 'impact.md', 'review.md'],
   'spec-relay-port': ['proposal.md', 'design.md', 'tasks.md'],
 };
 // Lowercase ASCII kebab-case segments, as the skill asks capabilities to be named.
@@ -40,6 +43,9 @@ const changeKey = (capability) => capability.split('/').join('-');
 const WORDS = {
   en: {
     analyze: 'Analyze', review: 'Review', implement: 'Implement', capability: 'Capability', group: 'Group',
+    survey: 'Survey: map the bounded contexts', target: 'Target design: modules, conventions, verification',
+    amending: (n, of) => `amendment under review ${n}/${of}`,
+    amendedAfterPort: 'the spec was amended after the port; port it again',
     overall: (done, total, reviewed) => `Overall: ${done} of ${total} capabilities ported (${reviewed} with a reviewed spec)`,
     noPlan: 'Overall: no capability list in the plan yet',
     allDone: (total) => `Overall: all ${total} capabilities ported`,
@@ -58,6 +64,9 @@ const WORDS = {
   },
   ja: {
     analyze: '解析', review: 'レビュー', implement: '実装', capability: '機能', group: 'グループ',
+    survey: '調査: コンテキストの地図', target: '移行先の設計: モジュール・規約・比べ方',
+    amending: (n, of) => `仕様の修正をレビュー中 ${n}/${of}`,
+    amendedAfterPort: '移行後に仕様が修正された・再実装が必要',
     overall: (done, total, reviewed) => `全体: ${total}機能のうち${done}機能が移行済み（仕様確定 ${reviewed}）`,
     noPlan: '全体: 計画に機能の一覧がまだありません',
     allDone: (total) => `全体: ${total}機能すべて移行済み`,
@@ -81,6 +90,11 @@ const WORDS = {
 // with the reason in `detail`, so at most one step is in progress and a waiting
 // step never looks as if the agent were busy with it. `marks` names the summary
 // count a completed step adds to.
+export const FOUNDATION = [
+  { id: 'survey', change: 'survey', schema: 'spec-relay-survey' },
+  { id: 'target', change: 'target-design', schema: 'spec-relay-target' },
+];
+
 export const STEPS = [
   {
     id: 'analyze', owner: 'agent',
@@ -97,6 +111,12 @@ export const STEPS = [
   {
     id: 'review', owner: 'person', marks: 'reviewed',
     state: (c, earlier) => {
+      if (c.amend) {
+        const { done, total } = c.amend.review;
+        if (c.amend.artifacts.done < c.amend.artifacts.total) return { status: 'in-progress', detail: ['writing', c.amend.artifacts.done, c.amend.artifacts.total] };
+        if (c.amend.gate) return { status: 'not-started', waiting: true, detail: ['waitingArchive'] };
+        return { status: 'not-started', waiting: true, detail: ['amending', done, total] };
+      }
       if (c.extract) {
         if (earlier.analyze.status !== 'completed') return { status: 'not-started' };
         const { done, total } = c.extract.review;
@@ -111,7 +131,7 @@ export const STEPS = [
     id: 'implement', owner: 'agent', marks: 'ported',
     state: (c) => {
       // A port opened while the extract is still active waits for that review (gate.mjs port-ready).
-      if (c.port && c.extract) return { status: 'not-started' };
+      if (c.port && (c.extract || c.amend)) return { status: 'not-started' };
       if (c.port) {
         if (!c.port.tasks || c.port.tasks.total === 0) return { status: 'in-progress', detail: ['designing'] };
         const { done, total } = c.port.tasks;
@@ -119,6 +139,7 @@ export const STEPS = [
         if (done === 0) return { status: 'not-started', waiting: true, detail: ['waitingDesign', total] };
         return { status: 'in-progress', detail: ['tasks', done, total] };
       }
+      if (c.portArchived && c.portStale) return { status: 'not-started', detail: ['amendedAfterPort'] };
       return c.portArchived ? { status: 'completed' } : { status: 'not-started' };
     },
   },
@@ -227,8 +248,11 @@ export function language(root, requested) {
 export function collect(root) {
   const problems = [];
   const changes = path.join(root, 'openspec/changes');
-  const active = dirs(changes).filter((name) => name !== 'archive');
-  const archived = dirs(path.join(changes, 'archive')).map((name) => name.replace(/^\d{4}-\d{2}-\d{2}-/, ''));
+  // Reruns carry a -v<n> suffix (port-billing-invoice-v2); they count as their base name.
+  const activeNames = dirs(changes).filter((name) => name !== 'archive');
+  const activeDir = new Map(activeNames.map((name) => [baseName(name), name]));
+  const active = [...activeDir.keys()];
+  const archived = dirs(path.join(changes, 'archive')).map((name) => baseName(name.replace(/^\d{4}-\d{2}-\d{2}-/, '')));
   const plan = read(root, path.join(root, PLAN), problems);
   const parsed = plan === null ? { list: [], skipped: [] } : parsePlan(plan);
   const planned = parsed.list;
@@ -244,13 +268,14 @@ export function collect(root) {
     const key = changeKey(capability);
     if (keys.has(key)) problems.push(`capabilities ${keys.get(key)} and ${capability} share the change names extract-${key} and port-${key}; rename one`);
     else keys.set(key, capability);
+    if (/-v\d+$/.test(key)) problems.push(`capability ${capability} gives change names ending like a rerun suffix (extract-${key}); rename it`);
   }
 
   // Capabilities that only openspec/ knows about come after the plan's, by name.
   const known = new Set(keys.keys());
   const extra = new Set(specCapabilities(path.join(root, 'openspec/specs')));
   for (const name of active.filter((n) => n.startsWith('extract-'))) {
-    const specs = specCapabilities(path.join(changes, name, 'specs'));
+    const specs = specCapabilities(path.join(changes, activeDir.get(name), 'specs'));
     for (const cap of specs) {
       extra.add(cap);
       if (`extract-${changeKey(cap)}` !== name) problems.push(`change ${name} has its spec at specs/${cap}/spec.md; the path must be the capability the change is named after`);
@@ -262,7 +287,7 @@ export function collect(root) {
   }
   // An active change known nowhere else still shows, under its change name.
   for (const name of active) {
-    const key = name.match(/^(?:extract|port)-(.+)$/)?.[1];
+    const key = name.match(/^(?:extract|amend|port)-(.+)$/)?.[1];
     if (key && !known.has(key)) { known.add(key); all.push({ capability: key, group: null, planned: false }); }
   }
 
@@ -274,18 +299,29 @@ export function collect(root) {
       baseline: isFile(path.join(root, 'openspec/specs', ...parts, 'spec.md')),
       extractArchived: archived.includes(`extract-${key}`),
       portArchived: archived.includes(`port-${key}`),
-      extract: null, port: null,
+      portStale: false,
+      extract: null, amend: null, port: null,
     };
-    if (active.includes(`extract-${key}`)) {
-      const dir = path.join(changes, `extract-${key}`);
-      c.extract = {
-        artifacts: artifactCount(root, dir, 'spec-relay-extract'),
+    // A port archived before an amendment changed the baseline is not done: the
+    // hash its proposal recorded no longer matches (gate.mjs port-done's check).
+    if (c.portArchived) {
+      const proposal = readIf(path.join(archivedChange(root, `port-${key}`) ?? '', 'proposal.md'), []) ?? '';
+      const now = baselineHash(root, entry.capability);
+      const recorded = [...proposal.matchAll(/`([^`]+)`\s*sha256:\s*([0-9a-f]{64})/gi)].find(([, cap]) => changeKey(capabilitySegments(cap).join('/')) === key);
+      c.portStale = Boolean(recorded && now && recorded[2].toLowerCase() !== now);
+    }
+    for (const kind of ['extract', 'amend']) {
+      if (!active.includes(`${kind}-${key}`)) continue;
+      const name = activeDir.get(`${kind}-${key}`);
+      const dir = path.join(changes, name);
+      c[kind] = {
+        artifacts: artifactCount(root, dir, `spec-relay-${kind}`),
         review: counts(read(root, path.join(dir, 'review.md'), problems)),
-        gate: checkReview(root, `extract-${key}`).ok,
+        gate: checkReview(root, name).ok,
       };
     }
     if (active.includes(`port-${key}`)) {
-      const tasks = read(root, path.join(changes, `port-${key}`, 'tasks.md'), problems);
+      const tasks = read(root, path.join(changes, activeDir.get(`port-${key}`), 'tasks.md'), problems);
       c.port = { tasks: tasks === null ? null : counts(tasks) };
     }
     if (c.extractArchived && !c.baseline && !c.extract) {
@@ -296,13 +332,26 @@ export function collect(root) {
     c.steps = {};
     for (const step of STEPS) c.steps[step.id] = step.state(c, c.steps);
     for (const step of STEPS.filter((s) => s.marks)) c[step.marks] = c.steps[step.id].status === 'completed';
-    c.active = Boolean(c.extract || c.port);
+    c.active = Boolean(c.extract || c.amend || c.port);
     c.finished = STEPS.every((step) => c.steps[step.id].status === 'completed') && !c.active;
     // With a plan, what is not in it is shown but not counted (an active change on it is reported above).
     c.counted = planned.length === 0 || entry.planned;
     return c;
   });
-  return { capabilities, problems: [...new Set(problems)], plan: plan !== null, planned: planned.length, skipped: parsed.skipped.length };
+  // Project-wide steps before any capability: the survey and the target design.
+  const foundation = FOUNDATION.map(({ id, change, schema }) => {
+    if (active.includes(change)) {
+      const name = activeDir.get(change);
+      const dir = path.join(changes, name);
+      const artifacts = artifactCount(root, dir, schema);
+      if (artifacts.done < artifacts.total) return { id, status: 'in-progress', detail: ['writing', artifacts.done, artifacts.total] };
+      if (checkReview(root, name).ok) return { id, status: 'not-started', waiting: true, owner: 'person', detail: ['waitingArchive'] };
+      const review = counts(read(root, path.join(dir, 'review.md'), problems));
+      return { id, status: 'not-started', waiting: true, owner: 'person', detail: ['waitingReview', review.done, review.total] };
+    }
+    return archived.includes(change) ? { id, status: 'completed' } : { id, status: 'not-started' };
+  });
+  return { capabilities, foundation, problems: [...new Set(problems)], plan: plan !== null, planned: planned.length, skipped: parsed.skipped.length };
 }
 
 function pickCurrent(capabilities, requested) {
@@ -322,7 +371,7 @@ const say = (words, detail) => {
 
 export function status(root, { capability, language: lang = 'en' } = {}) {
   const words = WORDS[lang] ?? WORDS.en;
-  const { capabilities, problems, plan, planned, skipped } = collect(root);
+  const { capabilities, foundation, problems, plan, planned, skipped } = collect(root);
   const counted = capabilities.filter((c) => c.counted);
   const total = counted.length;
   const ported = counted.filter((c) => c.ported).length;
@@ -330,17 +379,29 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
   const current = pickCurrent(capabilities, capability);
   const unknown = Boolean(capability && !current);
   if (unknown) problems.push(`capability not found: ${capability}`);
-  const finished = total > 0 && counted.every((c) => c.finished) && !capabilities.some((c) => c.active) && !(plan && planned === 0) && skipped === 0;
+  const finished = total > 0 && foundation.every((f) => f.status === 'completed') && counted.every((c) => c.finished) && !capabilities.some((c) => c.active) && !(plan && planned === 0) && skipped === 0;
 
   const overallTitle = (plan && planned === 0) || total === 0 ? words.noPlan : finished ? words.allDone(total) : words.overall(ported, total, reviewed);
   const todoList = [{ id: 1, key: 'overall', title: overallTitle, description: '', status: finished ? 'completed' : 'not-started' }];
   let here = null;
-  if (current) {
+  // Until the survey and the target design are archived, they are the work.
+  const foundationOpen = foundation.some((f) => f.status !== 'completed');
+  if (foundationOpen) {
+    foundation.forEach((f, i) => {
+      const detail = say(words, f.detail);
+      todoList.push({ id: i + 2, key: f.id, title: `${words[f.id]}${detail ? (lang === 'ja' ? `【${detail}】` : ` [${detail}]`) : ''}`, description: f.waiting ? words.person : '', status: f.status });
+      if (!here && f.status !== 'completed') here = { capability: null, step: f.id, owner: f.waiting ? 'person' : 'agent', ...(f.waiting ? { waiting: true } : {}) };
+    });
+  }
+  // Before the survey and target design, a capability's steps show only when asked
+  // for (a project that started on an earlier kit version, for example).
+  if (current && (!foundationOpen || capability)) {
+    const first = todoList.length + 1;
     STEPS.forEach((step, i) => {
       const state = current.steps[step.id];
       const detail = say(words, state.detail);
       todoList.push({
-        id: i + 2,
+        id: first + i,
         key: `${current.capability}:${step.id}`,
         title: `${current.capability}: ${words[step.id]}${detail ? (lang === 'ja' ? `【${detail}】` : ` [${detail}]`) : ''}`,
         description: step.owner === 'person' ? words.person : '',
@@ -352,6 +413,7 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
   return {
     plan, total, ported, reviewed,
     current: here,
+    foundation: foundation.map(({ id, status: st }) => ({ id, status: st })),
     active: capabilities.filter((c) => c.active).map((c) => c.capability),
     todoList,
     capabilities: capabilities.map(({ capability: name, group, counted: isCounted, steps }) => ({ capability: name, group, ...(isCounted ? {} : { counted: false }), steps })),
@@ -363,7 +425,7 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
 
 export function checklist(report, { problems = false } = {}) {
   const words = WORDS[report.language] ?? WORDS.en;
-  const hereKey = report.current ? `${report.current.capability}:${report.current.step}` : null;
+  const hereKey = report.current ? (report.current.capability ? `${report.current.capability}:${report.current.step}` : report.current.step) : null;
   const lines = report.todoList.map((item) => `- [${item.status === 'completed' ? 'x' : ' '}] ${item.key === hereKey ? '▶ ' : ''}${item.title}${item.key === hereKey ? ` ← ${words.current}` : ''}`);
   if (problems && report.problems.length) lines.push('', `${words.problems}:`, ...report.problems.map((p) => `- ${p}`));
   return lines.join('\n');

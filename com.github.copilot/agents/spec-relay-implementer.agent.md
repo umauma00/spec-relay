@@ -14,10 +14,16 @@ results, and anything left as `TODO(port)`.
   source references in the change's design.md.
 - Before anything else, check that the baseline spec exists at
   `openspec/specs/<capability>/spec.md`. If it does not, stop and report it.
-- Write files only under the target root named in `openspec/config.yaml`.
+- Write files only under the target root named in `openspec/config.yaml`, and
+  only inside the module of this capability's context and its tests. Use other
+  modules only through their public API or events (the archived target
+  design's architecture.md), and follow its conventions.md.
   Never edit the source root, `openspec/specs/` or the change's artifacts other
   than ticking the tasks you completed in tasks.md.
 - When the source code and the spec disagree, stop and report it instead of
   choosing.
 - Write the tests that come from the spec scenarios together with the code,
-  and tick a task only after its verification passes.
+  and the comparison tests design.md asks for (B1, B2, C). Tick a task only
+  after its verification passes, and run the boundary check before you report.
+- Never write a password, token or connection string into a file; sign-in
+  for comparisons comes from the environment variables verification.md names.

@@ -1,6 +1,6 @@
 name: spec-relay-extract
 version: 1
-description: spec-relay phase 1-2 - extract language-neutral specs from the source code, then gate them on a human review
+description: spec-relay steps 3-4 - extract language-neutral specs from the source code, then gate them on a human review
 artifacts:
   - id: source-map
     generates: source-map.md
@@ -33,7 +33,8 @@ artifacts:
     instruction: |
       Write the CURRENT behavior of the source code as an OpenSpec delta with
       `## ADDED Requirements`. This change creates the baseline spec that the
-      new implementation in the target language must satisfy.
+      new implementation in the target language must satisfy. Use the terms of
+      the context's glossary (archived survey, glossary.md).
 
       Describe behavior, not code:
       - Observable inputs, outputs, side effects, error conditions and limits.
@@ -58,6 +59,37 @@ artifacts:
     requires:
       - source-map
 
+  - id: screens
+    generates: screens.md
+    description: The screens of this capability as they look today - items, layout, wording, transitions
+    template: screens.md
+    instruction: |
+      Record every screen (web page, form, dialog, report, printed output) of
+      this capability as it is today, so the new system can keep the same
+      design. Behavior (validation rules, calculations) belongs in the specs;
+      this file holds what the user sees.
+
+      One `### Screen: <name>` per screen, with:
+      - **Entry**: URL, form or menu path, and the source file (path:symbol).
+      - **Layout**: the regions from top to bottom and left to right.
+      - **Items**: table of label (exact text), kind (text box, select,
+        button, label, grid column...), required, format and limits, default,
+        and read-only or editable.
+      - **Actions**: buttons, links and keys, and what each does.
+      - **Messages**: every message, title and confirmation, word for word,
+        with when it appears.
+      - **Transitions**: where each action leads.
+      - **Screenshot**: the path of a screenshot under
+        `openspec/spec-relay/screens/` if the person provided one; otherwise
+        "none". Never invent one.
+      Copy labels and messages exactly from the source (templates, resource
+      files, string literals), including full-width characters and spacing.
+
+      If the capability has no screens (a batch job, a library), write
+      `None` under the heading.
+    requires:
+      - source-map
+
   - id: trace
     generates: trace.md
     description: Trace from each requirement to the source code that implements it
@@ -65,7 +97,7 @@ artifacts:
     instruction: |
       For EVERY requirement in the specs, list where the source code implements
       it: repository-relative path with forward slashes, symbol, and line range
-      when stable. Phase 3
+      when stable. Step 5
       implementers read the original logic through this file, so make each
       reference precise enough to open directly.
 
@@ -74,6 +106,36 @@ artifacts:
       move the requirement into questions.md.
     requires:
       - specs
+      - screens
+
+  - id: crosscheck
+    generates: crosscheck.md
+    description: An independent AI check of every requirement and screen against the source code
+    template: crosscheck.md
+    instruction: |
+      An INDEPENDENT check before the human review, so the person spends their
+      attention on decisions instead of finding extraction mistakes. Give this
+      to the `spec-relay-checker` subagent: it receives only specs, screens.md,
+      trace.md and the source files they cite, never the analyst's notes, and
+      it does not see this change's earlier drafts.
+
+      The checker opens every trace reference and decides for each requirement
+      and each screen:
+      - `confirmed`: the source code does what the spec or screen says,
+        including every scenario's values.
+      - `mismatch`: the code does something else. Evidence: the line and what it
+        really does.
+      - `unclear`: the code does not settle it (configuration, data,
+        unreachable branch).
+
+      One table row per requirement (`R<n> <name>`, in spec order) and per
+      screen (`S<n> <name>`), with verdict and evidence (path:line).
+      Then resolve every row that is not `confirmed`: fix the spec, screens or
+      trace and have the checker check that row again, or move it to
+      questions.md and write `question Q<n>` as its verdict. `gate.mjs review`
+      fails while any row is missing, `mismatch` or `unclear`.
+    requires:
+      - trace
 
   - id: questions
     generates: questions.md
@@ -91,45 +153,56 @@ artifacts:
 
       Give each item an id (Q1, Q2, ...), the related requirement and the
       source reference. Write "None" under a heading with no items.
+      Include every crosscheck row that was resolved as `question Q<n>`.
     requires:
-      - specs
+      - crosscheck
 
   - id: review
     generates: review.md
     description: Human review checklist; the change may be archived only when every box is ticked by the reviewer
     template: review.md
     instruction: |
-      Build the checklist the HUMAN reviewer works through (phase 2).
+      Build the checklist the HUMAN reviewer works through (step 4).
       `gate.mjs review` checks this structure before the change may be archived.
       - Keep the `Reviewer:` line; the reviewer's name goes there.
       - One checkbox per requirement: `- [ ] R<n> <requirement name>` under
         `## 1. Requirements`, in spec order.
+      - One checkbox per screen: `- [ ] S<n> <screen name>` under
+        `## 2. Screens`, in screens.md order (leave the heading empty when
+        screens.md says None).
       - One checkbox per question: `- [ ] Q<n> <short title>: decision: ...`
-        under `## 2. Questions`. Leave the decision blank.
-      - Under `## 3. Coverage`, one checkbox that the source map covers the
+        under `## 3. Questions`. Leave the decision blank.
+      - Under `## 4. Coverage`, one checkbox that the source map covers the
         capability and one that every requirement has a trace entry.
 
       Do not tick any box. Only the reviewer decides; see the apply instruction.
     requires:
       - source-map
       - specs
+      - screens
       - trace
+      - crosscheck
       - questions
 
 apply:
   requires: [ review ]
   tracks: review.md
   instruction: |
-    Applying this change is the HUMAN REVIEW (spec-relay phase 2). It never
+    Applying this change is the HUMAN REVIEW (spec-relay step 4). It never
     edits the source code or writes target-language code.
 
+    Render the review page first (`render.mjs --change <change>`) and give the
+    person its path: it shows each requirement with its scenarios, the source
+    lines and the crosscheck verdict. The reviewer may review in this
+    conversation, or in the files or a pull request and tell you when done.
     Walk the reviewer through review.md one item at a time: show the
-    requirement (or question) with its trace entry, and ask the reviewer to
-    accept it, ask for a change, or record a decision.
+    requirement (or screen, or question) with its trace entry, and ask the
+    reviewer to accept it, ask for a change, or record a decision.
     - Tick a box only after the reviewer explicitly accepts that item in this
       conversation, or when the reviewer ticked it themselves.
-    - When the reviewer asks for a change, edit specs/trace/questions first,
-      untick every item you changed, show the result, and ask again.
+    - When the reviewer asks for a change, edit specs/screens/trace/questions
+      first, have the checker check the changed rows again, untick every item
+      you changed, render again, and ask again.
     - Write the reviewer's decision after `decision:` on each question line.
     Never tick a box on your own judgment. When every box is ticked, tell the
     reviewer that archiving the change makes the spec the migration baseline,

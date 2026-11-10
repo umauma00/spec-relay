@@ -1,10 +1,18 @@
 ## Structure
-<!-- target modules/files and what each owns -->
+<!-- module of this context (architecture.md), files, public API additions, events -->
 
 ## Language mapping
-| Topic | Source behavior | Target rule |
+<!-- only additions to conventions.md; "None" if none -->
+
+## Screens
+| Screen (screens.md) | Target page or form | How the design is kept |
 |---|---|---|
-| <!-- numbers / strings / dates / null / errors / collections / concurrency / I/O --> | | |
+| <!-- --> | <!-- --> | <!-- --> |
+
+## Verification
+| Level | Covers |
+|---|---|
+| A scenario tests | <!-- every scenario --> |
 
 ## Source references
 | Requirement | Source (from trace.md) |
