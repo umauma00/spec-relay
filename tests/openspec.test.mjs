@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { main, bypassFiles } from '../scripts/setup.mjs';
+import { main, bypassFiles, STUB_MARKER } from '../scripts/setup.mjs';
 import { checkReview, checkPortReady, checkPortDone } from '../scripts/gate.mjs';
 import { tempDir, write, quiet } from './helpers.mjs';
 
@@ -50,13 +50,14 @@ test('setup runs openspec init, keeps the config and removes the gate-bypassing 
   assert.match(fs.readFileSync(path.join(dir, 'openspec/config.yaml'), 'utf8'), /spec-relay: managed[\s\S]*Source language: Python/);
   assert.ok(fs.existsSync(path.join(dir, '.github/skills/openspec-propose/SKILL.md')));
   assert.deepEqual(bypassFiles(dir), []);
-  for (const rel of ['.github/skills/openspec-apply-change', '.github/skills/openspec-archive-change', '.github/prompts/opsx-archive.prompt.md']) {
-    assert.ok(!fs.existsSync(path.join(dir, rel)), `${rel} should be removed`);
+  for (const rel of ['.github/skills/openspec-apply-change/SKILL.md', '.github/skills/openspec-archive-change/SKILL.md', '.github/prompts/opsx-archive.prompt.md']) {
+    assert.ok(fs.readFileSync(path.join(dir, rel), 'utf8').includes(STUB_MARKER), `${rel} should be a stub`);
   }
 
-  // `openspec update` brings them back; running setup again removes them again.
+  // The stubs keep the files in place, so `openspec update` never narrows the
+  // person's global profile. If update restores a workflow, setup disables it again.
   openspec(dir, 'update');
-  assert.ok(bypassFiles(dir).length >= 6, 'openspec update should restore the workflows');
+  assert.ok(fs.existsSync(path.join(dir, '.github/skills/openspec-archive-change/SKILL.md')));
   assert.equal(quiet(() => main(['--target', dir, ...SETUP, '--apply'])), 0);
   assert.deepEqual(bypassFiles(dir), []);
 });

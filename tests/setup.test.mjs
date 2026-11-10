@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { main, parseArgs, plan, CONFIG_MARKER, KIT_ROOT } from '../scripts/setup.mjs';
+import { main, parseArgs, plan, CONFIG_MARKER, KIT_ROOT, STUB_MARKER } from '../scripts/setup.mjs';
 import { tempDir, write, quiet } from './helpers.mjs';
 
 const LANGS = ['--source-language', 'C#', '--target-language', 'TypeScript'];
@@ -114,7 +114,7 @@ test('a failed openspec init removes the files the run created, so a re-run star
   assert.equal(plan(parseArgs(['--target', dir, ...BASE])).runInit, true);
 });
 
-test('a re-run removes only OpenSpec-generated apply/archive/sync workflows', () => {
+test('a re-run disables only OpenSpec-generated apply/archive/sync workflows', () => {
   const dir = tempDir();
   quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply']));
   write(dir, '.github/prompts/opsx-apply.prompt.md', 'Run openspec instructions apply\n');
@@ -122,8 +122,10 @@ test('a re-run removes only OpenSpec-generated apply/archive/sync workflows', ()
   write(dir, '.github/skills/openspec-archive-change/SKILL.md', 'metadata:\n  generatedBy: "1.17.0"\n');
   write(dir, '.github/skills/openspec-propose/SKILL.md', 'metadata:\n  generatedBy: "1.17.0"\n');
   assert.equal(quiet(() => main(['--target', dir, ...BASE, '--apply'])), 0);
-  assert.ok(!fs.existsSync(path.join(dir, '.github/prompts/opsx-apply.prompt.md')));
-  assert.ok(!fs.existsSync(path.join(dir, '.github/skills/openspec-archive-change')));
-  assert.ok(fs.existsSync(path.join(dir, '.github/prompts/opsx-archive.prompt.md')));
-  assert.ok(fs.existsSync(path.join(dir, '.github/skills/openspec-propose/SKILL.md')));
+  const read = (rel) => fs.readFileSync(path.join(dir, rel), 'utf8');
+  assert.ok(read('.github/prompts/opsx-apply.prompt.md').includes(STUB_MARKER));
+  assert.match(read('.github/skills/openspec-archive-change/SKILL.md'), /name: openspec-archive-change[\s\S]*spec-relay-orchestrator/);
+  assert.equal(read('.github/prompts/opsx-archive.prompt.md'), 'my own notes\n');
+  assert.match(read('.github/skills/openspec-propose/SKILL.md'), /generatedBy/);
+  assert.equal(plan(parseArgs(['--target', dir, ...BASE])).steps.filter((st) => st.action === 'disable').length, 0);
 });

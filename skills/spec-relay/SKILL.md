@@ -49,8 +49,9 @@ need the reasoning behind a step.
    without `--apply`, show the plan, and run it again with `--apply` after the
    person agrees. On a conflict, show it and ask how to resolve it; never
    overwrite, move or delete the person's files to get past it.
-   Setup removes OpenSpec's generic apply, archive and sync workflows because
-   they skip the review gate. `openspec update` adds them back; run setup again
+   Setup replaces OpenSpec's generic apply, archive and sync workflows with
+   stubs that point here, because they skip the review gate. `openspec update`
+   may restore them; run setup again
    after it.
 5. Commit nothing on your own. Suggest a commit when setup is done.
 
