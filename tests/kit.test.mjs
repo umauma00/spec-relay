@@ -28,7 +28,7 @@ test('plugin, marketplace and package versions match', () => {
 test('agents have names matching their files and valid relative links', () => {
   const dir = 'com.github.copilot/agents';
   const files = fs.readdirSync(path.join(KIT_ROOT, dir));
-  assert.deepEqual(files.sort(), ['spec-relay-analyst.agent.md', 'spec-relay-implementer.agent.md', 'spec-relay-orchestrator.agent.md']);
+  assert.deepEqual(files.sort(), ['spec-relay-analyst.agent.md', 'spec-relay-checker.agent.md', 'spec-relay-implementer.agent.md', 'spec-relay-orchestrator.agent.md']);
   for (const file of files) {
     const text = read(path.join(dir, file));
     const meta = frontmatter(text);

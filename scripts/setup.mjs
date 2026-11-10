@@ -278,7 +278,7 @@ export function main(argv) {
     fs.writeFileSync(file, stubFor(file));
     if (willInit) console.log(`disabled ${path.relative(opts.target, file)}`);
   }
-  console.log('\nspec-relay is set up. Select the spec-relay orchestrator agent to start phase 1.');
+  console.log('\nspec-relay is set up. Select the spec-relay orchestrator agent to start with the survey (step 1).');
   return 0;
 }
 

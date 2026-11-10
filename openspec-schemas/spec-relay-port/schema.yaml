@@ -1,6 +1,6 @@
 name: spec-relay-port
 version: 1
-description: spec-relay phase 3 - implement reviewed baseline specs in the target language, reading the original code for detailed logic
+description: spec-relay step 5 - implement reviewed baseline specs in the target language, reading the original code for detailed logic
 artifacts:
   - id: proposal
     generates: proposal.md

@@ -1,6 +1,6 @@
 name: spec-relay-extract
 version: 1
-description: spec-relay phase 1-2 - extract language-neutral specs from the source code, then gate them on a human review
+description: spec-relay steps 3-4 - extract language-neutral specs from the source code, then gate them on a human review
 artifacts:
   - id: source-map
     generates: source-map.md
@@ -162,7 +162,7 @@ artifacts:
     description: Human review checklist; the change may be archived only when every box is ticked by the reviewer
     template: review.md
     instruction: |
-      Build the checklist the HUMAN reviewer works through (phase 2).
+      Build the checklist the HUMAN reviewer works through (step 4).
       `gate.mjs review` checks this structure before the change may be archived.
       - Keep the `Reviewer:` line; the reviewer's name goes there.
       - One checkbox per requirement: `- [ ] R<n> <requirement name>` under
@@ -188,7 +188,7 @@ apply:
   requires: [ review ]
   tracks: review.md
   instruction: |
-    Applying this change is the HUMAN REVIEW (spec-relay phase 2). It never
+    Applying this change is the HUMAN REVIEW (spec-relay step 4). It never
     edits the source code or writes target-language code.
 
     Render the review page first (`render.mjs --change <change>`) and give the
