@@ -75,6 +75,7 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 - **仕様の確定は人が決める。** AI は人がチャットで認めた項目だけをチェックし、明示的な承認なしに archive しません。archive の前に `scripts/gate.mjs review` で、すべての要件と質問がチェックリストにあり、チェック済みで、質問への判断とレビュー担当の名前が書かれていることを確かめます（`openspec archive --yes` 自体はこれを確かめません）。
 - **実装の前後も確かめる。** port は、ベースライン仕様があることを `gate.mjs port-ready` で確かめてから始め、すべてのタスクの完了を `gate.mjs port-done` で確かめてから archive します。
 - **仕様が契約。** 実装中に元コードと仕様が食い違ったら、AI はどちらかを選ばず人に聞きます。
+- **進捗は Copilot の TODO に出す。** `scripts/status.mjs` が `openspec/` のファイルから進捗を計算し、オーケストレーターが「全体1行 + いまの機能の工程」を TODO リストに出します。報告の先頭にも同じ一覧を出します。TODO のチェックは承認になりません（[詳しく](docs/WORKFLOW.md#進捗の表示copilot-の-todo)）。
 
 ## リポジトリの構成
 
@@ -87,6 +88,7 @@ openspec-schemas/              移行用の OpenSpec スキーマ
 templates/openspec-config.yaml 移行対象に置く OpenSpec 設定のひな形
 scripts/setup.mjs              導入スクリプト（外部パッケージなし）
 scripts/gate.mjs               承認・実装の前に使う機械的な確認
+scripts/status.mjs             進捗の計算（TODO リスト・チャット用）
 scripts/openspec.mjs           OpenSpec CLI の起動（Windows でシェルを通さない）
 tests/                         node:test のテスト（OpenSpec があれば通しの確認も）
 docs/WORKFLOW.md               流れと設計の説明、今後の課題

@@ -25,7 +25,7 @@ const stripComments = (text) => text.replace(/<!--[\s\S]*?-->/g, '');
 // Returns the file's text, or null when it is missing. A file that is not UTF-8
 // (Windows PowerShell 5.1 writes UTF-16 with `>` and Out-File) would read as
 // text with nothing in it, so it is reported in `problems` instead of trusted.
-function readIf(file, problems) {
+export function readIf(file, problems) {
   let buffer;
   try { if (!fs.statSync(file).isFile()) return null; buffer = fs.readFileSync(file); } catch { return null; }
   const utf16 = (buffer[0] === 0xff && buffer[1] === 0xfe) || (buffer[0] === 0xfe && buffer[1] === 0xff);

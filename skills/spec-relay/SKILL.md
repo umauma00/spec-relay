@@ -14,7 +14,8 @@ task and returns to it.
 
 The kit's own files are two directories above this skill:
 [scripts/setup.mjs](../../scripts/setup.mjs),
-[scripts/gate.mjs](../../scripts/gate.mjs), `openspec-schemas/` and
+[scripts/gate.mjs](../../scripts/gate.mjs),
+[scripts/status.mjs](../../scripts/status.mjs), `openspec-schemas/` and
 `docs/WORKFLOW.md`. `<kit>` below stands for the absolute path of that
 directory; resolve it from this file's own location (installed as a plugin it is
 under `.copilot/installed-plugins/` in the person's home folder).
@@ -84,6 +85,11 @@ need the reasoning behind a step.
    build files, tests). Propose a capability list in dependency order, with the
    source directories of each, and write it to the plan after the person agrees
    to the list. Start with a small capability that has few dependencies.
+   In the plan, list the capabilities in order under a `## Capabilities`
+   heading, one list item each, starting with the backticked capability path:
+   `` 1. `billing/invoice` 請求書 (src/billing) ``. `status.mjs` reads this
+   list (items under deeper headings below it count too); put other notes,
+   such as follow-up work, under another `##` heading.
    Name capabilities so that OpenSpec and Windows both accept them: each
    path segment is lowercase ASCII kebab-case (`billing/invoice`, not
    `Billing_Invoice` or `請求`; put the Japanese name in the plan beside it),
@@ -150,6 +156,39 @@ The person reviews; you assist. This gate is the point of the kit.
    port change after the person agrees: `openspec archive port-<capability>
    --yes`.
 
+## Progress in the TODO list
+
+Show where the migration stands in the host's TODO list (Copilot CLI:
+`update_todo`; VS Code: `todo`), so the person sees it without asking. Only you
+keep this list; the analyst and implementer subagents have no TODO tool.
+
+1. Run `node "<kit>/scripts/status.mjs" --format todo` (add `--capability
+   <capability>` when you work on a capability other than the one it picks).
+   It returns `todoList`: one line for the whole migration and the analyze,
+   review and implement steps of the current capability, with titles in the
+   artifact language, computed from the files under `openspec/` alone.
+2. Pass the items to the TODO tool in the shape that tool takes. VS Code's
+   `todo` takes the list as it is (`id`, `title`, `description`, `status`).
+   Copilot CLI's `update_todo` takes one Markdown checklist: pass the output of
+   `--format checklist`. Replace the whole list each time; do not add the
+   spec-relay items twice, and keep items the person added themselves.
+3. Do it at the start, on resume, when a step starts or ends, and right before
+   you report and wait for the person (phase 1 report, review, port design,
+   archive questions). Run the command again each time instead of editing the
+   list by hand, so it always matches the files.
+4. A step that waits for the person stays not started with the reason in its
+   title (`【レビュー待ち 3/8】`); only the step you are working on is in
+   progress. Never mark a step done to tidy the list.
+5. The TODO list is only a view. A ticked item never approves anything: review
+   approval is still the person's word in this conversation plus a passing
+   `gate.mjs`.
+6. A successful tool call does not prove the list is on screen. Put the output
+   of `--format checklist` at the top of every phase report, and if the TODO
+   tool is missing or fails, that checklist in chat is the progress display.
+   Never install anything or change settings to get the TODO list working.
+7. `--format markdown` adds a table of every capability; show it when the
+   person asks for the whole picture.
+
 ## Status and resuming
 
 - `openspec list --json` shows active changes; `openspec list --specs` shows
@@ -157,5 +196,7 @@ The person reviews; you assist. This gate is the point of the kit.
 - A capability's phase follows from OpenSpec: no extract change - phase 1 not
   started; active extract change - phase 1 or 2 (check review.md); archived
   extract - baseline exists; active port - phase 3; archived port - ported.
-- On resume, read the plan and these commands, tell the person where things
-  stand, and continue the first unfinished step.
+- `node "<kit>/scripts/status.mjs" --format markdown` shows every capability's
+  phase in one table.
+- On resume, read the plan and these commands, refresh the TODO list, tell the
+  person where things stand, and continue the first unfinished step.
