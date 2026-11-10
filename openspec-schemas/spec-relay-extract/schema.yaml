@@ -1,0 +1,136 @@
+name: spec-relay-extract
+version: 1
+description: spec-relay phase 1-2 - extract language-neutral specs from the source code, then gate them on a human review
+artifacts:
+  - id: source-map
+    generates: source-map.md
+    description: The source files, entry points and dependencies that make up this capability
+    template: source-map.md
+    instruction: |
+      Map the part of the SOURCE code base (the code being migrated) that this
+      capability covers. Read the code; do not guess from file names.
+
+      Sections:
+      - **Scope**: One or two sentences on what the capability does for its users.
+      - **Source files**: Every file in scope, with its repository-relative path
+        and a one-line role. Mark files that are only partly in scope.
+      - **Entry points**: Public functions, endpoints, commands, jobs or screens
+        through which callers reach this capability (path and symbol).
+      - **Dependencies**: Other capabilities, libraries, databases, files,
+        environment variables and external services it uses.
+      - **Out of scope**: Nearby code that belongs to another capability.
+
+      Write every path relative to the repository root with forward slashes
+      (`src/billing/Invoice.cs`), also on Windows.
+
+      The source code is read-only. Never edit, format or move it.
+    requires: []
+
+  - id: specs
+    generates: "specs/**/*.md"
+    description: Language-neutral behavior specs of the existing code
+    template: spec.md
+    instruction: |
+      Write the CURRENT behavior of the source code as an OpenSpec delta with
+      `## ADDED Requirements`. This change creates the baseline spec that the
+      new implementation in the target language must satisfy.
+
+      Describe behavior, not code:
+      - Observable inputs, outputs, side effects, error conditions and limits.
+      - Edge cases the code handles today, including odd ones: empty input,
+        rounding, ordering, encodings, time zones, null handling, overflow.
+      - Do NOT name classes, functions, libraries or language features of the
+        source language. Those belong in trace.md.
+      - Do NOT fix behavior. If the code looks wrong, still specify what it
+        does, and raise it in questions.md.
+
+      Format (`openspec validate --strict` checks most of it):
+      - New capability: the first section is `## Purpose`, one or two
+        sentences of at least 50 characters.
+      - `### Requirement: <name>` with SHALL/MUST, one behavior per requirement,
+        description at most 500 characters.
+      - Every requirement has at least one `#### Scenario: <name>` (exactly four
+        hashes) with a **WHEN** or **GIVEN** step and a **THEN** step.
+      - Use concrete values taken from the code or its tests in scenarios.
+
+      An extract change covers one capability: write exactly one
+      `specs/<capability-path>/spec.md`, using the capability path from the plan.
+    requires:
+      - source-map
+
+  - id: trace
+    generates: trace.md
+    description: Trace from each requirement to the source code that implements it
+    template: trace.md
+    instruction: |
+      For EVERY requirement in the specs, list where the source code implements
+      it: repository-relative path with forward slashes, symbol, and line range
+      when stable. Phase 3
+      implementers read the original logic through this file, so make each
+      reference precise enough to open directly.
+
+      Also record existing tests that exercise the requirement, if any.
+      A requirement with no source location is an error: either find it or
+      move the requirement into questions.md.
+    requires:
+      - specs
+
+  - id: questions
+    generates: questions.md
+    description: Ambiguities, suspected bugs and assumptions that need a human decision
+    template: questions.md
+    instruction: |
+      List everything the human reviewer must decide before the spec becomes
+      the baseline:
+      - **Suspected bugs**: behavior that looks unintended. Ask: keep as-is in
+        the new language, or fix (a fix is a separate change after migration).
+      - **Ambiguities**: behavior the code does not make clear, such as
+        unreachable branches, configuration-dependent paths or dead code.
+      - **Assumptions**: anything you inferred instead of reading it in code.
+      - **Not migrated**: parts you propose to leave out, with the reason.
+
+      Give each item an id (Q1, Q2, ...), the related requirement and the
+      source reference. Write "None" under a heading with no items.
+    requires:
+      - specs
+
+  - id: review
+    generates: review.md
+    description: Human review checklist; the change may be archived only when every box is ticked by the reviewer
+    template: review.md
+    instruction: |
+      Build the checklist the HUMAN reviewer works through (phase 2).
+      `gate.mjs review` checks this structure before the change may be archived.
+      - Keep the `Reviewer:` line; the reviewer's name goes there.
+      - One checkbox per requirement: `- [ ] R<n> <requirement name>` under
+        `## 1. Requirements`, in spec order.
+      - One checkbox per question: `- [ ] Q<n> <short title>: decision: ...`
+        under `## 2. Questions`. Leave the decision blank.
+      - Under `## 3. Coverage`, one checkbox that the source map covers the
+        capability and one that every requirement has a trace entry.
+
+      Do not tick any box. Only the reviewer decides; see the apply instruction.
+    requires:
+      - source-map
+      - specs
+      - trace
+      - questions
+
+apply:
+  requires: [ review ]
+  tracks: review.md
+  instruction: |
+    Applying this change is the HUMAN REVIEW (spec-relay phase 2). It never
+    edits the source code or writes target-language code.
+
+    Walk the reviewer through review.md one item at a time: show the
+    requirement (or question) with its trace entry, and ask the reviewer to
+    accept it, ask for a change, or record a decision.
+    - Tick a box only after the reviewer explicitly accepts that item in this
+      conversation, or when the reviewer ticked it themselves.
+    - When the reviewer asks for a change, edit specs/trace/questions first,
+      untick every item you changed, show the result, and ask again.
+    - Write the reviewer's decision after `decision:` on each question line.
+    Never tick a box on your own judgment. When every box is ticked, tell the
+    reviewer that archiving the change makes the spec the migration baseline,
+    and archive only after they say so.

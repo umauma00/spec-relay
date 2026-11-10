@@ -1,0 +1,82 @@
+name: spec-relay-port
+version: 1
+description: spec-relay phase 3 - implement reviewed baseline specs in the target language, reading the original code for detailed logic
+artifacts:
+  - id: proposal
+    generates: proposal.md
+    description: Which baseline capabilities this change ports, and to where
+    template: proposal.md
+    instruction: |
+      State what this port covers. A port does not change behavior: the
+      baseline specs in `openspec/specs/` are the contract.
+
+      Sections:
+      - **Capabilities**: The exact baseline spec paths being ported (run
+        `openspec list --specs`). Only capabilities whose extract change was
+        reviewed and archived may be listed.
+      - **Target**: Target language, runtime and the output directory.
+      - **Order**: Why these capabilities now; what they depend on that is
+        already ported or still in the source language.
+      - **Out of scope**: Anything left for a later port.
+
+      Port changes carry no spec deltas. Keep `skip_specs: true` in the
+      change's `.openspec.yaml`. If the port would need a behavior change,
+      stop and propose it as a separate change after the migration.
+    requires: []
+
+  - id: design
+    generates: design.md
+    description: How the reviewed behavior maps onto the target language
+    template: design.md
+    instruction: |
+      Explain HOW to implement the baseline specs in the target language.
+
+      Sections:
+      - **Structure**: Target modules or files and what each owns.
+      - **Language mapping**: Semantic differences that matter for these specs
+        and the rule chosen for each: numbers and rounding, strings and
+        encodings, dates and time zones, null/optional, errors and exceptions,
+        collections and ordering, concurrency, I/O.
+      - **Source references**: For each requirement, the source locations from
+        the archived extract change's trace.md
+        (`openspec/changes/archive/*-extract-<capability>/trace.md`). Implementers
+        read the original logic there for details the spec leaves open.
+      - **Decisions**: Choices with the alternatives considered.
+      - **Risks**: [Risk] -> Mitigation.
+
+      Never change behavior to suit the target language. When the target cannot
+      express a behavior exactly, write it down here and ask the person.
+    requires:
+      - proposal
+
+  - id: tasks
+    generates: tasks.md
+    description: Implementation checklist, one requirement group per task group
+    template: tasks.md
+    instruction: |
+      Break the port into tasks the apply phase can track.
+      - Group tasks under `## <n>. <group>` headings; each tracked task is
+        `- [ ] <n>.<m> <description>`.
+      - Every implementation task names the requirement(s) it implements, the
+        target file, the source reference to read, and how it is verified.
+      - Verification comes from the spec scenarios: each scenario becomes a test
+        in the target language, landed in the same group as its code.
+      - Order by dependency. A final group may only run integration checks and
+        compare results with the source program when it can run.
+    requires:
+      - design
+
+apply:
+  requires: [ tasks ]
+  tracks: tasks.md
+  instruction: |
+    Implement the tasks in the TARGET language only. The source code is
+    read-only: read it through the source references in design.md for logic
+    the spec leaves open, and never edit it.
+    - The baseline spec wins. When the source code and the spec disagree, stop
+      and ask the person instead of choosing.
+    - Mark a task done only after its verification passes; report the command
+      and its result.
+    - Write tests from the spec scenarios before or with the code they check.
+    - Leave a `TODO(port)` comment for anything unresolved and list it in your
+      report.

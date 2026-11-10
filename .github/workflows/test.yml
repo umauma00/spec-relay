@@ -1,0 +1,22 @@
+name: test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      # Windows is the main platform: one job failing must not cancel the others.
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm install -g @fission-ai/openspec@1.17.0
+      - run: npm test

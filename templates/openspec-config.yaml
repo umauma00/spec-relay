@@ -1,0 +1,21 @@
+# spec-relay: managed by scripts/setup.mjs. Edit the values; keep this line.
+schema: spec-relay-extract
+
+context: |
+  This repository is being migrated to another programming language with spec-relay.
+  Source language: {{SOURCE_LANGUAGE}}
+  Source root (read-only; only openspec/ and the target root may change): {{SOURCE_ROOT}}
+  Target language: {{TARGET_LANGUAGE}}
+  Target root (new implementation): {{TARGET_ROOT}}
+  Artifact language: {{ARTIFACT_LANGUAGE}}
+  Write all artifacts in the artifact language, but keep OpenSpec structural
+  headings and SHALL/MUST keywords in English.
+  Extract changes (schema spec-relay-extract) describe current behavior of the
+  source code. Port changes (schema spec-relay-port) implement archived
+  baseline specs in the target language without changing behavior.
+
+rules:
+  specs:
+    - Specify what the source code does today, even when it looks wrong; raise doubts in questions.md.
+  tasks:
+    - Every task cites the requirement, the target file and the source reference it reads.

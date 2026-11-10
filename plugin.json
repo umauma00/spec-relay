@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "spec-relay",
+  "version": "0.1.0",
+  "description": "Spec-driven language migration with OpenSpec: extract specs from the code, review them, implement them in the new language.",
+  "author": { "name": "umauma00", "url": "https://github.com/umauma00" },
+  "homepage": "https://github.com/umauma00/spec-relay",
+  "repository": "https://github.com/umauma00/spec-relay",
+  "keywords": ["migration", "language-migration", "openspec", "spec-driven", "copilot-cli", "agent-plugins"]
+}
