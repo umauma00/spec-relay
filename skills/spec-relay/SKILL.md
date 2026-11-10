@@ -158,9 +158,13 @@ not wash out these instructions.
    active change's `review.md` and `questions.md`, `plan.md`,
    `openspec/specs/`, `openspec/config.yaml` and the source files). After the
    wave, run `gate.mjs guard --compare wave-<n>`, which lists only the paths
-   that changed. Paths you changed yourself during the wave (a tick, a
-   question, an archive) are expected; for any other path, stop, tell the
-   person what changed, and do not use that wave's results until they decide.
+   that changed (exit code 1 then: read the lists). If the wave is still
+   running when you must write a guarded file yourself (a tick, a question, an
+   archive), run `--compare` first: if that path already changed, a subagent
+   changed it; otherwise write, then `--save wave-<n>` again. For any change
+   you did not make, stop, tell the person what changed, and do not use that
+   wave's results until they decide. If `--save` prints `warnings`, tell the
+   person which files are not guarded.
    In a git repository, also compare `git status --porcelain
    --untracked-files=all` before and after, for files outside those (such as
    kit or host folders).

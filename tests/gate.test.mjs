@@ -395,4 +395,7 @@ test('guard --save and --compare list only the protected files that changed', as
   });
   assert.match(guardCompare(dir, 'wave-2').problems.join(), /no snapshot .*wave-2\.json; run gate\.mjs guard --save wave-2/);
   assert.equal(guardSave(dir, '../x').ok, false);
+  assert.equal(quiet(() => main(['guard', '--compare', '', '--root', dir])), 1, 'an empty name never falls back to the plain hash');
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root: missing\n');
+  assert.match(guardSave(dir, 'wave-3').warnings.join(), /source files are not guarded/);
 });
