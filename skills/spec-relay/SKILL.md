@@ -175,7 +175,7 @@ keep this list; the analyst and implementer subagents have no TODO tool.
    Pass the items, titles and statuses exactly as printed. Never set a status
    yourself, not even for the step you are doing, and never add the
    spec-relay items twice. If the person keeps items of their own in the list,
-   keep those after the printed ones.
+   keep those after the printed ones, numbered after the printed ids.
 3. Do it at the start, on resume, when a step starts or ends, and right before
    you report and wait for the person (phase 1 report, review, port design,
    archive questions). Run the command again each time instead of editing the
@@ -187,9 +187,11 @@ keep this list; the analyst and implementer subagents have no TODO tool.
 5. The TODO list is only a view. A ticked item never approves anything: review
    approval is still the person's word in this conversation plus a passing
    `gate.mjs`.
-6. A successful tool call does not prove the list is on screen. Put the output
-   of `--format checklist` at the top of every phase report, and if the TODO
-   tool is missing or fails, that checklist in chat is the progress display.
+6. A successful tool call does not prove the list is on screen. Put the
+   `checklist` string from the same JSON at the top of every phase report, and
+   if the TODO tool is missing or fails, that checklist in chat is the progress
+   display. Read the checklist from the JSON rather than from `--format
+   checklist`, whose plain UTF-8 a Windows console code page can garble.
    Never install anything or change settings to get the TODO list working.
 7. `--format markdown` adds a table of every capability; show it when the
    person asks for the whole picture.

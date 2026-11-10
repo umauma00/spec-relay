@@ -56,7 +56,7 @@ test('the plan list is read in order, with groups; indented items and other sect
     { capability: 'billing/payment', group: '請求' },
   ]);
   assert.deepEqual(planCapabilities('## Capabilities\n```\n- `in/fence`\n```\n- `Bad_Name`\n- [ ] `with/box` x\n'), [{ capability: 'with/box', group: null }]);
-  for (const heading of ['## 1. Capabilities', '## Capability list', '## 機能一覧', '## ケイパビリティ']) {
+  for (const heading of ['## 1. Capabilities', '## Capability list', '## 機能一覧', '## 機能一覧（移行順）', '## ケイパビリティ']) {
     assert.equal(planCapabilities(`${heading}\n- \`a/b\`\n`).length, 1, heading);
   }
   assert.equal(planCapabilities('## 機能外のメモ\n- `a/b`\n').length, 0);
@@ -95,7 +95,7 @@ test('the review step says whether the gate passes, and a waiting step is never 
 test('artifacts are counted from the change schema, so a new artifact needs no code change', () => {
   const dir = repo();
   const schema = fs.readFileSync(path.join(KIT_ROOT, 'openspec-schemas/spec-relay-extract/schema.yaml'), 'utf8')
-    .replace('  - id: trace\n', '  - id: screens\n    generates: screens.md\n    requires: []\n\n  - id: trace\n');
+    .replace('  - id: trace\n', '  - id: screens\n    generates: screens.md  # new\n    requires: []\n    instruction: |\n      generates: not-an-artifact.md\n\n  - id: trace\n');
   write(dir, 'openspec/schemas/spec-relay-extract/schema.yaml', schema);
   const report = status(dir);
   assert.equal(report.todoList[1].title, 'billing/invoice: Analyze [writing artifacts 5/6]');
@@ -111,7 +111,7 @@ test('the port step follows tasks.md and the archive', () => {
   const steps = () => status(dir).todoList.slice(1).map((item) => [item.status, item.title.replace(/^billing\/invoice: /, '')]);
   assert.deepEqual(steps(), [['completed', 'Analyze'], ['completed', 'Review'], ['in-progress', 'Implement [writing the design]']]);
   write(dir, 'openspec/changes/port-billing-invoice/tasks.md', '- [ ] 1.1 a\n- [ ] 1.2 b\n');
-  assert.deepEqual(steps()[2], ['not-started', 'Implement [design ready; waiting for agreement (tasks 0/2)]']);
+  assert.deepEqual(steps()[2], ['not-started', 'Implement [tasks 0/2; starts once the person agrees to the design]']);
   write(dir, 'openspec/changes/port-billing-invoice/tasks.md', '- [x] 1.1 a\n- [ ] 1.2 b\n');
   assert.deepEqual(steps()[2], ['in-progress', 'Implement [tasks 1/2]']);
   write(dir, 'openspec/changes/port-billing-invoice/tasks.md', '- [x] 1.1 a\n- [x] 1.2 b\n');
@@ -146,6 +146,17 @@ test('a plan without a readable list never reads as finished', () => {
   has(report, 'has no capability list');
 });
 
+test('a plan item that cannot be read is reported and blocks "all ported"', () => {
+  const dir = repo({ plan: '## Capabilities\n1. `common/base`\n2. **`billing/two`**\n3. `Billing/Three`\n - `one/space`\n- plain note\n' });
+  fs.rmSync(path.join(dir, EXTRACT), { recursive: true });
+  const report = status(dir);
+  assert.equal(report.total, 2);
+  assert.equal(report.todoList[0].status, 'not-started');
+  has(report, '"2. **`billing/two`**" is not read as a capability');
+  has(report, '"3. `Billing/Three`" is not read as a capability');
+  assert.equal(report.problems.length, 2);
+});
+
 test('without a plan, openspec/ alone gives the list; with one, unplanned specs are shown but not counted', () => {
   const report = status(repo({ plan: null }));
   assert.equal(report.plan, false);
@@ -173,6 +184,11 @@ test('mismatched and colliding names, a missing baseline and overlapping changes
   has(report, 'billing/invoice and billing-invoice share the change names');
   has(report, 'change extract-billing-payment has its spec at specs/payment/spec.md');
   has(report, 'port-billing-invoice is active while extract-billing-invoice is still active');
+  // Analyze and Implement are never both in progress.
+  write(dir, 'openspec/changes/port-billing-invoice/tasks.md', '- [x] 1.1 a\n- [ ] 1.2 b\n');
+  fs.rmSync(path.join(dir, `${EXTRACT}/trace.md`));
+  const overlap = status(dir, { capability: 'billing/invoice' });
+  assert.deepEqual(statuses(overlap).slice(1), ['in-progress', 'not-started', 'not-started']);
   // An archived extract whose baseline never appeared.
   write(dir, 'openspec/changes/archive/2026-11-04-extract-billing-payment/source-map.md', '# x\n');
   fs.rmSync(path.join(dir, 'openspec/changes/extract-billing-payment'), { recursive: true });
@@ -200,6 +216,7 @@ test('language comes from the config, and a UTF-16 file is reported with its pat
   const report = status(dir, { language: 'ja' });
   has(report, 'openspec/changes/extract-billing-invoice/review.md is not UTF-8');
   has(report, 'openspec/spec-relay/plan.md is not UTF-8');
+  assert.ok(!report.problems.some((p) => p.includes('has no capability list')));
   assert.match(checklist(report, { problems: true }), /問題:\n- /);
 });
 

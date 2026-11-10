@@ -34,7 +34,7 @@ const DEFAULT_ARTIFACTS = {
 };
 // Lowercase ASCII kebab-case segments, as the skill asks capabilities to be named.
 const CAPABILITY = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/;
-const PLAN_HEADING = /^(?:\d+[.)]?\s*)?(?:capabilit(?:y|ies)\b|機能(?:一覧|リスト)?$|ケイパビリティ)/i;
+const PLAN_HEADING = /^(?:\d+[.)]?\s*)?(?:capabilit(?:y|ies)\b|機能(?:一覧|リスト)?(?:$|[\s（(:：])|ケイパビリティ)/i;
 const changeKey = (capability) => capability.split('/').join('-');
 
 const WORDS = {
@@ -49,7 +49,7 @@ const WORDS = {
     waitingArchive: 'reviewed; waiting for approval to archive',
     archivedNoBaseline: 'archived, but no baseline spec',
     designing: 'writing the design',
-    waitingDesign: (of) => `design ready; waiting for agreement (tasks 0/${of})`,
+    waitingDesign: (of) => `tasks 0/${of}; starts once the person agrees to the design`,
     tasks: (n, of) => `tasks ${n}/${of}`,
     waitingPortArchive: 'all tasks done; waiting for agreement to archive',
     person: 'decided by the person',
@@ -67,7 +67,7 @@ const WORDS = {
     waitingArchive: 'レビュー済み・承認待ち',
     archivedNoBaseline: 'アーカイブ済み・ベースライン仕様なし',
     designing: '設計中',
-    waitingDesign: (of) => `設計の確認待ち・タスク 0/${of}`,
+    waitingDesign: (of) => `タスク 0/${of}・設計の合意後に着手`,
     tasks: (n, of) => `タスク ${n}/${of}`,
     waitingPortArchive: '全タスク完了・完了の確認待ち',
     person: '人が判断します',
@@ -110,8 +110,10 @@ export const STEPS = [
   {
     id: 'implement', owner: 'agent', marks: 'ported',
     state: (c) => {
+      // A port opened while the extract is still active waits for that review (gate.mjs port-ready).
+      if (c.port && c.extract) return { status: 'not-started' };
       if (c.port) {
-        if (!c.port.tasks) return { status: 'in-progress', detail: ['designing'] };
+        if (!c.port.tasks || c.port.tasks.total === 0) return { status: 'in-progress', detail: ['designing'] };
         const { done, total } = c.port.tasks;
         if (total > 0 && done === total) return { status: 'not-started', waiting: true, detail: ['waitingPortArchive'] };
         if (done === 0) return { status: 'not-started', waiting: true, detail: ['waitingDesign', total] };
@@ -157,7 +159,7 @@ function schemaArtifacts(root, changeDir, fallback) {
   const meta = readIf(path.join(changeDir, '.openspec.yaml'), []) ?? '';
   const schema = meta.match(/^schema:\s*["']?([^"'\s#]+)/m)?.[1] ?? fallback;
   const text = readIf(path.join(root, 'openspec/schemas', schema, 'schema.yaml'), []) ?? '';
-  const listed = [...text.matchAll(/^\s+generates:\s*["']?([^"'\r\n#]+?)["']?\s*$/gm)].map((m) => m[1]);
+  const listed = [...text.matchAll(/^ {1,4}generates:\s*["']?([^"'\r\n#]+?)["']?\s*(?:#.*)?$/gm)].map((m) => m[1]);
   return listed.length ? listed : DEFAULT_ARTIFACTS[fallback];
 }
 
@@ -179,7 +181,14 @@ function artifactCount(root, changeDir, fallback) {
 // that start with a backticked capability path, in order. Indented items (notes
 // and source folders under a capability) and the rest of the plan are ignored.
 export function planCapabilities(text) {
+  return parsePlan(text).list;
+}
+
+// Also returns the top-level items under the heading that hold a backticked name
+// but no valid capability path, so a slip in the plan is reported, not dropped.
+export function parsePlan(text) {
   const list = [];
+  const skipped = [];
   let inside = false;
   let group = null;
   let fenced = false;
@@ -192,10 +201,13 @@ export function planCapabilities(text) {
       continue;
     }
     if (!inside) continue;
-    const item = line.match(/^(?:[-*+]|\d+[.)])\s+(?:\[.?\]\s+)?`([^`]+)`/);
-    if (item && CAPABILITY.test(item[1]) && !list.some((c) => c.capability === item[1])) list.push({ capability: item[1], group });
+    if (!/^ ?(?:[-*+]|\d+[.)])\s/.test(line)) continue;
+    const item = line.match(/^ ?(?:[-*+]|\d+[.)])\s+(?:\[.?\]\s+)?`([^`]+)`/);
+    if (item && CAPABILITY.test(item[1])) {
+      if (!list.some((c) => c.capability === item[1])) list.push({ capability: item[1], group });
+    } else if (line.includes('`')) skipped.push(line.trim());
   }
-  return list;
+  return { list, skipped };
 }
 
 function counts(text) {
@@ -218,8 +230,13 @@ export function collect(root) {
   const active = dirs(changes).filter((name) => name !== 'archive');
   const archived = dirs(path.join(changes, 'archive')).map((name) => name.replace(/^\d{4}-\d{2}-\d{2}-/, ''));
   const plan = read(root, path.join(root, PLAN), problems);
-  const planned = plan === null ? [] : planCapabilities(plan);
-  if (plan !== null && planned.length === 0) {
+  const parsed = plan === null ? { list: [], skipped: [] } : parsePlan(plan);
+  const planned = parsed.list;
+  for (const line of parsed.skipped) {
+    problems.push(`${PLAN}: "${line}" is not read as a capability; start the item with the path in backticks, lowercase kebab-case (\`billing/invoice\`)`);
+  }
+  // An unreadable (UTF-16) plan is already reported as such.
+  if (plan && planned.length === 0) {
     problems.push(`${PLAN} has no capability list: put each capability under a "## Capabilities" heading as a top-level item such as "1. \`billing/invoice\` ..."`);
   }
   const keys = new Map();
@@ -281,11 +298,11 @@ export function collect(root) {
     for (const step of STEPS.filter((s) => s.marks)) c[step.marks] = c.steps[step.id].status === 'completed';
     c.active = Boolean(c.extract || c.port);
     c.finished = STEPS.every((step) => c.steps[step.id].status === 'completed') && !c.active;
-    // With a plan, what is not in it is shown but not counted, unless it is being worked on.
+    // With a plan, what is not in it is shown but not counted (an active change on it is reported above).
     c.counted = planned.length === 0 || entry.planned;
     return c;
   });
-  return { capabilities, problems: [...new Set(problems)], plan: plan !== null, planned: planned.length };
+  return { capabilities, problems: [...new Set(problems)], plan: plan !== null, planned: planned.length, skipped: parsed.skipped.length };
 }
 
 function pickCurrent(capabilities, requested) {
@@ -305,7 +322,7 @@ const say = (words, detail) => {
 
 export function status(root, { capability, language: lang = 'en' } = {}) {
   const words = WORDS[lang] ?? WORDS.en;
-  const { capabilities, problems, plan, planned } = collect(root);
+  const { capabilities, problems, plan, planned, skipped } = collect(root);
   const counted = capabilities.filter((c) => c.counted);
   const total = counted.length;
   const ported = counted.filter((c) => c.ported).length;
@@ -313,7 +330,7 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
   const current = pickCurrent(capabilities, capability);
   const unknown = Boolean(capability && !current);
   if (unknown) problems.push(`capability not found: ${capability}`);
-  const finished = total > 0 && counted.every((c) => c.finished) && !capabilities.some((c) => c.active) && !(plan && planned === 0);
+  const finished = total > 0 && counted.every((c) => c.finished) && !capabilities.some((c) => c.active) && !(plan && planned === 0) && skipped === 0;
 
   const overallTitle = (plan && planned === 0) || total === 0 ? words.noPlan : finished ? words.allDone(total) : words.overall(ported, total, reviewed);
   const todoList = [{ id: 1, key: 'overall', title: overallTitle, description: '', status: finished ? 'completed' : 'not-started' }];
@@ -364,7 +381,7 @@ export function markdown(report) {
   return lines.join('\n');
 }
 
-const ascii = (json) => json.replace(/[\u007f-￿]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
+const ascii = (json) => json.replace(/[\u007f-\uffff]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
 
 export function main(argv) {
   const opts = { root: process.cwd(), format: 'json' };
