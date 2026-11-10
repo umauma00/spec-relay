@@ -8,6 +8,11 @@ context: |
   Target language: {{TARGET_LANGUAGE}}
   Target root (new implementation): {{TARGET_ROOT}}
   Artifact language: {{ARTIFACT_LANGUAGE}}
+  Parallel subagents (at once, whole session): {{PARALLEL}}
+  Analyses ahead of review: {{AHEAD}}
+  Analyst model: {{ANALYST_MODEL}}
+  Checker model: {{CHECKER_MODEL}}
+  Implementer model: {{IMPLEMENTER_MODEL}}
   Write all artifacts in the artifact language, but keep OpenSpec structural
   headings and SHALL/MUST keywords in English.
   The survey (schema spec-relay-survey) splits the source code into DDD bounded
@@ -20,6 +25,6 @@ context: |
 
 rules:
   specs:
-    - Specify what the source code does today, even when it looks wrong; raise doubts in questions.md.
+    - Specify what the source code does today, even when it looks wrong; raise doubts as questions for questions.md.
   tasks:
     - Every task cites the requirement, the target file and the source reference it reads.

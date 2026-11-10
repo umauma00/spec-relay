@@ -5,15 +5,20 @@
 //   node status.mjs [--format todo|checklist|markdown|json] [--capability PATH]
 //                   [--language ja|en] [--root DIR]
 //
-//   todo       { todoList: [{ id, title, description, status }], checklist, current, problems }
+//   todo       { todoList: [{ id, title, description, status }], checklist, current, parallel, problems }
 //              for the TODO tool. ASCII-only JSON (\uXXXX escapes), so a console
 //              code page on Windows cannot garble the titles.
 //   checklist  the same items as a Markdown checklist for chat, then any problems
 //   markdown   the checklist, then a table of every capability
 //   json       everything, with the per-capability details (the default)
 //
-// The TODO list is a view: one line for the whole migration and the steps of the
-// current capability. It never records or grants an approval; the review gate is
+// The TODO list is a view: one line for the whole migration, the steps of the
+// current capability, and one line for each other capability with an active
+// change (several run at once when the orchestrator works in parallel).
+// `parallel` says how many subagents may run at once, which capabilities are
+// being analyzed or are in review, and which may be analyzed next without
+// running more than `ahead` capabilities ahead of the person's review (both
+// numbers come from openspec/config.yaml). It never records or grants an approval; the review gate is
 // scripts/gate.mjs. Read-only. Exits 0, 1 when --capability names no known
 // capability, 2 on bad usage.
 //
@@ -23,7 +28,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkboxes, readIf, capabilitySegments, checkReview, baseName, archivedChange, baselineHash } from './gate.mjs';
+import { checkboxes, readIf, capabilitySegments, checkReview, baseName, archivedChange, baselineHash, configValue, cleanValue } from './gate.mjs';
 
 const PLAN = 'openspec/spec-relay/plan.md';
 // Used when a change's schema file cannot be read. The schema's own list wins,
@@ -87,8 +92,9 @@ const WORDS = {
 
 // Each step returns { status, detail?, waiting? }. status is one of the three
 // states every host supports. Work that waits for the person stays not-started
-// with the reason in `detail`, so at most one step is in progress and a waiting
-// step never looks as if the agent were busy with it. `marks` names the summary
+// with the reason in `detail`, so a waiting step never looks as if the agent
+// were busy with it. Several steps are in progress only when subagents work on
+// several capabilities at once. `marks` names the summary
 // count a completed step adds to.
 export const FOUNDATION = [
   { id: 'survey', change: 'survey', schema: 'spec-relay-survey' },
@@ -393,9 +399,10 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
       if (!here && f.status !== 'completed') here = { capability: null, step: f.id, owner: f.waiting ? 'person' : 'agent', ...(f.waiting ? { waiting: true } : {}) };
     });
   }
-  // Before the survey and target design, a capability's steps show only when asked
-  // for (a project that started on an earlier kit version, for example).
-  if (current && (!foundationOpen || capability)) {
+  // Before the survey and target design are both archived, a capability's steps
+  // show only when it has an active change (analyzed during the target design's
+  // review) or when asked for (a project that started on an earlier kit version).
+  if (current && (!foundationOpen || capability || current.active)) {
     const first = todoList.length + 1;
     STEPS.forEach((step, i) => {
       const state = current.steps[step.id];
@@ -410,9 +417,25 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
       if (!here && state.status !== 'completed') here = { capability: current.capability, step: step.id, owner: step.owner, ...(state.waiting ? { waiting: true } : {}) };
     });
   }
+  // Every other capability with an active change gets one line: its first
+  // unfinished step.
+  for (const other of capabilities.filter((c) => c.active && c !== current)) {
+    const step = STEPS.find((st) => other.steps[st.id].status !== 'completed');
+    if (!step) continue;
+    const state = other.steps[step.id];
+    const detail = say(words, state.detail);
+    todoList.push({
+      id: todoList.length + 1,
+      key: `${other.capability}:${step.id}`,
+      title: `${other.capability}: ${words[step.id]}${detail ? (lang === 'ja' ? `【${detail}】` : ` [${detail}]`) : ''}`,
+      description: step.owner === 'person' ? words.person : '',
+      status: state.status,
+    });
+  }
   return {
     plan, total, ported, reviewed,
     current: here,
+    parallel: parallelPlan(root, capabilities, foundation, problems),
     foundation: foundation.map(({ id, status: st }) => ({ id, status: st })),
     active: capabilities.filter((c) => c.active).map((c) => c.capability),
     todoList,
@@ -421,6 +444,51 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
     unknown,
     language: lang,
   };
+}
+
+// A limit from openspec/config.yaml: a whole number in range, else the default
+// (with a problem when a value is there but cannot be used).
+function setting(root, label, fallback, max, problems) {
+  const raw = configValue(root, label, null);
+  if (raw === null) return fallback;
+  const value = raw.replace(/\s+#.*$/, '').trim();
+  if (/^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= max) return Number(value);
+  problems.push(`openspec/config.yaml: "${label}" is "${value}"; use a whole number from 1 to ${max} (using ${fallback})`);
+  return fallback;
+}
+
+// What the orchestrator may run at once. Analyses run at most `ahead`
+// capabilities in front of the person's review, because the review is the one
+// step that cannot run in parallel: what it finds should reach the next
+// analyses, and a long queue only waits. Until the first capability is
+// reviewed (the pilot), only one is analyzed at a time. Extract changes need
+// the archived survey (the glossary and the capability list), not the target
+// design. `inReview` counts amendments from the moment they are opened.
+export function parallelPlan(root, capabilities, foundation, problems = []) {
+  const subagents = setting(root, 'Parallel subagents', 4, 32, problems);
+  const ahead = setting(root, 'Analyses ahead of review', 2, 10, problems);
+  const analyzing = capabilities.filter((c) => c.extract && c.steps.analyze.status !== 'completed').map((c) => c.capability);
+  const inReview = capabilities.filter((c) => (c.extract && c.steps.analyze.status === 'completed') || c.amend).map((c) => c.capability);
+  const surveyDone = foundation.find((f) => f.id === 'survey')?.status === 'completed';
+  const piloted = capabilities.some((c) => c.baseline || c.extractArchived);
+  const limit = piloted ? ahead : 1;
+  const busy = analyzing.length + inReview.length;
+  // Amendments are not started from nextToAnalyze, so only extract changes can overrun the limit.
+  const extracts = capabilities.filter((c) => c.extract).length;
+  if (extracts > limit) {
+    problems.push(piloted
+      ? `${extracts} extract changes are in analysis or review, more than the ${ahead} allowed ahead of the review; finish reviews before starting new analyses`
+      : `${extracts} extract changes are in analysis or review before the first capability was reviewed; analyze one capability first (the pilot) and finish its review`);
+  }
+  const nextToAnalyze = surveyDone
+    ? capabilities.filter((c) => c.planned && c.counted && !c.extract && !c.baseline && !c.extractArchived).slice(0, Math.max(0, limit - busy)).map((c) => c.capability)
+    : [];
+  // The model each role should run on; "session" means the orchestrator's own.
+  const models = Object.fromEntries(['analyst', 'checker', 'implementer'].map((role) => {
+    const value = cleanValue(configValue(root, `${role[0].toUpperCase()}${role.slice(1)} model`, 'session') ?? 'session');
+    return [role, !value || value.toLowerCase() === 'session' ? 'session' : value];
+  }));
+  return { subagents, ahead, models, analyzing, inReview, nextToAnalyze };
 }
 
 export function checklist(report, { problems = false } = {}) {
@@ -459,7 +527,7 @@ export function main(argv) {
   }
   const report = status(opts.root, { capability: opts.capability, language: language(opts.root, opts.language) });
   const todoList = report.todoList.map(({ id, title, description, status: s }) => ({ id, title, description, status: s }));
-  if (opts.format === 'todo') console.log(ascii(JSON.stringify({ todoList, checklist: checklist(report), current: report.current, problems: report.problems }, null, 2)));
+  if (opts.format === 'todo') console.log(ascii(JSON.stringify({ todoList, checklist: checklist(report), current: report.current, parallel: report.parallel, problems: report.problems }, null, 2)));
   else if (opts.format === 'checklist') console.log(checklist(report, { problems: true }));
   else if (opts.format === 'markdown') console.log(markdown(report));
   else console.log(JSON.stringify({ ...report, checklist: checklist(report) }, null, 2));

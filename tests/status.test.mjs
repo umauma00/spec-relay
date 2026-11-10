@@ -195,7 +195,7 @@ test('mismatched and colliding names, a missing baseline and overlapping changes
   write(dir, 'openspec/changes/port-billing-invoice/tasks.md', '- [x] 1.1 a\n- [ ] 1.2 b\n');
   fs.rmSync(path.join(dir, `${EXTRACT}/trace.md`));
   const overlap = status(dir, { capability: 'billing/invoice' });
-  assert.deepEqual(statuses(overlap).slice(1), ['in-progress', 'not-started', 'not-started']);
+  assert.deepEqual(statuses(overlap).slice(1, 4), ['in-progress', 'not-started', 'not-started']);
   // An archived extract whose baseline never appeared.
   write(dir, 'openspec/changes/archive/2026-11-04-extract-billing-payment/source-map.md', '# x\n');
   fs.rmSync(path.join(dir, 'openspec/changes/extract-billing-payment'), { recursive: true });
@@ -246,7 +246,7 @@ test('the CLI prints each format, keeps the TODO JSON ASCII-only and exits 1 for
   } finally { console.log = log; }
   assert.match(out[0], /^[\x00-\x7f]*$/);
   const todo = JSON.parse(out[0]);
-  assert.deepEqual(Object.keys(todo), ['todoList', 'checklist', 'current', 'problems']);
+  assert.deepEqual(Object.keys(todo), ['todoList', 'checklist', 'current', 'parallel', 'problems']);
   assert.deepEqual(Object.keys(todo.todoList[0]), ['id', 'title', 'description', 'status']);
   assert.match(todo.todoList[0].title, /^全体/);
   assert.match(todo.checklist, /← いまここ/);
@@ -323,7 +323,51 @@ test('a port archived before an amendment is not done; -v plan names are reporte
 
   const early = repo();
   fs.rmSync(path.join(early, 'openspec/changes/archive/2026-10-31-target-design'), { recursive: true });
+  // An extract change opened during the target design's review shows its steps.
+  assert.deepEqual(status(early).todoList.map((i) => i.key), ['overall', 'survey', 'target', 'billing/invoice:analyze', 'billing/invoice:review', 'billing/invoice:implement']);
+  fs.rmSync(path.join(early, EXTRACT), { recursive: true });
   assert.deepEqual(status(early).todoList.map((i) => i.key), ['overall', 'survey', 'target']);
   assert.deepEqual(status(early, { capability: 'billing/invoice' }).todoList.map((i) => i.key), ['overall', 'survey', 'target', 'billing/invoice:analyze', 'billing/invoice:review', 'billing/invoice:implement']);
   assert.equal(status(early, { capability: 'billing/invoice' }).current.step, 'target');
+});
+
+test('parallel work: one line per other active capability, and what may be analyzed next', () => {
+  const dir = repo({ plan: PLAN.replace('3. `billing/payment` 入金', '3. `billing/payment` 入金\n4. `billing/tax` 税\n5. `billing/refund` 返金') });
+  write(dir, 'openspec/changes/extract-billing-payment/.openspec.yaml', 'schema: spec-relay-extract\n');
+  write(dir, 'openspec/changes/extract-billing-payment/source-map.md', '# m\n');
+  const report = status(dir);
+  assert.equal(report.current.capability, 'billing/invoice');
+  assert.deepEqual(report.todoList.map((i) => i.key).slice(-1), ['billing/payment:analyze']);
+  assert.equal(report.todoList.at(-1).status, 'in-progress');
+  assert.deepEqual(report.parallel, { subagents: 4, ahead: 2, models: { analyst: 'session', checker: 'session', implementer: 'session' }, analyzing: ['billing/payment'], inReview: ['billing/invoice'], nextToAnalyze: [] });
+
+  // The limits come from openspec/config.yaml; a bad value falls back to the default.
+  const config = fs.readFileSync(path.join(dir, 'openspec/config.yaml'), 'utf8');
+  write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Parallel subagents (at once, whole session): 16\n  Analyses ahead of review: 3\n  Analyst model: claude-sonnet-5.5\n  Checker model: Claude Opus 5.5  # a second opinion\n  Implementer model: session\n`);
+  assert.deepEqual(status(dir).parallel, { subagents: 16, ahead: 3, models: { analyst: 'claude-sonnet-5.5', checker: 'Claude Opus 5.5', implementer: 'session' }, analyzing: ['billing/payment'], inReview: ['billing/invoice'], nextToAnalyze: ['billing/tax'] });
+  for (const bad of ['99', '"16"', '1e1', '8.0']) {
+    write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Parallel subagents (at once, whole session): ${bad}\n`);
+    const report = status(dir);
+    assert.equal(report.parallel.subagents, 4, bad);
+    has(report, `"Parallel subagents" is "${bad}"`);
+  }
+  // More in flight than allowed is reported.
+  write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Analyses ahead of review: 1\n`);
+  has(status(dir), '2 extract changes are in analysis or review, more than the 1 allowed');
+
+  // The pilot: until one capability is reviewed, one analysis at a time.
+  const fresh = repo({ plan: PLAN });
+  for (const rel of ['openspec/specs', 'openspec/changes/archive/2026-11-01-extract-common-base', 'openspec/changes/archive/2026-11-02-port-common-base', EXTRACT]) fs.rmSync(path.join(fresh, rel), { recursive: true });
+  assert.deepEqual(status(fresh).parallel.nextToAnalyze, ['common/base']);
+  for (const name of ['common-base', 'billing-invoice']) write(fresh, `openspec/changes/extract-${name}/.openspec.yaml`, 'schema: spec-relay-extract\n');
+  has(status(fresh), '2 extract changes are in analysis or review before the first capability was reviewed');
+
+  // A quoted model name loses its quotes, and "Session" is the session model.
+  write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Analyst model: "claude-sonnet-5.5"\n  Checker model: Session\n`);
+  assert.deepEqual(status(dir).parallel.models, { analyst: 'claude-sonnet-5.5', checker: 'session', implementer: 'session' });
+
+  // Nothing is analyzed before the survey is archived.
+  fs.rmSync(path.join(dir, 'openspec/changes/archive'), { recursive: true });
+  write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Analyses ahead of review: 5\n`);
+  assert.deepEqual(status(dir).parallel.nextToAnalyze, []);
 });

@@ -11,7 +11,8 @@ artifacts:
       it excluded. `gate.mjs review` lists the files on disk and fails when one
       is not covered, so do not sample: read the whole code base. For a large
       code base, split the reading by folder across `spec-relay-analyst`
-      subagents and merge what they return.
+      subagents that each write their rows to a part file, and merge the parts
+      with the kit's `merge.mjs` (see the spec-relay skill).
 
       One table row per file or folder:
       - **Path**: repository-relative, forward slashes. A path ending in `/`

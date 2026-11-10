@@ -347,3 +347,55 @@ test('port-done needs the hash of its own capability', () => {
   write(dir, 'openspec/changes/port-calc-add/proposal.md', `- \`calc/other\` sha256:${baselineHash(dir, 'calc/other')}\n`);
   assert.match(checkPortDone(dir, 'port-calc-add').problems.join(), /no baseline hash for this change's own capability/);
 });
+
+test('guard hashes review.md of active changes, baseline specs and the config, not artifacts or archives', async () => {
+  const { guardHash } = await import('../scripts/gate.mjs');
+  const dir = tempDir();
+  write(dir, 'openspec/config.yaml', 'x\n');
+  write(dir, 'openspec/specs/a/b/spec.md', '## Purpose\n');
+  write(dir, 'openspec/changes/extract-a/review.md', '- [ ] R1 a\n');
+  write(dir, 'openspec/changes/extract-a/spec.md', 'draft\n');
+  write(dir, 'openspec/changes/archive/2026-01-01-x/review.md', '- [x] old\n');
+  write(dir, 'x.php', '<?php\n');
+  const before = guardHash(dir);
+  assert.equal(before.files, 4, 'review.md, the spec, the config and the source file x.php');
+  write(dir, 'openspec/changes/extract-a/spec.md', 'draft 2\n');
+  write(dir, 'openspec/changes/archive/2026-01-01-x/review.md', 'changed\n');
+  assert.equal(guardHash(dir).sha256, before.sha256, 'artifacts and archives may change');
+  write(dir, 'openspec/changes/extract-a/review.md', '- [x] R1 a\n');
+  assert.notEqual(guardHash(dir).sha256, before.sha256, 'a tick changes the hash');
+});
+
+test('guard --save and --compare list only the protected files that changed', async () => {
+  const { guardSave, guardCompare } = await import('../scripts/gate.mjs');
+  const dir = tempDir();
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root: src\n  Target root: new\n');
+  write(dir, 'openspec/spec-relay/plan.md', '## Capabilities\n');
+  write(dir, 'openspec/changes/extract-a/review.md', '- [ ] R1 a\n');
+  write(dir, 'openspec/changes/extract-a/questions.md', '- Q1 a\n');
+  write(dir, 'openspec/changes/extract-a/specs/a/spec.md', 'draft\n');
+  write(dir, 'src/a.php', '<?php\n');
+  write(dir, 'src/b.php', '<?php\n');
+  write(dir, 'new/A.java', 'class A {}\n');
+  assert.deepEqual(guardSave(dir, 'wave-1'), { ok: true, snapshot: 'openspec/spec-relay/work/guard/wave-1.json', files: 6 });
+  write(dir, 'openspec/changes/extract-a/specs/a/spec.md', 'draft 2\n');
+  write(dir, 'new/A.java', 'class A { }\n');
+  write(dir, 'openspec/spec-relay/work/extract-a/crosscheck-01.md', '| Item | Verdict | Evidence |\n');
+  assert.deepEqual(guardCompare(dir, 'wave-1'), { ok: true, changed: [], added: [], removed: [] }, 'artifacts, the target and work files may change');
+  write(dir, 'openspec/changes/extract-a/questions.md', '- Q1 b\n');
+  write(dir, 'openspec/spec-relay/plan.md', '## Capabilities\n- x\n');
+  write(dir, 'src/a.php', '<?php // fixed\n');
+  write(dir, 'src/c.php', '<?php\n');
+  fs.rmSync(path.join(dir, 'src/b.php'));
+  assert.deepEqual(guardCompare(dir, 'wave-1'), {
+    ok: false,
+    changed: ['openspec/changes/extract-a/questions.md', 'openspec/spec-relay/plan.md', 'src/a.php'],
+    added: ['src/c.php'],
+    removed: ['src/b.php'],
+  });
+  assert.match(guardCompare(dir, 'wave-2').problems.join(), /no snapshot .*wave-2\.json; run gate\.mjs guard --save wave-2/);
+  assert.equal(guardSave(dir, '../x').ok, false);
+  assert.equal(quiet(() => main(['guard', '--compare', '', '--root', dir])), 1, 'an empty name never falls back to the plain hash');
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root: missing\n');
+  assert.match(guardSave(dir, 'wave-3').warnings.join(), /source files are not guarded/);
+});
