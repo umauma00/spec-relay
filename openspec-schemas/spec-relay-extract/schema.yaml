@@ -20,6 +20,9 @@ artifacts:
         environment variables and external services it uses.
       - **Out of scope**: Nearby code that belongs to another capability.
 
+      Write every path relative to the repository root with forward slashes
+      (`src/billing/Invoice.cs`), also on Windows.
+
       The source code is read-only. Never edit, format or move it.
     requires: []
 
@@ -61,7 +64,8 @@ artifacts:
     template: trace.md
     instruction: |
       For EVERY requirement in the specs, list where the source code implements
-      it: repository-relative path, symbol, and line range when stable. Phase 3
+      it: repository-relative path with forward slashes, symbol, and line range
+      when stable. Phase 3
       implementers read the original logic through this file, so make each
       reference precise enough to open directly.
 

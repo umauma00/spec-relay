@@ -12,9 +12,30 @@ tell the person to select `spec-relay-orchestrator` in the agent picker (Copilot
 CLI: `/agent`) and stop. A subagent the orchestrator starts does its assigned
 task and returns to it.
 
-The kit's own files are two directories above this skill (`<kit>` below):
-`scripts/setup.mjs`, `scripts/gate.mjs`, `openspec-schemas/` and
-`docs/WORKFLOW.md`. Read `docs/WORKFLOW.md` once when you
+The kit's own files are two directories above this skill:
+[scripts/setup.mjs](../../scripts/setup.mjs),
+[scripts/gate.mjs](../../scripts/gate.mjs), `openspec-schemas/` and
+`docs/WORKFLOW.md`. `<kit>` below stands for the absolute path of that
+directory; resolve it from this file's own location (installed as a plugin it is
+under `.copilot/installed-plugins/` in the person's home folder).
+
+## Running commands
+
+Most people use this kit on Windows, where your shell is PowerShell.
+- Run every command with the repository being migrated as the working
+  directory, and write commands on one line. Do not use bash line
+  continuations, `&&`, pipes or redirection (`>` writes UTF-16 in Windows
+  PowerShell 5.1, which OpenSpec and the gate cannot read). Write files with
+  your edit tool, in UTF-8.
+- Quote every path, because home folders often contain spaces:
+  `node "<kit>/scripts/gate.mjs" ...`. Forward slashes work on every platform.
+- If PowerShell answers `openspec` or `npm` with "running scripts is disabled
+  on this system", the command exists: call `openspec.cmd` or `npm.cmd`
+  instead. Never change the execution policy unless the person asks.
+- After installing a tool, PATH is stale in the open terminal. The kit's
+  scripts look in npm's global folder themselves; for your own `openspec`
+  calls open a new terminal.
+- Write repository paths in artifacts with forward slashes (`src/billing/Invoice.cs`). Read `docs/WORKFLOW.md` once when you
 need the reasoning behind a step.
 
 ## Words
@@ -38,14 +59,16 @@ need the reasoning behind a step.
 
 1. Run `openspec --version`. If the command is missing, ask the person before
    installing it with `npm install -g @fission-ai/openspec@1.17.0` (Node.js
-   22.12 or later; 1.17.0 is the version the kit is tested with).
+   22.12 or later; 1.17.0 is the version the kit is tested with). If `node`
+   itself is missing, tell the person how to install it (Windows: `winget
+   install OpenJS.NodeJS.LTS`) and stop.
 2. If `openspec/config.yaml` already contains `# spec-relay: managed`, setup is
    done; read its context and go to the first unfinished phase.
 3. Otherwise ask, one question at a time: the source language (propose what you
    detect from the files), the target language, the source root, the target root
    and the language for artifacts (default: the person's language).
-4. Run `node <kit>/scripts/setup.mjs --target . --source-language ...
-   --target-language ... --source-root ... --target-root ... --language ...`
+4. Run `node "<kit>/scripts/setup.mjs" --target . --source-language "..."
+   --target-language "..." --source-root "..." --target-root "..." --language ...`
    without `--apply`, show the plan, and run it again with `--apply` after the
    person agrees. On a conflict, show it and ask how to resolve it; never
    overwrite, move or delete the person's files to get past it.
@@ -61,8 +84,14 @@ need the reasoning behind a step.
    build files, tests). Propose a capability list in dependency order, with the
    source directories of each, and write it to the plan after the person agrees
    to the list. Start with a small capability that has few dependencies.
-   Avoid names that collide once `/` becomes `-` (`billing/invoice` and
-   `billing-invoice` would get the same change name).
+   Name capabilities so that OpenSpec and Windows both accept them: each
+   path segment is lowercase ASCII kebab-case (`billing/invoice`, not
+   `Billing_Invoice` or `請求`; put the Japanese name in the plan beside it),
+   never a Windows device name (`con`, `prn`, `aux`, `nul`, `com1`...), and
+   short, because the path repeats inside `openspec/changes/archive/` and
+   Windows limits paths to 260 characters. Avoid names that collide once `/`
+   becomes `-` (`billing/invoice` and `billing-invoice` would get the same
+   change name).
 2. **Create the change.** `openspec new change extract-<capability> --schema
    spec-relay-extract`. Use the capability path with `/` replaced by `-` as the
    change name.
@@ -89,7 +118,7 @@ The person reviews; you assist. This gate is the point of the kit.
    they ask for a change, edit the artifacts, untick every item whose
    requirement, trace entry or question you changed, show the result, validate
    again and ask again.
-3. When every box is ticked, run `node <kit>/scripts/gate.mjs review --change
+3. When every box is ticked, run `node "<kit>/scripts/gate.mjs" review --change
    extract-<capability>`. It fails when a requirement or question has no review
    item, an item is unticked, a decision is blank or no reviewer is named.
    `openspec archive --yes` checks none of this, so never archive while the gate
@@ -102,7 +131,7 @@ The person reviews; you assist. This gate is the point of the kit.
 ## 3. Implement: port the baseline spec
 
 1. Port only capabilities whose extract change is archived, in plan order.
-   `node <kit>/scripts/gate.mjs port-ready --capability <capability>` must pass
+   `node "<kit>/scripts/gate.mjs" port-ready --capability <capability>` must pass
    before you create the port change.
 2. `openspec new change port-<capability> --schema spec-relay-port`, then write
    proposal, design and tasks with `openspec instructions <artifact> --change
@@ -116,7 +145,7 @@ The person reviews; you assist. This gate is the point of the kit.
    accepting the work.
 5. When the code and the baseline spec disagree, stop and ask the person. Never
    change the spec or the code's behavior to make the two agree on your own.
-6. When every task is done and verified, run `node <kit>/scripts/gate.mjs
+6. When every task is done and verified, run `node "<kit>/scripts/gate.mjs"
    port-done --change port-<capability>`, report the results, and archive the
    port change after the person agrees: `openspec archive port-<capability>
    --yes`.

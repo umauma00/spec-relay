@@ -4,7 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { main, parseArgs, plan, CONFIG_MARKER, KIT_ROOT, STUB_MARKER } from '../scripts/setup.mjs';
-import { tempDir, write, quiet } from './helpers.mjs';
+import { findOpenspec, runOpenspec } from '../scripts/openspec.mjs';
+import { tempDir, write, quiet, isolateOpenspec, crlf } from './helpers.mjs';
+
+isolateOpenspec();
 
 const LANGS = ['--source-language', 'C#', '--target-language', 'TypeScript'];
 const BASE = [...LANGS, '--target-root', 'ts'];
@@ -16,9 +19,13 @@ test('required options are enforced', () => {
 });
 
 test('target root must be a relative, new directory outside openspec/ and .github/', () => {
-  for (const bad of ['../out', '/abs', 'C:out', '.', 'openspec/out', 'openspec\\out', '.github/x']) {
+  for (const bad of ['../out', '..\\out', '/abs', '\\abs', 'C:out', 'C:\\out', '\\\\server\\share\\out', '.', 'openspec/out', 'openspec\\out', '.github/x']) {
     assert.throws(() => parseArgs([...LANGS, '--target-root', bad]), /relative path|new directory/, bad);
   }
+  for (const bad of ['con', 'NUL', 'aux\\ts', 'com1.txt', 'ts.', 'ts ', 'a/b?c', 'ts*']) {
+    assert.throws(() => parseArgs([...LANGS, '--target-root', bad]), /Windows cannot use/, bad);
+  }
+  assert.equal(parseArgs([...LANGS, '--source-root', '.\\Legacy App\\src\\', '--target-root', 'ts']).sourceRoot, 'Legacy App/src');
 });
 
 test('source and target roots must not contain each other, except source root .', () => {
@@ -87,6 +94,22 @@ test('files openspec init would replace or clean up are conflicts before init', 
   assert.equal(fs.readFileSync(path.join(dir, 'openspec/AGENTS.md'), 'utf8'), 'my notes\n');
 });
 
+const run = (script, args, options = {}) => spawnSync(process.execPath, [path.join(KIT_ROOT, 'scripts', script), ...args], { encoding: 'utf8', ...options });
+
+test('the scripts run as processes and set their exit codes', () => {
+  const help = run('setup.mjs', ['--help']);
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /Usage:/);
+  assert.equal(run('setup.mjs', ['--nope']).status, 1);
+  assert.equal(run('gate.mjs', ['review']).status, 2);
+  const dir = tempDir();
+  assert.equal(run('gate.mjs', ['review', '--change', 'x'], { cwd: dir }).status, 2, 'no openspec/ folder');
+  write(dir, 'openspec/changes/port-x/tasks.md', '- [ ] 1.1 a\r\n');
+  const gate = run('gate.mjs', ['port-done', '--change', 'port-x', '--root', dir]);
+  assert.equal(gate.status, 1);
+  assert.equal(JSON.parse(gate.stdout).ok, false);
+});
+
 test('running the script through a symlink still runs it', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, () => {
   const dir = tempDir();
   const link = path.join(dir, 'setup-link.mjs');
@@ -96,22 +119,70 @@ test('running the script through a symlink still runs it', { skip: process.platf
   assert.match(result.stdout, /Usage:/);
 });
 
-function fakeOpenspec(initExit) {
+// A stand-in for the CLI: `--version` works and everything else exits 1.
+function fakeOpenspec() {
   const bin = tempDir('spec-relay-bin-');
-  write(bin, 'openspec', `#!/bin/sh\n[ "$1" = "--version" ] && { echo 1.17.0; exit 0; }\nexit ${initExit}\n`);
-  fs.chmodSync(path.join(bin, 'openspec'), 0o755);
+  if (process.platform === 'win32') {
+    write(bin, 'openspec.cmd', '@echo off\r\nif "%1"=="--version" (echo 1.17.0& exit /b 0)\r\nexit /b 1\r\n');
+  } else {
+    write(bin, 'openspec', '#!/bin/sh\n[ "$1" = "--version" ] && { echo 1.17.0; exit 0; }\nexit 1\n');
+    fs.chmodSync(path.join(bin, 'openspec'), 0o755);
+  }
   return bin;
 }
 
-test('a failed openspec init removes the files the run created, so a re-run starts over', { skip: process.platform === 'win32' && 'POSIX shell stub' }, () => {
+function envWithPath(first) {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.toUpperCase() === 'PATH' || key === 'APPDATA' || key === 'npm_config_prefix') delete env[key];
+  // Only this folder: the real CLI often sits beside node, so node's folder stays out.
+  env.PATH = first;
+  return env;
+}
+
+test('a failed openspec init removes the files the run created, so a re-run starts over', () => {
   const dir = tempDir();
-  const bin = fakeOpenspec(1);
-  const result = spawnSync(process.execPath, [path.join(KIT_ROOT, 'scripts/setup.mjs'), '--target', dir, ...BASE, '--apply'],
-    { encoding: 'utf8', env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` } });
-  assert.equal(result.status, 1, result.stderr);
+  const result = run('setup.mjs', ['--target', dir, ...BASE, '--apply'], { env: envWithPath(fakeOpenspec()) });
+  assert.equal(result.status, 1, result.stderr + result.stdout);
   assert.match(result.stderr, /were removed/);
   assert.ok(!fs.existsSync(path.join(dir, 'openspec/config.yaml')));
   assert.equal(plan(parseArgs(['--target', dir, ...BASE])).runInit, true);
+});
+
+test('a missing openspec CLI stops setup before anything is written', () => {
+  const dir = tempDir();
+  const result = run('setup.mjs', ['--target', dir, ...BASE, '--apply'], { env: envWithPath(tempDir()) });
+  assert.equal(result.status, 3, result.stderr + result.stdout);
+  assert.match(result.stderr, /was not found/);
+  assert.deepEqual(fs.readdirSync(dir), []);
+});
+
+test('on Windows the npm shim runs as node + openspec.js, never through a shell', () => {
+  const npm = 'C:\\Users\\Taro Yamada\\AppData\\Roaming\\npm';
+  const script = `${npm}\\node_modules\\@fission-ai\\openspec\\bin\\openspec.js`;
+  const find = (files, env) => findOpenspec({ platform: 'win32', env, exists: (file) => files.includes(file) });
+  assert.deepEqual(find([`${npm}\\openspec.cmd`, script], { Path: `.;relative\\bin;"${npm}"` }), { command: process.execPath, prefixArgs: [script] });
+  // Not on PATH (a terminal opened before the install): npm's folder under %APPDATA% is searched.
+  assert.deepEqual(find([`${npm}\\openspec.cmd`, script], { PATH: 'C:\\Windows', APPDATA: 'C:\\Users\\Taro Yamada\\AppData\\Roaming' }).prefixArgs, [script]);
+  assert.deepEqual(find(['C:\\tools\\openspec.exe'], { PATH: 'C:\\tools' }), { command: 'C:\\tools\\openspec.exe', prefixArgs: [] });
+  // A shim from another package manager runs through cmd.exe.
+  assert.equal(find(['C:\\pnpm\\openspec.cmd'], { PATH: 'C:\\pnpm', ComSpec: 'C:\\Windows\\System32\\cmd.exe' }).batch, 'C:\\pnpm\\openspec.cmd');
+  // A file in the repository being migrated is never picked up.
+  assert.equal(find(['openspec.cmd', '.\\openspec.cmd'], { PATH: '.' }), null);
+  assert.equal(runOpenspec(['--version'], {}, null).notFound, true);
+  const refused = runOpenspec(['init', 'a&b'], {}, { command: 'cmd.exe', prefixArgs: [], batch: 'C:\\pnpm\\openspec.cmd' });
+  assert.match(refused.error.message, /cannot pass/);
+});
+
+test('schema files checked out with CRLF or a BOM are the kit version, not a conflict', () => {
+  const dir = tempDir();
+  quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply']));
+  const schema = path.join(dir, 'openspec/schemas/spec-relay-port/schema.yaml');
+  const config = path.join(dir, 'openspec/config.yaml');
+  fs.writeFileSync(schema, `\uFEFF${crlf(fs.readFileSync(schema, 'utf8'))}`);
+  fs.writeFileSync(config, crlf(fs.readFileSync(config, 'utf8')));
+  const again = plan(parseArgs(['--target', dir, ...BASE]));
+  assert.ok(again.managed);
+  assert.deepEqual(again.steps.filter((step) => step.action !== 'keep'), []);
 });
 
 test('a re-run disables only OpenSpec-generated apply/archive/sync workflows', () => {

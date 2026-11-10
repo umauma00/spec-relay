@@ -116,3 +116,28 @@ test('port-ready normalises the capability path', () => {
   }
   assert.equal(checkPortReady(dir, '../x').ok, false);
 });
+
+test('CRLF and a UTF-8 BOM are read normally; UTF-16 files fail the gate', () => {
+  const crlf = (text) => text.replace(/\n/g, '\r\n');
+  const dir = repo(`\uFEFF${crlf(GOOD)}`, { questions: `\uFEFF${crlf(QUESTIONS)}` });
+  write(dir, `${CHANGE}/specs/calc/spec.md`, `\uFEFF${crlf(SPEC)}`);
+  assert.deepEqual(checkReview(dir, 'extract-calc'), { ok: true, problems: [] });
+
+  // What Windows PowerShell 5.1 writes with `>` or Out-File.
+  const utf16 = (text) => Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]);
+  for (const rel of ['questions.md', 'specs/calc/spec.md', 'review.md']) {
+    const bad = repo(GOOD.replace('- [x] Q1 Overflow: decision: keep\n', ''), { questions: '# Questions\nNone\n' });
+    fs.writeFileSync(path.join(bad, CHANGE, rel), utf16(rel === 'questions.md' ? QUESTIONS : 'x\n'));
+    assert.match(checkReview(bad, 'extract-calc').problems.join(), /not UTF-8/, rel);
+  }
+  const port = tempDir();
+  fs.mkdirSync(path.join(port, 'openspec/changes/port-calc'), { recursive: true });
+  fs.writeFileSync(path.join(port, 'openspec/changes/port-calc/tasks.md'), utf16('- [x] 1.1 a\n'));
+  assert.equal(checkPortDone(port, 'port-calc').ok, false);
+});
+
+test('a spec file with no requirements fails the review gate', () => {
+  const dir = repo(GOOD);
+  write(dir, `${CHANGE}/specs/calc/spec.md`, '## Purpose\n\nNothing here.\n');
+  assert.match(checkReview(dir, 'extract-calc').problems.join(), /no requirements found/);
+});

@@ -7,7 +7,8 @@
 //   node gate.mjs port-done --change port-<capability>     before archiving a port change
 //
 // Prints { ok, problems } as JSON and exits 0 when ok, 1 when not, 2 on bad usage.
-// Run it from the repository root (or pass --root DIR).
+// Run it from the repository root (or pass --root DIR). Files may use CRLF line
+// endings and a UTF-8 BOM; UTF-16 files are rejected.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,8 +22,18 @@ const PLACEHOLDER = /^(<.*>|tbd|todo|tba|n\/a|-|\.\.\.|…)?$/i;
 const ticked = (mark) => mark.trim().toLowerCase() === 'x';
 const stripComments = (text) => text.replace(/<!--[\s\S]*?-->/g, '');
 
-function readIf(file) {
-  try { return fs.statSync(file).isFile() ? fs.readFileSync(file, 'utf8') : null; } catch { return null; }
+// Returns the file's text, or null when it is missing. A file that is not UTF-8
+// (Windows PowerShell 5.1 writes UTF-16 with `>` and Out-File) would read as
+// text with nothing in it, so it is reported in `problems` instead of trusted.
+function readIf(file, problems) {
+  let buffer;
+  try { if (!fs.statSync(file).isFile()) return null; buffer = fs.readFileSync(file); } catch { return null; }
+  const utf16 = (buffer[0] === 0xff && buffer[1] === 0xfe) || (buffer[0] === 0xfe && buffer[1] === 0xff);
+  if (utf16 || buffer.includes(0)) {
+    problems.push(`${path.basename(file)} is not UTF-8 (it looks like UTF-16); save it again as UTF-8`);
+    return '';
+  }
+  return buffer.toString('utf8').replace(/^\uFEFF/, '');
 }
 
 function walk(dir) {
@@ -66,7 +77,7 @@ export function checkReview(root, change) {
   const problems = [];
   const dir = path.join(root, 'openspec/changes', change);
   if (!fs.existsSync(dir)) return { ok: false, problems: [`change not found: ${change} (an archived change cannot be checked)`] };
-  const review = readIf(path.join(dir, 'review.md'));
+  const review = readIf(path.join(dir, 'review.md'), problems);
   if (review === null) return { ok: false, problems: ['review.md is missing'] };
 
   const reviewer = stripComments(review).match(/^Reviewer:[ \t]*(.*)$/m);
@@ -80,15 +91,17 @@ export function checkReview(root, change) {
   if (specs.length === 0) problems.push('the change has no spec files');
   const rItems = boxes.filter((b) => /^R\d+\b/i.test(b.plain)).map((b) => norm(b.plain.replace(/^R\d+\s*[.:)-]?\s*/i, '')));
   for (const file of specs) {
-    for (const name of requirementNames(fs.readFileSync(file, 'utf8'))) {
+    const names = requirementNames(readIf(file, problems) ?? '');
+    if (names.length === 0) problems.push(`no requirements found in ${path.relative(dir, file).replace(/\\/g, '/')}`);
+    for (const name of names) {
       const count = rItems.filter((item) => item === norm(name)).length;
       if (count !== 1) {
-        problems.push(`requirement has ${count === 0 ? 'no' : 'more than one'} review item: "${name}" (${path.relative(dir, file)})`);
+        problems.push(`requirement has ${count === 0 ? 'no' : 'more than one'} review item: "${name}" (${path.relative(dir, file).replace(/\\/g, '/')})`);
       }
     }
   }
 
-  const questions = readIf(path.join(dir, 'questions.md'));
+  const questions = readIf(path.join(dir, 'questions.md'), problems);
   if (questions === null) problems.push('questions.md is missing');
   const qItems = new Map();
   for (const box of boxes) {
@@ -110,7 +123,7 @@ export function checkPortReady(root, capability) {
   const problems = [];
   const parts = capabilitySegments(capability);
   if (parts.length === 0 || parts.includes('..')) return { ok: false, problems: [`not a capability path: ${capability}`] };
-  if (!readIf(path.join(root, 'openspec/specs', ...parts, 'spec.md'))) {
+  if (!readIf(path.join(root, 'openspec/specs', ...parts, 'spec.md'), problems)) {
     problems.push(`no baseline spec at openspec/specs/${parts.join('/')}/spec.md; archive its reviewed extract change first`);
   }
   const extract = `extract-${parts.join('-')}`;
@@ -122,10 +135,11 @@ export function checkPortReady(root, capability) {
 
 export function checkPortDone(root, change) {
   const dir = path.join(root, 'openspec/changes', change);
-  const tasks = readIf(path.join(dir, 'tasks.md'));
+  const problems = [];
+  const tasks = readIf(path.join(dir, 'tasks.md'), problems);
   if (tasks === null) return { ok: false, problems: [`tasks.md not found for change ${change}`] };
   const boxes = checkboxes(tasks);
-  const problems = boxes.filter((b) => !b.done).map((b) => `not done: ${b.body}`);
+  problems.push(...boxes.filter((b) => !b.done).map((b) => `not done: ${b.body}`));
   if (boxes.length === 0) problems.push('tasks.md has no tasks');
   return { ok: problems.length === 0, problems };
 }
@@ -137,6 +151,10 @@ export function main(argv) {
     const key = { '--change': 'change', '--capability': 'capability', '--root': 'root' }[rest[i]];
     if (!key || rest[i + 1] === undefined) return usage();
     opts[key] = rest[i + 1];
+  }
+  if (!fs.existsSync(path.join(opts.root, 'openspec'))) {
+    console.error(`gate: no openspec/ folder in ${path.resolve(opts.root)}. Run this from the repository root or pass --root DIR.`);
+    return 2;
   }
   let result;
   if (command === 'review' && opts.change) result = checkReview(opts.root, opts.change);

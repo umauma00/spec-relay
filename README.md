@@ -25,17 +25,21 @@ GitHub Copilot CLI・VS Code・GitHub Copilot app を想定しています。入
 
 ## 必要なもの
 
-- Node.js 22.12 以上（OpenSpec の要件）
-- [OpenSpec CLI](https://github.com/Fission-AI/OpenSpec) 1.17.0（`npm install -g @fission-ai/openspec@1.17.0`。テストはこの版で実行）
-- GitHub Copilot（CLI・VS Code・Copilot app のいずれか）
+Windows を主な実行環境として扱います（macOS・Linux でも動きます）。Windows での入れ方と注意点は [docs/WINDOWS.md](docs/WINDOWS.md) にまとめています。
+
+| 必要なもの | Windows での入れ方の例 |
+|---|---|
+| Node.js 22.12 以上（OpenSpec の要件） | `winget install OpenJS.NodeJS.LTS` |
+| [OpenSpec CLI](https://github.com/Fission-AI/OpenSpec) 1.17.0（テストはこの版で実行） | `npm install -g @fission-ai/openspec@1.17.0` |
+| GitHub Copilot（CLI・VS Code・Copilot app のいずれか） | |
 
 ## 導入
 
 ### プラグインとして入れる
 
-Copilot CLI の場合：
+Copilot CLI の場合（PowerShell でもそのまま実行できます）：
 
-```bash
+```powershell
 copilot plugin marketplace add umauma00/spec-relay
 copilot plugin install spec-relay@spec-relay-marketplace
 ```
@@ -46,14 +50,12 @@ VS Code と Copilot app でも、同じ登録元（`umauma00/spec-relay`）を�
 
 移行したいリポジトリを開いて `spec-relay-orchestrator` を選び、「Java から TypeScript への移行を始めて」のように頼みます。AI が言語とフォルダーを聞いたうえで、次の導入スクリプトを実行します（手で実行してもかまいません）。
 
-```bash
-# 確認だけ（何も書き換えない）
-node <spec-relay>/scripts/setup.mjs --target . \
-  --source-language Java --target-language TypeScript \
-  --source-root src --target-root ts --language ja
-# 反映する
-node <spec-relay>/scripts/setup.mjs ...同じ引数... --apply
+```powershell
+node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Java" --target-language "TypeScript" --source-root "src" --target-root "ts" --language ja
 ```
+
+- これは確認だけで、何も書き換えません。内容を見てから、同じコマンドの最後に `--apply` を付けて反映します。
+- PowerShell・コマンドプロンプト・bash のどれでも同じ1行で動きます。キットのパスは `"` で囲んでください（プラグインとして入れた場合は、ホームフォルダーの `.copilot\installed-plugins\` の下にあります）。
 
 導入で置かれるもの：
 
@@ -65,7 +67,7 @@ node <spec-relay>/scripts/setup.mjs ...同じ引数... --apply
 | `.github/skills/openspec-*`、`.github/prompts/opsx-*` | `openspec init --tools github-copilot` が置く OpenSpec 標準のスキルとコマンド（propose・explore・update） |
 
 - 内容の違う既存ファイルがあると、上書きせずに衝突を表示して止まります。`openspec init` が置き換え・削除・編集するファイル（既存の `opsx-*`・`openspec-*`、`openspec/AGENTS.md` など）が既にある場合も、同じく止まります。
-- OpenSpec 標準の apply・archive（bulk-archive を含む）・sync（スキルとコマンド）は、レビューの確認を通らずにチェックや archive ができてしまうため、導入スクリプトが中身を「`spec-relay-orchestrator` を使ってください」という案内に置き換えて無効にします。ファイル自体を消さないのは、消すと後の `openspec update` が利用者の OpenSpec 全体の設定（`~/.config/openspec`）から、ほかのプロジェクトも含めてこれらのワークフローを外してしまうためです。`openspec update` で元の中身に戻ったときは、もう一度導入スクリプトを実行してください。
+- OpenSpec 標準の apply・archive（bulk-archive を含む）・sync（スキルとコマンド）は、レビューの確認を通らずにチェックや archive ができてしまうため、導入スクリプトが中身を「`spec-relay-orchestrator` を使ってください」という案内に置き換えて無効にします。ファイル自体を消さないのは、消すと後の `openspec update` が利用者の OpenSpec 全体の設定（Windows では `%APPDATA%\openspec`）から、ほかのプロジェクトも含めてこれらのワークフローを外してしまうためです。`openspec update` で元の中身に戻ったときは、もう一度導入スクリプトを実行してください。
 
 ## 守っていること
 
@@ -85,16 +87,20 @@ openspec-schemas/              移行用の OpenSpec スキーマ
 templates/openspec-config.yaml 移行対象に置く OpenSpec 設定のひな形
 scripts/setup.mjs              導入スクリプト（外部パッケージなし）
 scripts/gate.mjs               承認・実装の前に使う機械的な確認
+scripts/openspec.mjs           OpenSpec CLI の起動（Windows でシェルを通さない）
 tests/                         node:test のテスト（OpenSpec があれば通しの確認も）
 docs/WORKFLOW.md               流れと設計の説明、今後の課題
+docs/WINDOWS.md                Windows での準備と注意点
 ```
 
 ## 開発
 
-```bash
-npm install -g @fission-ai/openspec@1.17.0   # 通しのテストに使う（なければそのテストは skip と表示）
+```powershell
+npm install -g @fission-ai/openspec@1.17.0
 npm test
 ```
+
+OpenSpec がない端末では、OpenSpec を実際に動かす通しのテストだけ skip と表示されます（CI では skip せず失敗にします）。テストは一時フォルダーの設定を使うので、手元の OpenSpec の設定は変わりません。CI は Windows と Ubuntu の Node.js 22・24 で実行しています。
 
 ライセンスはまだ決めていません（LICENSE は未配置）。
 

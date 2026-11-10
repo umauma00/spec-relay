@@ -17,5 +17,5 @@ files you read.
   looks wrong. Never "fix" behavior in a spec; put doubts in questions.md.
 - Keep specs language-neutral: no class, function or library names of the
   source language. Put every source location in trace.md.
-- Cite repository-relative paths and symbols for every claim in trace.md and
+- Cite repository-relative paths (with forward slashes, also on Windows) and symbols for every claim in trace.md and
   source-map.md. Say "not found" rather than guessing.

@@ -8,14 +8,15 @@
 //      with stubs that send the agent to the orchestrator, because they would
 //      tick review.md and archive without the review gate. The files stay in
 //      place: deleting them makes a later `openspec update` narrow the person's
-//      global OpenSpec profile (~/.config/openspec), which affects every project.
+//      global OpenSpec profile (%APPDATA%\\openspec or ~/.config/openspec), which
+//      affects every project.
 // Without --apply it only prints the plan. It never overwrites a file whose
 // content differs from the kit's, and it never lets `openspec init` replace or
 // clean up files that already exist; it reports the conflict and stops instead.
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runOpenspec, probeOpenspec } from './openspec.mjs';
 
 export const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SCHEMAS = ['spec-relay-extract', 'spec-relay-port'];
@@ -76,8 +77,14 @@ export function parseArgs(argv) {
   }
   for (const key of ['sourceRoot', 'targetRoot']) {
     const flag = key === 'sourceRoot' ? '--source-root' : '--target-root';
-    if (path.isAbsolute(opts[key]) || /^[A-Za-z]:/.test(opts[key]) || opts[key].split(/[\\/]/).includes('..')) {
+    if (path.isAbsolute(opts[key]) || /^([A-Za-z]:|[\\/])/.test(opts[key]) || opts[key].split(/[\\/]/).includes('..')) {
       throw new UsageError(`${flag} must be a relative path inside --target`);
+    }
+    for (const part of segments(opts[key])) {
+      // The repository is shared with Windows machines even when setup runs elsewhere.
+      if (/[<>:"|?*]/.test(part) || /[. ]$/.test(part) || WINDOWS_RESERVED.test(part)) {
+        throw new UsageError(`${flag} contains a name Windows cannot use: "${part}"`);
+      }
     }
     opts[key] = segments(opts[key]).join('/') || '.';
   }
@@ -93,11 +100,12 @@ export function parseArgs(argv) {
   return opts;
 }
 
-// Windows ignores trailing dots and spaces in names ("openspec." is openspec/).
-const fold = (name) => {
-  const trimmed = process.platform === 'win32' ? name.replace(/[. ]+$/, '') : name;
-  return CASE_INSENSITIVE_FS ? trimmed.toLowerCase() : trimmed;
-};
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+const fold = (name) => (CASE_INSENSITIVE_FS ? name.toLowerCase() : name);
+// The same text whatever the checkout did to it: Git for Windows converts LF to
+// CRLF by default (core.autocrlf=true), and some editors add a UTF-8 BOM.
+export const normalizeText = (text) => text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+const readText = (file) => { try { return normalizeText(fs.readFileSync(file, 'utf8')); } catch { return ''; } };
 // Splits on both separators so "a\\b" is checked the same way on every platform.
 const segments = (rel) => rel.split(/[\\/]+/).filter((part) => part && part !== '.');
 const isPrefix = (a, b) => a.length <= b.length && a.every((part, i) => fold(part) === fold(b[i]));
@@ -145,7 +153,7 @@ function initConflicts(target) {
   }
   for (const rel of ['AGENTS.md', 'CLAUDE.md', '.github/copilot-instructions.md']) {
     const file = path.join(target, rel);
-    if (exists(file) && fs.readFileSync(file, 'utf8').includes('OPENSPEC:START')) found.push(file);
+    if (exists(file) && readText(file).includes('OPENSPEC:START')) found.push(file);
   }
   return found;
 }
@@ -156,7 +164,7 @@ function initConflicts(target) {
 // change is shown in the dry run first.
 export function bypassFiles(target) {
   const found = [];
-  const read = (file) => { try { return fs.readFileSync(file, 'utf8'); } catch { return ''; } };
+  const read = readText;
   let names = [];
   try { names = fs.readdirSync(path.join(target, '.github/skills')); } catch { /* absent */ }
   for (const name of names.filter((n) => n.startsWith('openspec-') && BYPASS_NAME.test(n))) {
@@ -179,14 +187,14 @@ export function bypassFiles(target) {
 export function plan(opts) {
   const steps = [];
   const configYaml = path.join(opts.target, 'openspec/config.yaml');
-  const managed = exists(configYaml) && fs.readFileSync(configYaml, 'utf8').includes(CONFIG_MARKER);
+  const managed = exists(configYaml) && readText(configYaml).includes(CONFIG_MARKER);
   for (const schema of SCHEMAS) {
     const from = path.join(KIT_ROOT, 'openspec-schemas', schema);
     for (const rel of listFiles(from)) {
       const dest = path.join(opts.target, 'openspec/schemas', schema, rel);
       const content = fs.readFileSync(path.join(from, rel), 'utf8');
       if (!fs.existsSync(dest)) steps.push({ action: 'create', path: dest, content });
-      else if (fs.readFileSync(dest, 'utf8') === content) steps.push({ action: 'keep', path: dest });
+      else if (readText(dest) === normalizeText(content)) steps.push({ action: 'keep', path: dest });
       else steps.push({ action: 'conflict', path: dest, reason: 'differs from the kit version' });
     }
   }
@@ -218,15 +226,13 @@ export function plan(opts) {
   return { steps, runInit, managed };
 }
 
-function openspecAvailable() {
-  const result = spawnSync('openspec', ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
-  return !result.error && result.status === 0;
-}
-
 function runInit(opts) {
+  // The target is passed as init's path and as cwd, so nothing depends on a shell.
   const args = ['init', '--tools', 'github-copilot', '--no-copilot-cloud', '--no-animation', '.'];
-  const result = spawnSync('openspec', args, { cwd: opts.target, stdio: 'inherit', shell: process.platform === 'win32' });
-  if (result.error || result.status !== 0) throw new Error(`openspec init failed with exit code ${result.status}`);
+  const result = runOpenspec(args, { cwd: opts.target, stdio: 'inherit' });
+  if (result.error || result.status !== 0) {
+    throw new Error(`openspec init failed${result.error ? `: ${result.error.message}` : ` with exit code ${result.status}`}`);
+  }
 }
 
 export function main(argv) {
@@ -245,9 +251,12 @@ export function main(argv) {
     console.error('\nStopped: resolve the conflicts above, then run setup again. Nothing was changed.');
     return 2;
   }
-  if (willInit && !openspecAvailable()) {
-    console.error('\nStopped: the openspec CLI was not found. Install it with "npm install -g @fission-ai/openspec@1.17.0" and run setup again. Nothing was changed.');
-    return 3;
+  if (willInit) {
+    const probe = probeOpenspec();
+    if (!probe.ok) {
+      console.error(`\nStopped: ${probe.reason}\nThen run setup again. Nothing was changed.`);
+      return 3;
+    }
   }
   if (!opts.apply) { console.log('\nDry run. Add --apply to make these changes.'); return 0; }
   const created = steps.filter((s) => s.action === 'create');
