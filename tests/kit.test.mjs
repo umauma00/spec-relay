@@ -51,3 +51,12 @@ test('the skill is hidden and the kit files it names exist', () => {
     assert.ok(fs.existsSync(path.join(KIT_ROOT, rel)), `${rel} is missing`);
   }
 });
+
+test('the view skill names the renderer, which exists', () => {
+  const text = read('skills/spec-relay-view/SKILL.md');
+  const meta = frontmatter(text);
+  assert.equal(meta.name, 'spec-relay-view');
+  assert.ok(meta.description);
+  assert.ok(text.includes('scripts/render.mjs'));
+  assert.ok(fs.existsSync(path.join(KIT_ROOT, 'scripts/render.mjs')));
+});

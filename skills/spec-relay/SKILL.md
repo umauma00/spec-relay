@@ -110,8 +110,11 @@ need the reasoning behind a step.
    write the files it returns yourself.
 4. **Validate.** `openspec validate extract-<capability> --strict`. Fix every
    error and warning, then check that every requirement has a trace entry.
-5. Report to the person: the number of requirements, the questions they must
-   decide, and that phase 2 is theirs. Then stop and wait.
+5. Render the review page with the `spec-relay-view` skill
+   (`node "<kit>/scripts/render.mjs" --change extract-<capability>`).
+6. Report to the person: the number of requirements, the questions they must
+   decide, the path of the review page, and that phase 2 is theirs. Then stop
+   and wait.
 
 ## 2. Review: the person decides
 
@@ -124,7 +127,8 @@ The person reviews; you assist. This gate is the point of the kit.
    `decision:` on each question line, and their name after `Reviewer:`. When
    they ask for a change, edit the artifacts, untick every item whose
    requirement, trace entry or question you changed, show the result, validate
-   again and ask again.
+   again and ask again. Render the review page again after every change to
+   the artifacts, so the page the person reads matches the Markdown.
 3. When every box is ticked, run `node "<kit>/scripts/gate.mjs" review --change
    extract-<capability>`. It fails when a requirement or question has no review
    item, an item is unticked, a decision is blank or no reviewer is named.
