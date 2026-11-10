@@ -28,7 +28,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkboxes, readIf, capabilitySegments, checkReview, baseName, archivedChange, baselineHash, configValue } from './gate.mjs';
+import { checkboxes, readIf, capabilitySegments, checkReview, baseName, archivedChange, baselineHash, configValue, cleanValue } from './gate.mjs';
 
 const PLAN = 'openspec/spec-relay/plan.md';
 // Used when a change's schema file cannot be read. The schema's own list wins,
@@ -475,14 +475,18 @@ export function parallelPlan(root, capabilities, foundation, problems = []) {
   const busy = analyzing.length + inReview.length;
   // Amendments are not started from nextToAnalyze, so only extract changes can overrun the limit.
   const extracts = capabilities.filter((c) => c.extract).length;
-  if (extracts > ahead) problems.push(`${extracts} extract changes are in analysis or review, more than the ${ahead} allowed ahead of the review; finish reviews before starting new analyses`);
+  if (extracts > limit) {
+    problems.push(piloted
+      ? `${extracts} extract changes are in analysis or review, more than the ${ahead} allowed ahead of the review; finish reviews before starting new analyses`
+      : `${extracts} extract changes are in analysis or review before the first capability was reviewed; analyze one capability first (the pilot) and finish its review`);
+  }
   const nextToAnalyze = surveyDone
     ? capabilities.filter((c) => c.planned && c.counted && !c.extract && !c.baseline && !c.extractArchived).slice(0, Math.max(0, limit - busy)).map((c) => c.capability)
     : [];
   // The model each role should run on; "session" means the orchestrator's own.
   const models = Object.fromEntries(['analyst', 'checker', 'implementer'].map((role) => {
-    const value = (configValue(root, `${role[0].toUpperCase()}${role.slice(1)} model`, 'session') ?? 'session').replace(/\s+#.*$/, '').trim();
-    return [role, value || 'session'];
+    const value = cleanValue(configValue(root, `${role[0].toUpperCase()}${role.slice(1)} model`, 'session') ?? 'session');
+    return [role, !value || value.toLowerCase() === 'session' ? 'session' : value];
   }));
   return { subagents, ahead, models, analyzing, inReview, nextToAnalyze };
 }

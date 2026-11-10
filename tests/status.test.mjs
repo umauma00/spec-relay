@@ -359,6 +359,12 @@ test('parallel work: one line per other active capability, and what may be analy
   const fresh = repo({ plan: PLAN });
   for (const rel of ['openspec/specs', 'openspec/changes/archive/2026-11-01-extract-common-base', 'openspec/changes/archive/2026-11-02-port-common-base', EXTRACT]) fs.rmSync(path.join(fresh, rel), { recursive: true });
   assert.deepEqual(status(fresh).parallel.nextToAnalyze, ['common/base']);
+  for (const name of ['common-base', 'billing-invoice']) write(fresh, `openspec/changes/extract-${name}/.openspec.yaml`, 'schema: spec-relay-extract\n');
+  has(status(fresh), '2 extract changes are in analysis or review before the first capability was reviewed');
+
+  // A quoted model name loses its quotes, and "Session" is the session model.
+  write(dir, 'openspec/config.yaml', `${config}\ncontext: |\n  Analyst model: "claude-sonnet-5.5"\n  Checker model: Session\n`);
+  assert.deepEqual(status(dir).parallel.models, { analyst: 'claude-sonnet-5.5', checker: 'session', implementer: 'session' });
 
   // Nothing is analyzed before the survey is archived.
   fs.rmSync(path.join(dir, 'openspec/changes/archive'), { recursive: true });

@@ -92,10 +92,15 @@ export function parseArgs(argv) {
     if (!/^\d+$/.test(String(opts[key])) || n < 1 || n > max) throw new UsageError(`${flag} must be a whole number from 1 to ${max}`);
     opts[key] = n;
   }
+  const model = (value) => /^[^\r\n#{}"'`]{1,80}$/.test(value);
+  const modelHelp = 'must be a model name on one line (no #, quotes or braces), or "session"';
+  opts.subagentModel = opts.subagentModel.trim();
+  if (!model(opts.subagentModel)) throw new UsageError(`--subagent-model ${modelHelp}`);
   for (const role of ['analyst', 'checker', 'implementer']) {
     const key = `${role}Model`;
     opts[key] = (opts[key] ?? opts.subagentModel).trim();
-    if (!/^[^\r\n#{}]{1,80}$/.test(opts[key])) throw new UsageError(`--${role}-model must be a model name on one line (no # or braces), or "session"`);
+    if (!model(opts[key])) throw new UsageError(`--${role}-model ${modelHelp}`);
+    if (opts[key].toLowerCase() === 'session') opts[key] = 'session';
   }
   for (const key of ['sourceRoot', 'targetRoot']) {
     const flag = key === 'sourceRoot' ? '--source-root' : '--target-root';

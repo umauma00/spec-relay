@@ -153,13 +153,17 @@ not wash out these instructions.
    Never give a subagent a path under the source root (when the source root is
    `.`, give only paths under `openspec/` and the target root), under
    `openspec/specs/`, or `openspec/config.yaml`.
-   Before and after every wave, run `node "<kit>/scripts/gate.mjs" guard` (one
-   hash over every active change's `review.md`, `openspec/specs/` and
-   `openspec/config.yaml`) and, in a git repository, `git status --porcelain
-   --untracked-files=all` (which shows changed tracked source files and new
-   files). If the hash changed, or a path changed that you did not assign,
-   stop, tell the person what changed, and do not use that wave's results
-   until they decide.
+   Before every wave, run `node "<kit>/scripts/gate.mjs" guard --save
+   wave-<n>`: it saves the hashes of the files no subagent may write (every
+   active change's `review.md` and `questions.md`, `plan.md`,
+   `openspec/specs/`, `openspec/config.yaml` and the source files). After the
+   wave, run `gate.mjs guard --compare wave-<n>`, which lists only the paths
+   that changed. Paths you changed yourself during the wave (a tick, a
+   question, an archive) are expected; for any other path, stop, tell the
+   person what changed, and do not use that wave's results until they decide.
+   In a git repository, also compare `git status --porcelain
+   --untracked-files=all` before and after, for files outside those (such as
+   kit or host folders).
 5. **Tables split across subagents** (inventory, crosscheck): each subagent
    writes its rows as a Markdown table to its own part file in the work folder
    (a `|` inside a cell written as `\|`),

@@ -7,9 +7,11 @@
 //   node gate.mjs port-ready --capability <capability>     before creating a port change
 //   node gate.mjs port-done --change port-<capability>     before archiving a port change
 //   node gate.mjs baseline --capability <capability>       the baseline hash a port records
-//   node gate.mjs guard                                    one hash over the files no subagent may write
-//                                                          (every active change's review.md, openspec/specs/,
-//                                                          openspec/config.yaml), to compare before and after a wave
+//   node gate.mjs guard --save <name>                      before a wave: snapshot the hashes of the files no
+//                                                          subagent may write (active review.md and questions.md,
+//                                                          plan.md, openspec/specs/, openspec/config.yaml, source files)
+//   node gate.mjs guard --compare <name>                   after the wave: list the paths that changed since
+//   node gate.mjs guard                                    one hash over the same files
 //
 // Prints { ok, problems } as JSON and exits 0 when ok, 1 when not, 2 on bad usage.
 // Run it from the repository root (or pass --root DIR). Files may use CRLF line
@@ -248,7 +250,7 @@ const relPath = (p) => p.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/
 // Files under the source root the inventory must cover. Kit and tool folders are
 // not source code: .git, openspec/, the target root and OpenSpec's generated
 // Copilot files.
-const cleanValue = (v) => v.replace(/\s+#.*$/, '').trim().replace(/^(["'`])(.*)\1$/, '$2').trim();
+export const cleanValue = (v) => v.replace(/\s+#.*$/, '').trim().replace(/^(["'`])(.*)\1$/, '$2').trim();
 
 // Files under the source root the inventory must cover, or null when the source
 // root is not a folder inside the repository. In a git repository these are the
@@ -373,22 +375,64 @@ export function baselineHash(root, capability) {
 
 export const capabilitySegments = (capability) => capability.split(/[\\/]+/).filter((part) => part && part !== '.');
 
-// The files subagents must never write, hashed so the orchestrator can compare
-// the value before and after a wave of subagents. Git cannot show a tick in an
-// untracked or already modified review.md; this can.
-export function guardHash(root) {
+// The files subagents must never write: every active change's review.md and
+// questions.md, the plan, the baseline specs, the config and the source files.
+// The orchestrator saves a snapshot of their hashes before a wave and compares
+// after it. Git cannot show a tick in an untracked or already modified
+// review.md, nor an edit to an ignored or already modified source file; this can.
+export function guardFiles(root) {
   const changes = path.join(root, 'openspec/changes');
   const files = [];
   try {
     for (const e of fs.readdirSync(changes, { withFileTypes: true })) {
-      if (e.isDirectory() && e.name !== 'archive') files.push(path.join(changes, e.name, 'review.md'));
+      if (e.isDirectory() && e.name !== 'archive') files.push(path.join(changes, e.name, 'review.md'), path.join(changes, e.name, 'questions.md'));
     }
   } catch { /* no changes yet */ }
-  files.push(...walk(path.join(root, 'openspec/specs')), path.join(root, 'openspec/config.yaml'));
-  const lines = files.filter((f) => { try { return fs.statSync(f).isFile(); } catch { return false; } })
-    .map((f) => `${path.relative(root, f).split(path.sep).join('/')}\0${crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex')}`)
-    .sort();
+  files.push(path.join(root, 'openspec/spec-relay/plan.md'), ...walk(path.join(root, 'openspec/specs')), path.join(root, 'openspec/config.yaml'));
+  const out = {};
+  for (const f of files) {
+    try { if (fs.statSync(f).isFile()) out[path.relative(root, f).split(path.sep).join('/')] = crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex'); } catch { /* gone */ }
+  }
+  for (const f of sourceFiles(root) ?? []) {
+    try { out[f] = crypto.createHash('sha256').update(fs.readFileSync(path.join(root, f))).digest('hex'); } catch { /* gone */ }
+  }
+  return out;
+}
+
+export function guardHash(root) {
+  const files = guardFiles(root);
+  const lines = Object.keys(files).sort().map((f) => `${f}\0${files[f]}`);
   return { ok: true, sha256: crypto.createHash('sha256').update(lines.join('\n')).digest('hex'), files: lines.length };
+}
+
+const GUARD_DIR = 'openspec/spec-relay/work/guard';
+const snapshotFile = (root, name) => path.join(root, GUARD_DIR, `${name}.json`);
+
+export function guardSave(root, name) {
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(name)) return { ok: false, problems: [`not a snapshot name: ${name} (letters, digits and hyphens)`] };
+  const files = guardFiles(root);
+  const file = snapshotFile(root, name);
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `${JSON.stringify(files, null, 1)}\n`);
+  } catch (error) { return { ok: false, problems: [`could not write ${GUARD_DIR}/${name}.json: ${error.message}`] }; }
+  return { ok: true, snapshot: `${GUARD_DIR}/${name}.json`, files: Object.keys(files).length };
+}
+
+// Lists only the paths that differ, so a large source tree never floods the
+// orchestrator's context. The orchestrator ignores the paths it changed itself.
+export function guardCompare(root, name) {
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(name)) return { ok: false, problems: [`not a snapshot name: ${name} (letters, digits and hyphens)`] };
+  let before;
+  try { before = JSON.parse(fs.readFileSync(snapshotFile(root, name), 'utf8')); } catch {
+    return { ok: false, problems: [`no snapshot ${GUARD_DIR}/${name}.json; run gate.mjs guard --save ${name} before the wave`] };
+  }
+  const now = guardFiles(root);
+  const changed = Object.keys(now).filter((f) => f in before && before[f] !== now[f]).sort();
+  const added = Object.keys(now).filter((f) => !(f in before)).sort();
+  const removed = Object.keys(before).filter((f) => !(f in now)).sort();
+  const cap = (list) => (list.length > 50 ? [...list.slice(0, 50), `...and ${list.length - 50} more`] : list);
+  return { ok: changed.length + added.length + removed.length === 0, changed: cap(changed), added: cap(added), removed: cap(removed) };
 }
 
 export function checkPortReady(root, capability) {
@@ -437,7 +481,7 @@ export function main(argv) {
   const [command, ...rest] = argv;
   const opts = { root: process.cwd() };
   for (let i = 0; i < rest.length; i += 2) {
-    const key = { '--change': 'change', '--capability': 'capability', '--root': 'root' }[rest[i]];
+    const key = { '--change': 'change', '--capability': 'capability', '--root': 'root', '--save': 'save', '--compare': 'compare' }[rest[i]];
     if (!key || rest[i + 1] === undefined) return usage();
     opts[key] = rest[i + 1];
   }
@@ -449,7 +493,9 @@ export function main(argv) {
   if (command === 'review' && opts.change) result = checkReview(opts.root, opts.change);
   else if (command === 'port-ready' && opts.capability) result = checkPortReady(opts.root, opts.capability);
   else if (command === 'port-done' && opts.change) result = checkPortDone(opts.root, opts.change);
-  else if (command === 'guard') result = guardHash(opts.root);
+  else if (command === 'guard' && opts.save && !opts.compare) result = guardSave(opts.root, opts.save);
+  else if (command === 'guard' && opts.compare && !opts.save) result = guardCompare(opts.root, opts.compare);
+  else if (command === 'guard' && !opts.save && !opts.compare) result = guardHash(opts.root);
   else if (command === 'baseline' && opts.capability) {
     const sha256 = baselineHash(opts.root, opts.capability);
     result = sha256 ? { ok: true, capability: opts.capability, sha256 } : { ok: false, problems: [`no baseline spec for ${opts.capability}`] };
@@ -460,7 +506,7 @@ export function main(argv) {
 }
 
 function usage() {
-  console.error('Usage: node gate.mjs review --change NAME | port-ready --capability PATH | port-done --change NAME | baseline --capability PATH | guard [--root DIR]');
+  console.error('Usage: node gate.mjs review --change NAME | port-ready --capability PATH | port-done --change NAME | baseline --capability PATH | guard [--save NAME | --compare NAME] [--root DIR]');
   return 2;
 }
 

@@ -48,6 +48,8 @@ test('subagent models: one for all roles, a role overrides it, default session',
   const opts = parseArgs([...BASE, '--subagent-model', 'claude-sonnet-5.5', '--checker-model', 'Claude Opus 5.5']);
   assert.deepEqual([opts.analystModel, opts.checkerModel, opts.implementerModel], ['claude-sonnet-5.5', 'Claude Opus 5.5', 'claude-sonnet-5.5']);
   assert.throws(() => parseArgs([...BASE, '--checker-model', 'a # b']), /--checker-model must be a model name/);
+  assert.throws(() => parseArgs([...BASE, '--subagent-model', ' ']), /--subagent-model must be a model name/);
+  assert.equal(parseArgs([...BASE, '--subagent-model', 'Session']).analystModel, 'session');
 });
 
 test('a dry run changes nothing', () => {
