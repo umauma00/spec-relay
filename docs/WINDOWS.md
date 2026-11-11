@@ -9,7 +9,7 @@ spec-relay は Windows を主な実行環境として扱います。GitHub Actio
 | Node.js 22.12 以上 | `winget install OpenJS.NodeJS.LTS` | `node --version` |
 | Git for Windows | `winget install Git.Git` | `git --version` |
 | OpenSpec CLI 1.17.0 | `npm install -g @fission-ai/openspec@1.17.0` | `openspec --version` |
-| GitHub Copilot | CLI は `npm install -g @github/copilot`、または VS Code・Copilot app | |
+| GitHub Copilot | CLI は `npm install -g @github/copilot`（1.0.109 以降）、または VS Code（1.143 以降、Copilot ハーネス）・Copilot app | `copilot --version` |
 
 入れた直後は、開いていたターミナルに PATH が反映されていません。新しいターミナルを開いてください。
 
