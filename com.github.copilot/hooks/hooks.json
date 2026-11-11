@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "matcher": "bash|powershell|edit|create|write|str_replace_editor|str_replace|insert|apply_patch|multi_edit",
+        "bash": "node \"$PLUGIN_ROOT/scripts/hook.mjs\" || true",
+        "powershell": "node \"$env:PLUGIN_ROOT/scripts/hook.mjs\"; exit 0",
+        "timeoutSec": 15
+      }
+    ]
+  }
+}

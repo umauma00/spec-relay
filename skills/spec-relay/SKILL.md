@@ -105,6 +105,9 @@ need the reasoning behind a step.
    may restore them; run setup again
    after it.
 5. Commit nothing on your own. Suggest a commit when setup is done.
+6. The kit's hook (see When something stops) is off unless `openspec/config.yaml`
+   says `Hook enforcement ...: on`. Tell the person once that they can turn it
+   on there themselves (README, "止まったとき"); never change that line yourself.
 
 ## Working in parallel
 
@@ -208,8 +211,10 @@ you assist. This gate is the point of the kit.
    render again and ask again.
 4. When every box is ticked, run `node "<kit>/scripts/gate.mjs" review --change
    <change>`. `openspec archive --yes` checks none of what the gate checks, so
-   never archive while the gate fails. Then ask whether to archive, and archive
-   only on an explicit yes: `openspec archive <change> --yes`.
+   never archive while the gate fails; report the failure as When something
+   stops says. Then ask whether to archive, and archive only on an explicit
+   yes: `openspec archive <change> --yes`. Extract and amend changes also need
+   the archived survey with the capability in its list or in the plan.
 
 ## 1. Survey: map the bounded contexts
 
@@ -413,6 +418,54 @@ keep this list; the analyst, checker and implementer subagents have no TODO tool
    Never install anything or change settings to get the TODO list working.
 7. `--format markdown` adds a table of every capability; show it when the
    person asks for the whole picture.
+
+## When something stops
+
+A gate, a script or the hook that stops you is the kit doing its job. Never work
+around it: do not archive while a gate fails, tick boxes the person did not
+accept, or edit the kit, the schemas, `openspec/config.yaml` or a gate's output
+to get past a stop.
+
+1. `gate.mjs` prints `next` beside `problems`. `next.person` holds sentences in
+   the person's language for what only the person can do (approve items, name
+   the reviewer, decide questions, finish another review, decide about a file
+   that changed); pass them on as they are. `next.agent` holds the problems
+   that are yours: fix them (or give them to a subagent) and run the gate again
+   before you report. A gate that passes still lists in `next.person` the
+   question you must ask before an archive.
+2. Report every stop in this shape, in the person's language, before anything
+   else in the reply:
+   - **What stopped**: the check or command, and why in one line.
+   - **What I need from you**: the `next.person` sentences, or "nothing, I am
+     fixing it". When the person must decide, ask one question at a time.
+   - **What I do next**: the fixes from `next.agent`, then the same check again.
+   Put the TODO `checklist` (Progress in the TODO list) after it.
+3. A tool call denied with a reason starting `spec-relay:` came from the kit's
+   hook. Do what the reason says. When the person wants a denied change (an
+   edit under the source root, a setting), they make it themselves; never look
+   for another tool or command that does the same.
+4. For a failure the environment may cause (a command not found, access denied,
+   a file in use, a model or subagent error), follow Running commands first.
+5. When a check still fails after two rounds of fixes, stop: show the person
+   the remaining problems and ask how to go on.
+
+## When the person asks to skip a step
+
+The order survey, target design, analysis, review, implementation exists so
+that every line of new code traces back to a spec the person approved (the
+target design and the first analyses may overlap; that is not a skip). When the
+person asks to skip a step, a review or a check:
+
+1. Say in two sentences what the step protects and what it still needs, and
+   offer the quickest way that keeps it: review in the files or a pull request,
+   review the open questions first, split a large capability, or move a
+   suspected bug to follow-up work.
+2. Never archive, port or implement past a failing gate, even when asked. The
+   order is checked by `gate.mjs` (review, port-ready, port-done) and, when
+   Hook enforcement is on, by the hook.
+3. If the person still wants to leave the flow, say that the kit cannot do that
+   part, and that what is done outside it (with OpenSpec directly) is not
+   checked or tracked by the kit.
 
 ## Status and resuming
 

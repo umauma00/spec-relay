@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { main, parseArgs, plan, CONFIG_MARKER, KIT_ROOT, STUB_MARKER } from '../scripts/setup.mjs';
+import { main, parseArgs, plan, renderConfig, CONFIG_MARKER, KIT_ROOT, STUB_MARKER } from '../scripts/setup.mjs';
 import { findOpenspec, runOpenspec } from '../scripts/openspec.mjs';
 import { tempDir, write, quiet, isolateOpenspec, crlf } from './helpers.mjs';
 
@@ -216,4 +216,11 @@ test('a re-run disables only OpenSpec-generated apply/archive/sync workflows', (
   assert.equal(read('.github/prompts/opsx-archive.prompt.md'), 'my own notes\n');
   assert.match(read('.github/skills/openspec-propose/SKILL.md'), /generatedBy/);
   assert.equal(plan(parseArgs(['--target', dir, ...BASE])).steps.filter((st) => st.action === 'disable').length, 0);
+});
+
+test('--hooks writes the Hook enforcement line the hook reads, off by default', () => {
+  const base = ['--source-language', 'PHP', '--target-language', 'Java', '--target-root', 'java'];
+  assert.match(renderConfig(parseArgs(base)), /^  Hook enforcement \(on or off;[^:\n]*\): off$/m);
+  assert.match(renderConfig(parseArgs([...base, '--hooks', 'ON'])), /^  Hook enforcement [^:\n]*: on$/m);
+  assert.throws(() => parseArgs([...base, '--hooks', 'maybe']), /--hooks must be on or off/);
 });

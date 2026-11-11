@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { checkReview, checkPortReady, checkPortDone, baselineHash, archivedChange, sourceFiles, main } from '../scripts/gate.mjs';
+import { checkReview, checkPortReady, checkPortDone, baselineHash, archivedChange, sourceFiles, main, nextSteps, language } from '../scripts/gate.mjs';
 import { quiet } from './helpers.mjs';
 import { tempDir, write } from './helpers.mjs';
 
@@ -14,8 +14,14 @@ const GOOD = 'Reviewer: Uma\n\n## 1. Requirements\n- [x] R1 Add two numbers\n- [
 
 const CROSSCHECK = '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/calc.php:3 |\n| R2 Reject text | confirmed | src/calc.php:9 |\n';
 
+// The archived survey that lists the capability the fixtures review.
+function surveyed(dir, caps = ['calc']) {
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md', `# Capabilities\n\n${caps.map((c, i) => `${i + 1}. \`${c}\``).join('\n')}\n`);
+  return dir;
+}
+
 function repo(review, { questions = QUESTIONS, screens = '# Screens\n\nNone\n', crosscheck = CROSSCHECK } = {}) {
-  const dir = tempDir();
+  const dir = surveyed(tempDir());
   write(dir, `${CHANGE}/specs/calc/spec.md`, SPEC);
   write(dir, `${CHANGE}/questions.md`, questions);
   if (screens !== null) write(dir, `${CHANGE}/screens.md`, screens);
@@ -243,7 +249,8 @@ test('the target-design gate needs a module and verification levels for every co
 });
 
 test('the amend gate: a reason, review items for the delta, crosscheck except for removed requirements', () => {
-  const dir = tempDir();
+  const dir = surveyed(tempDir());
+  write(dir, 'openspec/specs/calc/spec.md', SPEC);
   const A = 'openspec/changes/amend-calc';
   write(dir, `${A}/.openspec.yaml`, 'schema: spec-relay-amend\n');
   write(dir, `${A}/specs/calc/spec.md`, '## MODIFIED Requirements\n\n### Requirement: Add two numbers\nThe system SHALL truncate.\n\n## REMOVED Requirements\n\n### Requirement: Reject text\n**Reason**: not in the code\n');
@@ -398,4 +405,62 @@ test('guard --save and --compare list only the protected files that changed', as
   assert.equal(quiet(() => main(['guard', '--compare', '', '--root', dir])), 1, 'an empty name never falls back to the plain hash');
   write(dir, 'openspec/config.yaml', 'context: |\n  Source root: missing\n');
   assert.match(guardSave(dir, 'wave-3').warnings.join(), /source files are not guarded/);
+});
+
+test('an extract or amend review needs the archived survey, a listed capability and the matching change name', () => {
+  const none = repo(GOOD);
+  fs.rmSync(path.join(none, 'openspec/changes/archive'), { recursive: true });
+  assert.match(checkReview(none, 'extract-calc').problems.join(), /no archived survey change: extract changes need the reviewed capability list/);
+
+  const unlisted = surveyed(repo(GOOD), ['billing/invoice']);
+  assert.match(checkReview(unlisted, 'extract-calc').problems.join(), /capability calc is not in the archived survey's capabilities.md or in openspec\/spec-relay\/plan.md/);
+  // A capability added to the plan after the survey counts.
+  write(unlisted, 'openspec/spec-relay/plan.md', '# Plan\n\n## Capabilities\n\n1. `billing/invoice`\n2. `calc` added later\n');
+  assert.deepEqual(checkReview(unlisted, 'extract-calc'), { ok: true, problems: [] });
+
+  const renamed = repo(GOOD);
+  fs.renameSync(path.join(renamed, CHANGE), path.join(renamed, 'openspec/changes/extract-other'));
+  assert.match(checkReview(renamed, 'extract-other').problems.join(), /change extract-other holds the spec of calc; a extract change of calc is named extract-calc/);
+  // A rerun suffix is the same change.
+  const rerun = repo(GOOD);
+  fs.renameSync(path.join(rerun, CHANGE), path.join(rerun, 'openspec/changes/extract-calc-v2'));
+  assert.deepEqual(checkReview(rerun, 'extract-calc-v2'), { ok: true, problems: [] });
+
+  const amend = surveyed(tempDir());
+  const A = 'openspec/changes/amend-calc';
+  write(amend, `${A}/.openspec.yaml`, 'schema: spec-relay-amend\n');
+  write(amend, `${A}/reason.md`, '# Reason\n\nTruncates (src/calc.php:3).\n');
+  write(amend, `${A}/specs/calc/spec.md`, '## MODIFIED Requirements\n\n### Requirement: Add two numbers\nThe system SHALL truncate.\n');
+  write(amend, `${A}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | x |\n');
+  write(amend, `${A}/review.md`, 'Reviewer: Uma\n- [x] R1 Add two numbers\n');
+  assert.match(checkReview(amend, 'amend-calc').problems.join(), /no baseline spec at openspec\/specs\/calc\/spec.md to amend/);
+  write(amend, 'openspec/specs/calc/spec.md', SPEC);
+  assert.deepEqual(checkReview(amend, 'amend-calc'), { ok: true, problems: [] });
+});
+
+test('next separates what the person decides from what the agent fixes, in the person\'s language', () => {
+  const dir = repo('Reviewer: <name>\n- [ ] **R1** Add two numbers\n- [x] R2 Reject text\n- [ ] Q1 Overflow: decision:\n');
+  const result = checkReview(dir, 'extract-calc');
+  const ja = nextSteps('review', result, 'ja');
+  assert.deepEqual(ja.person, [
+    'レビューで未承認の項目が 2 件あります（R1, Q1）。チャットで承認を伝えるか、review.md で自分でチェックしてください。',
+    'review.md に承認者の名前（Reviewer:）がありません。記録する名前を教えてください。',
+    '判断がまだの質問があります（Q1）。新しいシステムでどうするかを決めてください。',
+  ]);
+  assert.deepEqual(ja.agent, []);
+  write(dir, `${CHANGE}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | mismatch | x |\n| R2 Reject text | confirmed | x |\n');
+  assert.match(nextSteps('review', checkReview(dir, 'extract-calc'), 'en').agent.join(), /crosscheck of requirement "Add two numbers" is "mismatch"/);
+  assert.match(nextSteps('review', checkReview(repo(GOOD), 'extract-calc'), 'en').person.join(), /may be archived/);
+  assert.deepEqual(nextSteps('port-ready', { ok: false, problems: ['extract change extract-calc is still active; finish its review and archive it first', 'no archived survey change: x'] }, 'ja'),
+    { person: ['extract-calc のレビューがまだ終わっていません。先にそのレビューを終えてください。'], agent: ['no archived survey change: x'] });
+  assert.match(nextSteps('guard', { ok: false, changed: ['src/a.php'], added: [], removed: [] }, 'ja').person[0], /割り当て外のファイルが変わりました（src\/a.php）/);
+
+  write(dir, 'openspec/config.yaml', '# spec-relay: managed\ncontext: |\n  Artifact language: 日本語\n');
+  assert.equal(language(dir), 'ja');
+  assert.equal(language(dir, 'en'), 'en');
+  const log = console.log;
+  let out = '';
+  console.log = (s) => { out += s; };
+  try { assert.equal(main(['review', '--change', 'extract-calc', '--root', dir]), 1); } finally { console.log = log; }
+  assert.match(JSON.parse(out).next.person[0], /^レビューで未承認の項目が/);
 });
