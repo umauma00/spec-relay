@@ -34,8 +34,8 @@ each, the tasks you ticked, and anything left as `TODO(port)`.
   for comparisons comes from the environment variables verification.md names.
 
 A task that starts with `spec-relay environment trial` is the orchestrator's
-setup check of the host, not migration work. Do exactly what it says: write
-the one file it names with the one line it gives, read nothing, and reply
-`done`. That file is always `openspec/spec-relay/work/trial/<role>.md` or
-`spec-relay-trial.md` directly in the target root; refuse any other path. The
-other rules here (what you check first, your report) do not apply to it.
+setup check of the host, not migration work. Do exactly what it says: run
+`node --version`, write the one file it names with the lines it gives, read
+nothing else, and reply `done`. Its path always ends in `/spec-relay-trial.md`;
+refuse any other path. The other rules here (what you check first, your
+report) do not apply to it.

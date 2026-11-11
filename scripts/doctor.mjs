@@ -11,8 +11,8 @@
 //       gives each to its subagent in one wave; each writes one small file
 //       (the implementer's in the target root, where it writes during a port).
 //   node doctor.mjs --trial-check [--target DIR] [--client cli|vscode|app] [--json] [--lang ja|en]
-//       after that wave: checks what the trial subagents wrote and records the
-//       trial in openspec/spec-relay/trial.json
+//       after that wave: checks what the trial subagents wrote, cleans up and
+//       records a passed trial in openspec/spec-relay/local/trial.json
 //
 // Exit code 0: nothing blocks (warnings may remain), 1: something must be fixed
 // first, 2: bad usage. --json prints ASCII-only JSON (\uXXXX escapes), so a
@@ -21,7 +21,8 @@
 // The checks change nothing in the repository. They write and remove one
 // temporary file to test write access. --trial removes what an earlier trial
 // left (openspec/spec-relay/work/trial/ and <target root>/spec-relay-trial.md);
-// --trial-check writes trial.json and removes them when the trial passed.
+// --trial-check removes them again and records a passed trial in
+// openspec/spec-relay/local/trial.json (git-ignored).
 //
 // This file uses only syntax Node.js 14 can read, and loads the other kit
 // modules after the Node.js check, so an old Node.js gets that check's message
@@ -39,7 +40,8 @@ export const OPENSPEC_TESTED = '1.17.0';
 // prompts (Copilot CLI 1.0.106-1.0.109); the Copilot harness is the VS Code default from 1.143.
 export const CLIENT_MIN = { cli: '1.0.109', vscode: '1.143.0' };
 export const TRIAL_DIR = 'openspec/spec-relay/work/trial';
-export const TRIAL_RECORD = 'openspec/spec-relay/trial.json';
+// Per machine and client, so it stays out of git (local/ has its own .gitignore).
+export const TRIAL_RECORD = 'openspec/spec-relay/local/trial.json';
 const TRIAL_FILE = 'spec-relay-trial.md';
 export const ROLES = ['analyst', 'checker', 'implementer'];
 const CLIENTS = ['cli', 'vscode', 'app'];
@@ -180,6 +182,18 @@ export function checkOpenspec(ctx) {
   };
 }
 
+// The kit's scripts also look in npm's global folder; a terminal opened before
+// the install (or an app started before it) does not have it on PATH, so the
+// agent's own `openspec` commands would fail there.
+export function checkOpenspecPath(ctx) {
+  if (ctx.platform !== 'win32' || ctx.openspecOnPath()) return null;
+  return {
+    id: 'openspec-path', level: 'warn',
+    message: ctx.t('OpenSpec は入っていますが、このターミナルの PATH にありません（入れる前に開いたターミナルやアプリでよく起きます）。オーケストレーターが打つ `openspec` コマンドが「認識されません」で止まります。', 'OpenSpec is installed but not on this terminal\'s PATH (common in a terminal or app opened before the install); the orchestrator\'s own `openspec` commands fail with "not recognized".'),
+    fix: ctx.t('新しいターミナルを開くか、Copilot のアプリ（VS Code・Copilot app）を再起動してから続けてください。', 'Open a new terminal, or restart the Copilot client (VS Code, the Copilot app), then continue.'),
+  };
+}
+
 export function checkTelemetry(ctx) {
   const off = telemetryOff(ctx.env, ctx.platform, ctx.readFile);
   if (off) return { id: 'telemetry', level: 'ok', message: ctx.t(`OpenSpec の利用統計の送信は止まっています（${off}）。`, `OpenSpec usage statistics are off (${off}).`) };
@@ -197,11 +211,13 @@ export function checkPowershell(ctx) {
   if (ctx.platform !== 'win32') return null;
   const shim = ctx.findInPath('openspec.ps1');
   if (!shim) return null;
-  const policy = ctx.executionPolicy();
-  if (!policy || !/^(restricted|allsigned|undefined)$/i.test(policy)) return null;
+  // Windows PowerShell 5.1 and PowerShell 7 keep separate policies; the agent's shell may be either.
+  const blocked = (ctx.executionPolicy() || []).filter((p) => /^(restricted|allsigned|undefined)$/i.test(p.policy));
+  if (!blocked.length) return null;
+  const which = blocked.map((p) => `${p.shell} ${p.policy}`).join(', ');
   return {
     id: 'powershell', level: 'info',
-    message: ctx.t(`PowerShell の実行ポリシーが ${policy} のため、\`openspec\` と打つと「スクリプトの実行が無効」で止まります。`, `the PowerShell execution policy is ${policy}, so typing \`openspec\` stops with "running scripts is disabled".`),
+    message: ctx.t(`PowerShell の実行ポリシー（${which}）のため、そこで \`openspec\` と打つと「スクリプトの実行が無効」で止まります。`, `the PowerShell execution policy (${which}) stops a typed \`openspec\` there with "running scripts is disabled".`),
     fix: ctx.t('`openspec.cmd` と打てば動きます（オーケストレーターもそうします）。ポリシーを変えるかはご自身で判断してください（`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`）。',
       'Type `openspec.cmd` instead (the orchestrator does). Whether to change the policy is your decision (`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`).'),
   };
@@ -209,9 +225,9 @@ export function checkPowershell(ctx) {
 
 export function checkGit(ctx) {
   const git = ctx.exec('git', ['--version'], { cwd: ctx.target });
-  if (!git.found) {
+  if (!git.found || git.status !== 0) {
     return [{
-      id: 'git', level: 'warn', message: ctx.t('git が見つかりません。', 'git was not found.'),
+      id: 'git', level: 'warn', message: git.found ? ctx.t('git が動きません（`git --version` が失敗します）。', 'git does not run (`git --version` fails).') : ctx.t('git が見つかりません。', 'git was not found.'),
       fix: ctx.t('`winget install Git.Git` で入れてください。git がなくても動きますが、元ファイルの一覧にビルドの出力（bin/・obj/ など）が混ざり、サブエージェントが割り当て外のファイルを変えたことも見つけにくくなります。',
         'Install it (`winget install Git.Git`). The kit runs without git, but the source file list then includes build output (bin/, obj/) and edits outside a subagent\'s assignment are harder to see.'),
     }];
@@ -220,10 +236,13 @@ export function checkGit(ctx) {
   const top = ctx.exec('git', ['rev-parse', '--show-toplevel'], { cwd: ctx.target });
   const stderr = top.stderr || '';
   if (/dubious ownership|safe\.directory/i.test(stderr)) {
+    // Git prints the exact command, including the %(prefix)/// form network folders need.
+    const suggested = stderr.match(/git config --global --add safe\.directory\s+(.+?)\s*$/m);
+    const command = suggested ? `git config --global --add safe.directory ${suggested[1]}` : `git config --global --add safe.directory "${ctx.target.replace(/\\/g, '/')}"`;
     results.push({
       id: 'git-repo', level: 'warn',
       message: ctx.t('git がこのフォルダーを「所有者が違う」として拒否しています（別のドライブや別のユーザーが作ったフォルダーでよく起きます）。このままでは git を使う確認が働きません。', 'git refuses this folder as owned by someone else (common on another drive or a folder another user created); the kit\'s git checks cannot work.'),
-      fix: ctx.t(`\`git config --global --add safe.directory "${ctx.target.replace(/\\/g, '/')}"\` を実行してください。`, `Run \`git config --global --add safe.directory "${ctx.target.replace(/\\/g, '/')}"\`.`),
+      fix: ctx.t(`\`${command}\` を実行してください（git の全体設定を変えるので、ご自身で判断してください）。`, `Run \`${command}\` (it changes git's global config, so it is your decision).`),
     });
   } else if (top.status !== 0) {
     results.push({
@@ -241,17 +260,16 @@ export function checkGit(ctx) {
         fix: ctx.t('リポジトリの一番上のフォルダーを開いて始めてください。中のフォルダーだと、元ファイルの一覧に git が無視するファイルまで入ります。', 'Open the repository\'s top folder instead; from a subfolder the source file list also includes files git ignores.'),
       });
     } else {
-      const dirty = ctx.exec('git', ['status', '--porcelain'], { cwd: ctx.target });
-      if (dirty.status === 0 && (dirty.stdout || '').trim()) {
+      // Uncommitted changes matter before setup only: during a migration there always are some.
+      const dirty = ctx.setUp ? null : ctx.exec('git', ['status', '--porcelain'], { cwd: ctx.target });
+      if (dirty && dirty.status === 0 && (dirty.stdout || '').trim()) {
         results.push({
           id: 'git-repo', level: 'info',
           message: ctx.t('コミットしていない変更があります。', 'there are uncommitted changes.'),
-          fix: ctx.setUp
-            ? ctx.t('工程の区切り（archive のあとなど）ごとにコミットしておくと、いつでもその時点に戻せます。', 'Commit at the end of each step (after an archive, for example), so you can always go back to it.')
-            : ctx.t('導入の前にコミットしておくと、キットが加えたものだけを見分けて戻せます。', 'Commit them before setup, so the kit\'s changes stay separate and easy to undo.'),
+          fix: ctx.t('導入の前にコミットしておくと、キットが加えたものだけを見分けて戻せます。', 'Commit them before setup, so the kit\'s changes stay separate and easy to undo.'),
         });
       } else {
-        results.push({ id: 'git-repo', level: 'ok', message: ctx.t('git リポジトリの一番上で、変更はコミット済みです。', 'the top of a git repository, with no uncommitted changes.') });
+        results.push({ id: 'git-repo', level: 'ok', message: ctx.t('git リポジトリの一番上です。', 'the top of a git repository.') });
       }
     }
   }
@@ -284,6 +302,13 @@ export function checkTarget(ctx) {
   } else {
     results.push({ id: 'target', level: 'ok', message: ctx.t(`書き込めます: ${ctx.target}`, `writable: ${ctx.target}`) });
   }
+  if (ctx.platform === 'win32' && /^\\\\/.test(ctx.target)) {
+    results.push({
+      id: 'network-folder', level: 'warn',
+      message: ctx.t('ネットワーク上のフォルダー（\\\\ で始まるパス）です。cmd.exe はここを作業フォルダーにできないため、`openspec.cmd` や `npm.cmd` を使うコマンドが止まります。ファイルの移動も遅く、ロックで失敗しやすくなります。', 'this is a network folder (a \\\\ path). cmd.exe cannot work in it, so commands through `openspec.cmd` or `npm.cmd` stop, and folder moves are slow and fail on locks more often.'),
+      fix: ctx.t('リポジトリを手元のドライブ（`C:\\work\\proj` など）に置いて使ってください。', 'Work on a local copy of the repository (for example `C:\\work\\proj`).'),
+    });
+  }
   const synced = syncedFolder(ctx);
   if (synced) {
     results.push({
@@ -301,8 +326,11 @@ function syncedFolder(ctx) {
     const dir = envValue(ctx.env, name).replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
     if (dir && (here === dir || here.startsWith(`${dir}/`))) return 'OneDrive';
   }
+  // Box Drive's folder has a common name, so only the one directly in the home folder counts.
+  const home = (ctx.home || '').replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
+  if (home && (here === `${home}/box` || here.startsWith(`${home}/box/`))) return 'Box';
   const parts = ctx.target.split(/[\\/]+/);
-  const hit = parts.find((p) => /^(onedrive( - .*)?|dropbox|google drive|icloud ?drive|box)$/i.test(p));
+  const hit = parts.find((p) => /^(onedrive( - .*)?|dropbox|google drive|icloud ?drive)$/i.test(p));
   return hit ? hit.replace(/ - .*/, '') : null;
 }
 
@@ -395,19 +423,26 @@ function checkToolchain(ctx, tool) {
 
 // The trial proves, once per client and machine, that the three subagents start,
 // accept their models and may write files. Models changed since -> run it again.
+export function trialRun(ctx) {
+  const runs = (readJson(ctx.readFile(path.join(ctx.target, TRIAL_RECORD))) || {}).runs || {};
+  const mine = Object.keys(runs).filter((key) => key.split('/')[0] === ctx.machine).map((key) => runs[key]);
+  if (ctx.client) return mine.find((run) => run.client === ctx.client) || (mine.length ? { otherClient: mine[0].client } : null);
+  return mine[0] || null;
+}
+
 function checkTrialRecord(ctx) {
-  const record = readJson(ctx.readFile(path.join(ctx.target, TRIAL_RECORD)));
+  const record = trialRun(ctx);
   const models = configModels(ctx);
   const again = (why) => ({
     id: 'trial', level: 'warn',
     message: why,
     fix: ctx.t('オーケストレーターがサブエージェントの試運転（3つの小さな作業）を1回行います。各サブエージェントがファイルを1つ書くので、許可の確認が出たら許可してください。', 'The orchestrator runs the subagent trial once (three tiny tasks). Each subagent writes one file: allow it when asked.'),
   });
-  if (!record) return again(ctx.t('サブエージェントの試運転をまだしていません。', 'the subagent trial has not run yet.'));
+  if (trialLeftovers(ctx).length) return again(ctx.t('終わっていない試運転のファイルが残っています。', 'an unfinished trial left its files.'));
+  if (record && record.otherClient) return again(ctx.t(`この PC では別のアプリ（${record.otherClient}）でしか試運転していません。`, `on this machine the trial ran only in another client (${record.otherClient}).`));
+  if (!record) return again(ctx.t('この PC ではサブエージェントの試運転をまだしていません。', 'the subagent trial has not run on this machine yet.'));
   const changed = ROLES.filter((r) => (record.models || {})[r] !== models[r]);
   if (changed.length) return again(ctx.t(`試運転のあとでモデルの設定が変わりました（${changed.join(', ')}）。`, `the model settings changed since the trial (${changed.join(', ')}).`));
-  if (record.machine !== ctx.machine) return again(ctx.t('試運転は別の PC で行われました。', 'the trial ran on another machine.'));
-  if (ctx.client && record.client !== ctx.client) return again(ctx.t(`試運転は別のアプリ（${record.client || '不明'}）で行われました。`, `the trial ran in another client (${record.client || 'unknown'}).`));
   return { id: 'trial', level: 'ok', message: ctx.t(`サブエージェントの試運転は済んでいます（${record.date}、${record.client || 'アプリ不明'}）。`, `the subagent trial passed (${record.date}, ${record.client || 'client unknown'}).`) };
 }
 
@@ -462,7 +497,8 @@ export function runChecks(ctx) {
   const target = checkTarget(ctx);
   // Without the folder, the checks that run commands in it would only add confusing errors.
   if (!ctx.isDir(ctx.target)) return [checkNode(ctx), checkKit(ctx), ...target];
-  return [checkNode(ctx), checkKit(ctx), checkOpenspec(ctx), checkTelemetry(ctx), checkPowershell(ctx), checkClient(ctx)]
+  const openspec = checkOpenspec(ctx);
+  return [checkNode(ctx), checkKit(ctx), openspec, openspec.level === 'fail' ? null : checkOpenspecPath(ctx), checkTelemetry(ctx), checkPowershell(ctx), checkClient(ctx)]
     .concat(checkGit(ctx), target, checkSetup(ctx))
     .filter(Boolean);
 }
@@ -478,29 +514,83 @@ export function trialTasks(ctx) {
   return ROLES.map((role) => {
     const file = role === 'implementer' && targetRoot ? `${targetRoot}/${TRIAL_FILE}` : `${TRIAL_DIR}/${role}.md`;
     const line = `spec-relay trial: ${role}`;
-    return {
-      role, agent: `spec-relay-${role}`, model: models[role], file, line,
-      task: `spec-relay environment trial. Create the file ${file} containing exactly this one line: ${line}. Do not read, create or change anything else. Reply with one word: done.`,
-    };
+    // The implementer also runs a command: a port runs builds and tests, and shell commands have their own permission prompt.
+    const task = role === 'implementer'
+      ? `spec-relay environment trial. Run the command \`node --version\`, then create the file ${file} with two lines: first exactly ${line}, then the command's output. Do not read, create or change anything else. Reply with one word: done.`
+      : `spec-relay environment trial. Create the file ${file} containing exactly this one line: ${line}. Do not read, create or change anything else. Reply with one word: done.`;
+    return { role, agent: `spec-relay-${role}`, model: models[role], file, line, task };
   });
 }
 
 export function checkTrial(ctx) {
   const results = trialTasks(ctx).map((task) => {
     const text = ctx.readFile(path.join(ctx.target, task.file));
-    if (text !== null && ctx.normalizeText(text).includes(task.line)) {
+    const lines = text === null ? [] : ctx.normalizeText(text).split('\n').map((l) => l.trim());
+    const ran = task.role !== 'implementer' || lines.some((l) => /^v\d+\.\d+/.test(l));
+    if (lines.includes(task.line) && ran) {
       return { id: `trial-${task.role}`, level: 'ok', message: ctx.t(`${task.agent} が起動し、ファイルを書けました（モデル: ${task.model}）。`, `${task.agent} started and wrote its file (model: ${task.model}).`) };
     }
-    const why = text === null ? ctx.t('ファイルがありません', 'no file') : ctx.t('中身が違います（UTF-8 で書かれていないか、別の内容）', 'unexpected content (not UTF-8, or other text)');
+    const why = text === null ? ctx.t('ファイルがありません', 'no file')
+      : !lines.includes(task.line) ? ctx.t('中身が違います（UTF-8 で書かれていないか、別の内容）', 'unexpected content (not UTF-8, or other text)')
+        : ctx.t('`node --version` の結果がありません（コマンドの実行が許可されなかった可能性があります）', 'no `node --version` output (running the command may have been declined)');
     return {
       id: `trial-${task.role}`, level: 'fail',
       message: ctx.t(`${task.agent} の試運転が通りませんでした（${why}: ${task.file}）。`, `the trial of ${task.agent} failed (${why}: ${task.file}).`),
       fix: ctx.t(
-        `その呼び出しの返事を確かめてください。(1) エージェントが見つからない: キットのプラグインが入っているか、VS Code では Copilot ハーネスで使っているか。Copilot CLI では \`/subagents\` でサブエージェントが無効になっていないか。(2) モデルのエラー: openspec/config.yaml の「${task.role[0].toUpperCase()}${task.role.slice(1)} model」を \`session\` か、契約で使えるモデル名にする。(3) 許可を断った: ファイル編集を許可して試運転をやり直す。直したらもう一度試運転します。`,
-        `Read that call's reply. (1) Agent not found: is the kit plugin installed, and in VS Code is chat on the Copilot harness? In Copilot CLI, are subagents turned on in \`/subagents\`? (2) A model error: set "${task.role[0].toUpperCase()}${task.role.slice(1)} model" in openspec/config.yaml to \`session\` or a model your plan offers. (3) The edit was declined: allow file edits and run the trial again. Then run the trial again.`),
+        `その呼び出しの返事を確かめてください。(1) エージェントが見つからない: キットのプラグインが入っているか、VS Code では Copilot ハーネスで使っているか。Copilot CLI では \`/subagents\` でサブエージェントが無効になっていないか。(2) モデルのエラー: openspec/config.yaml の「${task.role[0].toUpperCase()}${task.role.slice(1)} model」を \`session\` か、契約で使えるモデル名にする。(3) 許可を断った: ファイル編集（実装担当はコマンドの実行も）を許可して試運転をやり直す。直したらもう一度試運転します。`,
+        `Read that call's reply. (1) Agent not found: is the kit plugin installed, and in VS Code is chat on the Copilot harness? In Copilot CLI, are subagents turned on in \`/subagents\`? (2) A model error: set "${task.role[0].toUpperCase()}${task.role.slice(1)} model" in openspec/config.yaml to \`session\` or a model your plan offers. (3) A permission was declined: allow file edits (and, for the implementer, running commands) and run the trial again. Then run the trial again.`),
     };
   });
   return results;
+}
+
+// What a trial may have left: its folder and the implementer's file.
+function trialLeftovers(ctx) {
+  return [TRIAL_DIR, ...trialTasks(ctx).filter((t) => !t.file.startsWith(`${TRIAL_DIR}/`)).map((t) => t.file)]
+    .filter((rel) => ctx.exists(path.join(ctx.target, rel)));
+}
+
+const CREATED = `${TRIAL_DIR}/created.json`;
+
+// Before a trial: removes an earlier trial's files and notes the folders the
+// implementer's file will create, so that cleaning up removes only those.
+function startTrial(ctx) {
+  cleanTrial(ctx);
+  const created = [];
+  for (const task of trialTasks(ctx).filter((t) => !t.file.startsWith(`${TRIAL_DIR}/`))) {
+    let dir = path.dirname(task.file);
+    while (dir && dir !== '.' && !ctx.exists(path.join(ctx.target, dir))) { created.push(dir); dir = path.dirname(dir); }
+  }
+  fs.mkdirSync(path.join(ctx.target, TRIAL_DIR), { recursive: true });
+  fs.writeFileSync(path.join(ctx.target, CREATED), `${JSON.stringify(created)}\n`);
+}
+
+// Removes what a trial wrote, and only the folders it created (deepest first).
+// A file a scanner or a sync client still holds is retried, and a failure only warns.
+function cleanTrial(ctx) {
+  const created = readJson(ctx.readFile(path.join(ctx.target, CREATED))) || [];
+  const retry = { recursive: true, force: true, maxRetries: 5, retryDelay: 200 };
+  try {
+    for (const task of trialTasks(ctx).filter((t) => !t.file.startsWith(`${TRIAL_DIR}/`))) fs.rmSync(path.join(ctx.target, task.file), retry);
+    fs.rmSync(path.join(ctx.target, TRIAL_DIR), retry);
+    for (const dir of created.slice().sort((a, b) => b.length - a.length)) {
+      try { fs.rmdirSync(path.join(ctx.target, dir)); } catch { /* not empty: the person's files */ }
+    }
+    return null;
+  } catch (error) {
+    return error.code || error.message;
+  }
+}
+
+function saveTrial(ctx) {
+  const file = path.join(ctx.target, TRIAL_RECORD);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const ignore = path.join(path.dirname(file), '.gitignore');
+  if (!fs.existsSync(ignore)) fs.writeFileSync(ignore, '# spec-relay: results that belong to one machine; never committed.\n*\n');
+  const saved = readJson(ctx.readFile(file)) || {};
+  const runs = saved.runs || {};
+  runs[`${ctx.machine}/${ctx.client || 'unknown'}`] = { date: new Date().toISOString().slice(0, 10), kit: ctx.kitVersion, client: ctx.client || null, models: configModels(ctx) };
+  fs.writeFileSync(file, `${JSON.stringify({ runs }, null, 2)}\n`);
 }
 
 // --- running it --------------------------------------------------------------
@@ -590,20 +680,37 @@ async function machineContext(opts, overrides = {}) {
     },
     tryWrite: (dir) => {
       const file = path.join(dir, `.spec-relay-doctor-${process.pid}.tmp`);
-      try { fs.writeFileSync(file, 'spec-relay doctor write test\n'); fs.rmSync(file, { force: true }); return null; } catch (error) { return error.code || error.message; }
+      try { fs.writeFileSync(file, 'spec-relay doctor write test\n'); } catch (error) { return error.code || error.message; }
+      // Only the write is the test; a scanner may hold the new file for a moment.
+      try { fs.rmSync(file, { force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* left behind; harmless */ }
+      return null;
     },
+    home: os.homedir(),
+    openspecOnPath: () => platform !== 'win32' || Boolean(launcher.findCommand('openspec', { npmScript: '@fission-ai/openspec/bin/openspec.js' })),
     findInPath: (name) => pathDirs().map((d) => path.join(d, name)).find((f) => fs.existsSync(f)) || null,
     executionPolicy: () => {
-      const exe = path.join(envValue(env, 'SystemRoot') || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-      const r = launcher.runCommand({ command: exe, prefixArgs: [] }, ['-NoProfile', '-NonInteractive', '-Command', 'Get-ExecutionPolicy'], { timeout: 15000 });
-      return r.status === 0 ? (r.stdout || '').trim() : null;
+      // A child of PowerShell 7 inherits its PSModulePath, on which Windows PowerShell 5.1 cannot load its modules.
+      const clean = Object.assign({}, env);
+      for (const key of Object.keys(clean)) if (key.toUpperCase() === 'PSMODULEPATH') delete clean[key];
+      const shells = [
+        ['PowerShell 7', launcher.findCommand('pwsh', {})],
+        ['Windows PowerShell', { command: path.join(envValue(env, 'SystemRoot') || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), prefixArgs: [] }],
+      ];
+      const found = [];
+      for (const [shell, launch] of shells) {
+        if (!launch || launch.batch) continue;
+        const r = launcher.runCommand(launch, ['-NoProfile', '-NonInteractive', '-Command', 'Get-ExecutionPolicy'], { timeout: 15000, env: clean });
+        if (r.status === 0 && (r.stdout || '').trim()) found.push({ shell, policy: r.stdout.trim() });
+      }
+      return found;
     },
     exec: (name, args, { cwd, npmScript } = {}) => {
       const launch = launcher.findCommand(name, { npmScript });
-      const r = launcher.runCommand(launch, args, { cwd, timeout: 20000 });
+      const r = launcher.runCommand(launch, args, { cwd, timeout: 20000, maxBuffer: 64 * 1024 * 1024 });
       // 9009: the Microsoft Store's "python" alias when Python is not installed.
       const found = !r.notFound && !(r.error && r.error.code === 'ENOENT') && r.status !== 9009;
-      return { found, status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
+      // A timeout or a full buffer is "could not tell", never a result.
+      return { found, status: r.error ? null : r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
     },
     probeOpenspec: (cwd) => launcher.probeOpenspec({ cwd }),
   };
@@ -680,29 +787,22 @@ export async function main(argv, overrides = {}) {
       console.error(ctx.t('doctor: まだ導入していません。試運転は導入のあとに行います。', 'doctor: spec-relay is not set up here yet; run the trial after setup.'));
       return 1;
     }
-    const trialDir = path.join(ctx.target, TRIAL_DIR);
-    // Removes what a trial wrote, and the target root when the trial created it.
-    const clean = () => {
-      fs.rmSync(trialDir, { recursive: true, force: true });
-      for (const task of trialTasks(ctx).filter((t) => !t.file.startsWith(`${TRIAL_DIR}/`))) {
-        const file = path.join(ctx.target, task.file);
-        fs.rmSync(file, { force: true });
-        try { if (!fs.readdirSync(path.dirname(file)).length) fs.rmdirSync(path.dirname(file)); } catch { /* not there or not empty */ }
-      }
-    };
     if (opts.mode === 'trial') {
-      clean();
+      startTrial(ctx);
       const tasks = trialTasks(ctx);
       console.log(ascii(JSON.stringify({ folder: TRIAL_DIR, wave: tasks.length, tasks }, null, 2)));
       return 0;
     }
-    const checks = checkTrial(ctx);
-    const passed = !checks.some((c) => c.level === 'fail');
-    if (passed) {
-      const record = { date: new Date().toISOString().slice(0, 10), kit: ctx.kitVersion, client: ctx.client || null, machine: ctx.machine, models: configModels(ctx) };
-      fs.writeFileSync(path.join(ctx.target, TRIAL_RECORD), `${JSON.stringify(record, null, 2)}\n`);
-      clean();
+    // Run twice (after a compaction, say): a passed trial whose files are gone still counts.
+    if (!trialLeftovers(ctx).length) {
+      const done = checkTrialRecord(ctx);
+      if (done.level === 'ok') return print([done], ctx, opts);
     }
+    const checks = checkTrial(ctx);
+    if (!checks.some((c) => c.level === 'fail')) saveTrial(ctx);
+    // Cleaned up either way: a failed trial is started again with --trial.
+    const left = cleanTrial(ctx);
+    if (left) checks.push({ id: 'trial-cleanup', level: 'warn', message: ctx.t(`試運転のファイルを消せませんでした（${left}）。`, `could not remove the trial files (${left}).`), fix: ctx.t(`${TRIAL_DIR}/ と移行先のフォルダーの ${TRIAL_FILE} を消してください。`, `Delete ${TRIAL_DIR}/ and ${TRIAL_FILE} in the target root.`) });
     return print(checks, ctx, opts);
   }
   return print(runChecks(ctx), ctx, opts);

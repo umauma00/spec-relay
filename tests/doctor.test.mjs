@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import {
   main, parseVersion, compareVersions, telemetryOff, toolchainFor, checkNode, checkOpenspec,
   checkGit, checkTarget, checkClient, checkPowershell, TRIAL_RECORD, TRIAL_DIR, KIT_ROOT,
@@ -35,6 +36,9 @@ function machine(dir, extra = {}) {
     exec: tools(),
     samePath: () => true,
     machine: 'test-machine',
+    // No PowerShell processes per test on Windows CI.
+    executionPolicy: () => [],
+    openspecOnPath: () => true,
     ...extra,
   };
 }
@@ -172,10 +176,14 @@ test('clients: Copilot CLI and VS Code versions, nothing to read for the app', (
 });
 
 test('PowerShell: a policy that blocks openspec.ps1 is mentioned, never changed', () => {
-  const ctx = (policy, platform = 'win32') => ({ ...ja, platform, findInPath: () => 'C:\\npm\\openspec.ps1', executionPolicy: () => policy });
-  assert.match(checkPowershell(ctx('Restricted')).fix, /openspec\.cmd/);
-  assert.equal(checkPowershell(ctx('RemoteSigned')), null);
-  assert.equal(checkPowershell(ctx('Restricted', 'linux')), null);
+  const ctx = (policies, platform = 'win32') => ({ ...ja, platform, findInPath: () => 'C:\\npm\\openspec.ps1', executionPolicy: () => policies });
+  const both = checkPowershell(ctx([{ shell: 'PowerShell 7', policy: 'RemoteSigned' }, { shell: 'Windows PowerShell', policy: 'Restricted' }]));
+  assert.match(both.fix, /openspec\.cmd/);
+  assert.match(both.message, /Windows PowerShell Restricted/);
+  assert.doesNotMatch(both.message, /PowerShell 7/);
+  assert.equal(checkPowershell(ctx([{ shell: 'PowerShell 7', policy: 'RemoteSigned' }])), null);
+  assert.equal(checkPowershell(ctx([])), null);
+  assert.equal(checkPowershell(ctx([{ shell: 'Windows PowerShell', policy: 'Restricted' }], 'linux')), null);
 });
 
 test('toolchains follow the target language', () => {
@@ -230,38 +238,103 @@ test('the subagent trial: tasks, check, record, and when to run it again', async
   write(dir, `${TRIAL_DIR}/analyst.md`, 'spec-relay trial: analyst\n');
   const plan = await doctor(['--target', dir, '--trial'], machine(dir));
   assert.equal(plan.code, 0);
-  assert.equal(fs.existsSync(path.join(dir, TRIAL_DIR)), false);
+  assert.equal(fs.existsSync(path.join(dir, `${TRIAL_DIR}/analyst.md`)), false);
   const tasks = plan.json.tasks;
   assert.deepEqual(tasks.map((t) => [t.agent, t.model]), [['spec-relay-analyst', 'session'], ['spec-relay-checker', 'claude-opus-5.5'], ['spec-relay-implementer', 'session']]);
-  // The implementer writes where it writes during a port.
+  // The implementer writes where it writes during a port, and runs a command.
   assert.equal(tasks[2].file, 'ts/spec-relay-trial.md');
+  assert.match(tasks[2].task, /node --version/);
   for (const t of tasks) assert.ok(t.task.startsWith('spec-relay environment trial') && t.task.includes(t.file) && t.task.includes(t.line));
 
+  const check = (client = 'cli', extra) => doctor(['--target', dir, '--trial-check', '--client', client, '--json', '--lang', 'en'], machine(dir, extra));
   write(dir, tasks[0].file, `${tasks[0].line}\n`);
   write(dir, tasks[2].file, `${tasks[2].line}\r\n`);
-  let check = await doctor(['--target', dir, '--trial-check', '--client', 'cli', '--json', '--lang', 'en'], machine(dir));
-  assert.equal(check.code, 1);
-  assert.deepEqual(check.json.checks.map((c) => c.level), ['ok', 'fail', 'ok']);
-  assert.match(check.json.checks[1].fix, /Checker model/);
+  let result = await check();
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.json.checks.map((c) => c.level), ['ok', 'fail', 'fail']);
+  assert.match(result.json.checks[1].fix, /Checker model/);
+  assert.match(result.json.checks[2].message, /node --version/);
   assert.equal(fs.existsSync(path.join(dir, TRIAL_RECORD)), false);
+  // A failed trial is cleaned up too; the next one starts with --trial.
+  assert.equal(fs.existsSync(path.join(dir, 'ts')), false);
 
+  await doctor(['--target', dir, '--trial'], machine(dir));
+  write(dir, tasks[0].file, `${tasks[0].line}\n`);
   write(dir, tasks[1].file, `${tasks[1].line}\n`);
-  check = await doctor(['--target', dir, '--trial-check', '--client', 'cli', '--json', '--lang', 'en'], machine(dir));
-  assert.equal(check.code, 0);
-  const record = JSON.parse(fs.readFileSync(path.join(dir, TRIAL_RECORD), 'utf8'));
-  assert.deepEqual([record.client, record.machine, record.models.checker], ['cli', 'test-machine', 'claude-opus-5.5']);
+  write(dir, tasks[2].file, `${tasks[2].line}\r\nv22.12.0\r\n`);
+  result = await check();
+  assert.equal(result.code, 0, JSON.stringify(result.json));
+  const runs = JSON.parse(fs.readFileSync(path.join(dir, TRIAL_RECORD), 'utf8')).runs;
+  assert.deepEqual(Object.keys(runs), ['test-machine/cli']);
+  assert.equal(runs['test-machine/cli'].models.checker, 'claude-opus-5.5');
+  assert.equal(fs.readFileSync(path.join(dir, path.dirname(TRIAL_RECORD), '.gitignore'), 'utf8').trim().split('\n').pop(), '*');
   // The trial leaves nothing behind, not even the target root it created.
   assert.equal(fs.existsSync(path.join(dir, TRIAL_DIR)), false);
   assert.equal(fs.existsSync(path.join(dir, 'ts')), false);
+  // Checking again (after a compaction, say) still passes.
+  assert.equal((await check()).code, 0);
 
   const trial = async (argv, extra) => byId((await doctor(['--target', dir, '--json', '--lang', 'en', ...argv], machine(dir, extra))).json, 'trial').level;
   assert.equal(await trial(['--client', 'cli']), 'ok');
   assert.equal(await trial([]), 'ok');
   assert.equal(await trial(['--client', 'vscode']), 'warn');
   assert.equal(await trial(['--client', 'cli'], { machine: 'other-machine' }), 'warn');
+  // A second client on the same machine keeps the first one's result.
+  await doctor(['--target', dir, '--trial'], machine(dir));
+  for (const t of tasks) write(dir, t.file, `${t.line}\nv24.1.0\n`);
+  assert.equal((await check('vscode')).code, 0);
+  assert.equal(await trial(['--client', 'vscode']), 'ok');
+  assert.equal(await trial(['--client', 'cli']), 'ok');
+  // Leftovers of an unfinished trial ask for the check.
+  await doctor(['--target', dir, '--trial'], machine(dir));
+  assert.equal(await trial(['--client', 'cli']), 'warn');
+  await check();
   const config = path.join(dir, 'openspec/config.yaml');
   fs.writeFileSync(config, fs.readFileSync(config, 'utf8').replace('Checker model: claude-opus-5.5', 'Checker model: session'));
   assert.equal(await trial(['--client', 'cli']), 'warn');
+});
+
+test('the trial removes only the folders it created', async () => {
+  const dir = setUpRepo(['--source-language', 'PHP', '--target-language', 'Java', '--target-root', 'apps/new', '--skip-init', '--apply']);
+  const java = { 'java -version': { found: true, status: 0, stderr: 'openjdk version "21.0.2"' }, 'javac -version': { found: true, status: 0, stdout: 'javac 21.0.2' } };
+  const plan = await doctor(['--target', dir, '--trial'], machine(dir, { exec: tools(java) }));
+  for (const t of plan.json.tasks) write(dir, t.file, `${t.line}\nv22.12.0\n`);
+  assert.equal(plan.json.tasks[2].file, 'apps/new/spec-relay-trial.md');
+  assert.equal((await doctor(['--target', dir, '--trial-check', '--json'], machine(dir))).code, 0);
+  assert.equal(fs.existsSync(path.join(dir, 'apps')), false);
+
+  // A target root the person already made stays.
+  fs.mkdirSync(path.join(dir, 'apps/new'), { recursive: true });
+  const again = await doctor(['--target', dir, '--trial'], machine(dir));
+  for (const t of again.json.tasks) write(dir, t.file, `${t.line}\nv22.12.0\n`);
+  await doctor(['--target', dir, '--trial-check', '--json'], machine(dir, { machine: 'second' }));
+  assert.ok(fs.existsSync(path.join(dir, 'apps/new')));
+  assert.equal(fs.existsSync(path.join(dir, 'apps/new/spec-relay-trial.md')), false);
+  const json = (await doctor(['--target', dir, '--json', '--lang', 'en'], machine(dir, { exec: tools(java) }))).json;
+  assert.match(byId(json, 'toolchain').message, /javac 21/);
+});
+
+test('review findings: PATH, git status, safe.directory, Box, network folders', async () => {
+  const dir = tempDir();
+  // OpenSpec found only in npm's folder: the agent's own commands would fail.
+  const notOnPath = (await doctor(['--target', dir, '--json', '--lang', 'en'], machine(dir, { platform: 'win32', openspecOnPath: () => false }))).json;
+  assert.equal(byId(notOnPath, 'openspec-path').level, 'warn');
+  const missing = (await doctor(['--target', dir, '--json', '--lang', 'en'], machine(dir, { platform: 'win32', openspecOnPath: () => false, probeOpenspec: () => ({ ok: false, reason: 'the openspec CLI was not found.' }) }))).json;
+  assert.equal(byId(missing, 'openspec-path'), undefined);
+
+  const ctx = (answers) => ({ ...en, target: '/work/proj', platform: 'linux', exec: tools(answers), samePath: () => true });
+  assert.equal(checkGit(ctx({ 'git --version': { found: true, status: 1, stdout: '' } })).length, 1);
+  // A timeout or a full buffer says nothing about the changes.
+  assert.equal(checkGit(ctx({ 'git status --porcelain': { found: true, status: null, stdout: '' } }))[1].level, 'ok');
+  const share = checkGit(ctx({ 'git rev-parse --show-toplevel': { found: true, status: 128, stderr: "fatal: detected dubious ownership in repository at '//server/share/proj'\nTo add an exception for this directory, call:\n\n\tgit config --global --add safe.directory '%(prefix)///server/share/proj'\n" } }));
+  assert.match(share[1].fix, /safe\.directory '%\(prefix\)\/\/\/server\/share\/proj'/);
+  // After setup, uncommitted changes are normal.
+  assert.equal(checkGit({ ...ctx({ 'git status --porcelain': { found: true, status: 0, stdout: '?? openspec/\n' } }), setUp: true })[1].level, 'ok');
+
+  const folder = (target, extra = {}) => checkTarget({ ...en, target, env: {}, home: 'C:\\Users\\a', platform: 'win32', isDir: () => true, tryWrite: () => null, ...extra }).map((c) => c.id);
+  assert.deepEqual(folder('C:\\Users\\a\\Box\\proj'), ['target', 'sync-folder']);
+  assert.deepEqual(folder('C:\\work\\box\\proj'), ['target']);
+  assert.deepEqual(folder('\\\\server\\share\\proj'), ['target', 'network-folder']);
 });
 
 test('the text report: one line per check and the fix under each problem', async () => {
@@ -295,9 +368,12 @@ test('on Windows a tool installed by npm runs as node + its script', () => {
 // The real machine, nothing replaced: in CI (Windows and Ubuntu) every tool the kit needs is installed.
 test('the real machine runs every check without an error', async () => {
   const dir = setUpRepo();
+  // A git repository, so the real path comparison (git's C:/... against a short 8.3 temp path) runs.
+  const git = spawnSync('git', ['init', '-q'], { cwd: dir });
   const { code, json } = await doctor(['--target', dir, '--client', 'cli', '--json', '--lang', 'en']);
   assert.ok(json, 'JSON output');
   for (const id of ['node', 'kit', 'target', 'schemas', 'toolchain']) assert.equal(byId(json, id).level, 'ok', `${id}: ${JSON.stringify(byId(json, id))}`);
+  if (git.status === 0) assert.equal(byId(json, 'git-repo').level, 'ok', JSON.stringify(byId(json, 'git-repo')));
   if (process.env.CI) {
     assert.equal(byId(json, 'openspec').level, 'ok', JSON.stringify(byId(json, 'openspec')));
     assert.equal(byId(json, 'git').level, 'ok');

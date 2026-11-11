@@ -95,9 +95,13 @@ stop halfway on something the machine or the host lacks.
    with its `fix`, in the person's language and in one message (the JSON is
    ASCII with `\uXXXX` escapes; read it as JSON).
    - A `fail` blocks: stop, and run the check again after the person fixed it.
-   - A `warn` may cause trouble later: ask whether to fix it first or go on.
+   - A `warn` may cause trouble later. Before setup, ask whether to fix it
+     first or go on. Once set up, the person has already decided on the
+     warnings that stay (a newer OpenSpec, a synchronised folder): list their
+     ids in one line and go on, unless one is new or changed. A `trial`
+     warning needs no question: run the trial (step 6).
    - An `info` needs no answer; mention it in a line (for `telemetry`, how to
-     turn it off).
+     turn it off) before setup, and not again later.
    - Never install, update or change settings to fix a check on your own:
      ask first for installs (`npm install -g @fission-ai/openspec@1.17.0`),
      and leave the execution policy, git's global config and OpenSpec's
@@ -134,7 +138,8 @@ stop halfway on something the machine or the host lacks.
    wave from stopping at a permission prompt. Run `node
    "<kit>/scripts/doctor.mjs" --trial` and start every task in `tasks` in one
    wave (at most `subagents` at once): give its `task` text as it is to its
-   `agent`, with its `model` unless that is `session`. When all have returned,
+   `agent`, with its `model` unless that is `session`. The implementer also
+   runs `node --version`, so a prompt to allow a command may appear too. When all have returned,
    run `node "<kit>/scripts/doctor.mjs" --trial-check --client <client>
    --json`. On a `fail`, tell the person what that subagent replied and the
    `fix`, and run the trial again after they fixed it. If this host cannot
