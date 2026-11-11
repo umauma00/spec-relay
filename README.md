@@ -2,7 +2,7 @@
 
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) を使って、コードベースを別のプログラミング言語へ移すための GitHub Copilot 用キットです。元のコードから仕様を起こし、人間がその仕様をレビューし、レビュー済みの仕様をもとに新しい言語で実装します。
 
-> **状態：0.3.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
+> **状態：0.4.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
 
 ## 流れ
 
@@ -52,6 +52,31 @@ copilot plugin install spec-relay@spec-relay-marketplace
 
 VS Code と Copilot app でも、同じ登録元（`umauma00/spec-relay`）をマーケットプレイスとして追加して `spec-relay` を入れます。
 
+### 最初に環境を確かめる
+
+移行の途中で環境が原因で止まらないよう、オーケストレーターは毎回のセッションの最初に `scripts/doctor.mjs` で環境を確かめ、足りないものと、それぞれ何をすればよいかを知らせます。`FAIL` があるうちは調査を始めません。手で実行することもできます（何も書き換えません）。
+
+```powershell
+node "C:\path\to\spec-relay\scripts\doctor.mjs" --target . --client cli
+```
+
+`--client` は使うアプリに合わせて `cli`・`vscode`・`app` のどれかにします。確かめること：
+
+| 対象 | 確かめること | 足りないとき |
+|---|---|---|
+| Node.js | 22.12 以上（古い Node.js でも、このメッセージは出ます） | FAIL |
+| キット | スキーマ・スクリプト・エージェントがそろっているか | FAIL |
+| OpenSpec CLI | 起動できて、版が 1.17.0 か（古いと FAIL、新しいと WARN）。入れる前に開いたターミナルで PATH にないとき（WARN） | FAIL |
+| OpenSpec の利用統計 | 送信が止まっているか（止め方を案内。キットは設定を変えません） | INFO |
+| PowerShell | 実行ポリシーで `openspec` が止まるか（`openspec.cmd` を案内） | INFO |
+| Copilot のアプリ | Copilot CLI 1.0.109 以上、VS Code 1.143 以上 | WARN |
+| git | git があるか、リポジトリの一番上か、「所有者が違う」で拒否されていないか、長いパス | WARN |
+| フォルダー | 書き込めるか（「コントロールされたフォルダー アクセス」など）、OneDrive などの同期フォルダーやネットワーク上のフォルダーでないか | FAIL・WARN |
+| 導入済みのリポジトリ | スキーマがキットの版と同じか、`openspec update` で apply・archive・sync が戻っていないか、元コードのフォルダーがあるか、移行先の言語のビルド道具（JDK・Python・.NET SDK など） | FAIL・WARN |
+| サブエージェント | 導入のあとに1回、解析・照合・実装担当を同時に起動して、それぞれファイルを1つ書かせる試運転（`--trial`・`--trial-check`。実装担当は移行先のフォルダーに書き、`node --version` も実行）。エージェントが見つかるか、モデルが使えるか、書き込みとコマンド実行の許可が出るかを最初に確かめます | FAIL |
+
+終了コードは、0 なら始められる（WARN が残ることはある）、1 なら FAIL を直してからです。試運転の結果は PC とアプリごとに `openspec/spec-relay/local/trial.json`（git では無視）に残り、モデルの設定を変えたときや、別の PC・アプリで使い始めたときは、もう一度試運転を求めます。
+
 ### 移行対象のリポジトリを準備する
 
 移行したいリポジトリを開いて `spec-relay-orchestrator` を選び、「Java から TypeScript への移行を始めて」のように頼みます。AI が言語とフォルダーを聞いたうえで、次の導入スクリプトを実行します（手で実行してもかまいません）。
@@ -95,6 +120,10 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 - **並列で進めても、レビューは1本。** 解析・照合・実装はサブエージェントが同時に進め、人のレビューは1つずつです。先に解析しておくのは `--ahead` 件までにして、レビュー待ちを溜めません。サブエージェントは割り当てられたファイルだけを書き、オーケストレーターには短い報告だけを返すので、長い移行でもオーケストレーターの文脈が埋まりにくくなっています（[詳しく](docs/WORKFLOW.md#並列での進め方)）。
 - **進捗は Copilot の TODO に出す。** `scripts/status.mjs` が `openspec/` のファイルから進捗を計算し、オーケストレーターが「全体1行 + いまの機能の工程 + 並行して動いている機能」を TODO リストに出します。報告の先頭にも同じ一覧を出します。TODO のチェックは承認になりません（[詳しく](docs/WORKFLOW.md#進捗の表示copilot-の-todo)）。
 
+## 0.3.0 から更新するとき
+
+0.4.0 で環境チェック（`scripts/doctor.mjs`）が加わりました。スキーマと設定は変わっていないので、導入し直す必要はありません。次のセッションの最初に、オーケストレーターが環境を確かめ、サブエージェントの試運転を1回行います。
+
 ## 0.2.0 から更新するとき
 
 0.3.0 で、サブエージェントを並列に動かす手順に変わり、survey・extract・amend のスキーマの説明文が変わりました。導入スクリプトをもう一度実行するとスキーマの違いを表示して止まるので、`openspec/schemas/spec-relay-*` を削除してから実行し直してください。`openspec/config.yaml` はそのまま残るので、次の2か所を手で直します。
@@ -130,6 +159,7 @@ scripts/gate.mjs               承認・実装の前に使う機械的な確認
 scripts/status.mjs             進捗の計算（TODO リスト・チャット用）と、次に並列で始めてよい作業
 scripts/merge.mjs              サブエージェントが分担して書いた表を1つの成果物にまとめる
 scripts/render.mjs             成果物の markdown をレビュー用の HTML にする（デザイン固定）
+scripts/doctor.mjs             最初の環境チェックとサブエージェントの試運転
 scripts/openspec.mjs           OpenSpec CLI の起動（Windows でシェルを通さない）
 tests/                         node:test のテスト（OpenSpec があれば通しの確認も）
 docs/WORKFLOW.md               流れと設計の説明、今後の課題

@@ -16,7 +16,8 @@ The kit's own files are two directories above this skill:
 [scripts/setup.mjs](../../scripts/setup.mjs),
 [scripts/gate.mjs](../../scripts/gate.mjs),
 [scripts/status.mjs](../../scripts/status.mjs),
-[scripts/merge.mjs](../../scripts/merge.mjs), `openspec-schemas/` and
+[scripts/merge.mjs](../../scripts/merge.mjs),
+[scripts/doctor.mjs](../../scripts/doctor.mjs), `openspec-schemas/` and
 `docs/WORKFLOW.md`. `<kit>` below stands for the absolute path of that
 directory; resolve it from this file's own location (installed as a plugin it is
 under `.copilot/installed-plugins/` in the person's home folder).
@@ -37,6 +38,9 @@ Most people use this kit on Windows, where your shell is PowerShell.
 - After installing a tool, PATH is stale in the open terminal. The kit's
   scripts look in npm's global folder themselves; for your own `openspec`
   calls open a new terminal.
+- When a command fails in a way the environment can cause (a command not
+  found, access denied, `EPERM` or `EBUSY`, a model or subagent error), run
+  the environment check (step 0) and give the person its fixes.
 - Write repository paths in artifacts with forward slashes (`src/billing/Invoice.cs`). Read `docs/WORKFLOW.md` once when you
 need the reasoning behind a step.
 
@@ -76,15 +80,35 @@ need the reasoning behind a step.
 - **Wave**: a set of subagent tasks you start together (see Working in
   parallel).
 
-## 0. Setup (once per repository)
+## 0. Environment check and setup
 
-1. Run `openspec --version`. If the command is missing, ask the person before
-   installing it with `npm install -g @fission-ai/openspec@1.17.0` (Node.js
-   22.12 or later; 1.17.0 is the version the kit is tested with). If `node`
-   itself is missing, tell the person how to install it (Windows: `winget
-   install OpenJS.NodeJS.LTS`) and stop.
+Check the environment before anything else, so that the migration does not
+stop halfway on something the machine or the host lacks.
+
+1. **Environment check** (at the start of every session, also on resume; it
+   is quick and changes nothing). Run `node "<kit>/scripts/doctor.mjs"
+   --target . --client <client> --json`, where `<client>` is `cli` in Copilot
+   CLI, `vscode` in VS Code and `app` in the Copilot app. If the shell does not
+   know `node`, tell the person to install Node.js 22.12 or later (Windows:
+   `winget install OpenJS.NodeJS.LTS`) and to open a new terminal or restart
+   the app, and stop. Otherwise report every `fail` and `warn` in `checks`
+   with its `fix`, in the person's language and in one message (the JSON is
+   ASCII with `\uXXXX` escapes; read it as JSON).
+   - A `fail` blocks: stop, and run the check again after the person fixed it.
+   - A `warn` may cause trouble later. Before setup, ask whether to fix it
+     first or go on. Once set up, the person has already decided on the
+     warnings that stay (a newer OpenSpec, a synchronised folder): list their
+     ids in one line and go on, unless one is new or changed. A `trial`
+     warning needs no question: run the trial (step 6).
+   - An `info` needs no answer; mention it in a line (for `telemetry`, how to
+     turn it off) before setup, and not again later.
+   - Never install, update or change settings to fix a check on your own:
+     ask first for installs (`npm install -g @fission-ai/openspec@1.17.0`),
+     and leave the execution policy, git's global config and OpenSpec's
+     settings to the person.
 2. If `openspec/config.yaml` already contains `# spec-relay: managed`, setup is
-   done; read its context and go to the first unfinished step.
+   done: read its context, run the trial (step 6) if the check reported `trial`
+   as `warn`, and go to the first unfinished step.
 3. Otherwise ask, one question at a time: the source language (propose what you
    detect from the files), the target language, the source root, the target root,
    the language for artifacts (default: the person's language), how many
@@ -102,9 +126,27 @@ need the reasoning behind a step.
    overwrite, move or delete the person's files to get past it.
    Setup replaces OpenSpec's generic apply, archive and sync workflows with
    stubs that point here, because they skip the review gate. `openspec update`
-   may restore them; run setup again
+   may restore them (the check reports `workflows` then); run setup again
    after it.
-5. Commit nothing on your own. Suggest a commit when setup is done.
+5. Run the environment check again: now it also compares the schemas, the
+   source root and the target language's toolchain.
+6. **Subagent trial** (once; again when the check reports `trial` as `warn`).
+   It proves that the three subagents start on their models and may write
+   files, before real work depends on it. First tell the person that three
+   subagents will each write one small file, and that allowing file edits for
+   `openspec/` and the target root for this session now keeps every later
+   wave from stopping at a permission prompt. Run `node
+   "<kit>/scripts/doctor.mjs" --trial` and start every task in `tasks` in one
+   wave (at most `subagents` at once): give its `task` text as it is to its
+   `agent`, with its `model` unless that is `session`. The implementer also
+   runs `node --version`, so a prompt to allow a command may appear too. When all have returned,
+   run `node "<kit>/scripts/doctor.mjs" --trial-check --client <client>
+   --json`. On a `fail`, tell the person what that subagent replied and the
+   `fix`, and run the trial again after they fixed it. If this host cannot
+   start subagents at all, tell the person that the kit needs them (Copilot
+   CLI: `/subagents`; VS Code: the Copilot harness) and stop.
+7. Commit nothing on your own. Suggest a commit when setup and the trial are
+   done.
 
 ## Working in parallel
 
@@ -323,7 +365,9 @@ port.
 ## 5. Implement: port the baseline spec
 
 1. Port only capabilities whose extract change is archived, in plan order.
-   `node "<kit>/scripts/gate.mjs" port-ready --capability <capability>` must
+   Before the first port, run the environment check (step 0) again: a
+   `toolchain` warning (the target language's build tools) must be fixed
+   first. `node "<kit>/scripts/gate.mjs" port-ready --capability <capability>` must
    pass before you create the port change (it also needs the archived survey
    and target design, and no open amendment).
 2. `openspec new change port-<capability> --schema spec-relay-port`, then write
@@ -430,5 +474,6 @@ keep this list; the analyst, checker and implementer subagents have no TODO tool
   changes stay as they are; put their capabilities into the survey's list
   unchanged), because `gate.mjs port-ready` needs both. Until then,
   `status.mjs --capability <capability>` still shows that capability's steps.
-- On resume, read the plan and these commands, refresh the TODO list, tell the
-  person where things stand, and continue the first unfinished step.
+- On resume, run the environment check (step 0), read the plan and these
+  commands, refresh the TODO list, tell the person where things stand, and
+  continue the first unfinished step.

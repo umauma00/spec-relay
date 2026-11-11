@@ -20,3 +20,23 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: npm install -g @fission-ai/openspec@1.17.0
       - run: npm test
+  old-node:
+    # doctor.mjs must explain an old Node.js instead of stopping on a SyntaxError.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 16
+      - name: doctor reports the old Node.js
+        shell: bash
+        run: |
+          set +e
+          node scripts/doctor.mjs --json > out.json
+          code=$?
+          cat out.json
+          test "$code" = 1 && grep -q '"id": "node"' out.json
