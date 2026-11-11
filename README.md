@@ -26,8 +26,17 @@ flowchart LR
 
 GitHub Copilot CLI・VS Code・GitHub Copilot app を想定しています。入口はどれも **`spec-relay-orchestrator`** エージェント1つで、チャットで頼むと AI がコマンドを実行して報告します。
 
-- **VS Code** は Copilot ハーネス（1.143 から既定）で使ってください。旧来の Local ハーネスでは「Run Subagent」を有効にする必要があり、サブエージェントが並列に動くかは公式に書かれていません。
-- **ファイル編集の許可**：解析担当・照合担当・実装担当は自分のファイルを書きます。最初の並列作業の前にファイル編集をセッション中は許可しておくと、サブエージェントが許可待ちで止まりません。許可はできるだけ `openspec/` と移行先のフォルダーに絞ってください（VS Code では `chat.tools.edits.autoApprove` 設定でファイルパターンごとに自動承認を決められます。例：`{"**/*": false, "openspec/**": true, "<移行先のフォルダー>/**": true}`。Copilot app は Assisted）。リポジトリ全体を許可するしかない場合（Copilot CLI の「このリポジトリでは今後確認しない」など）でも、オーケストレーターが波の前後に `gate.mjs guard` で元コード・review.md・ベースライン仕様などのハッシュを比べ、割り当て外の変更があれば止まって知らせます。Copilot CLI では、並列に起動した呼び出しのどれか1つを拒否すると、一緒に起動したものも取り消されます。
+- **VS Code** は Copilot ハーネス（1.143 から既定）で使ってください。Local ハーネスは 1.146（2026-11-11）で非推奨になり、2027年2月に削除される予定のため、対象にしていません。
+- **Copilot CLI** は 1.0.109 以降を勧めます。並列に動くサブエージェントの許可確認の修正が 1.0.106 から 1.0.109 に入っています（確認が重複して残る、長いセッションでサブエージェントの操作が効かなくなる、など）。`copilot --version` で確かめられます。
+- **ファイル編集の許可**：解析担当・照合担当・実装担当は自分のファイルを書きます。最初の並列作業の前にファイル編集をセッション中は許可しておくと、サブエージェントが許可待ちで止まりません。許可はできるだけ `openspec/` と移行先のフォルダーに絞ってください。
+
+  | アプリ | 許可の選び方（2026-11-11 時点の公式情報） |
+  |---|---|
+  | VS Code | 権限は Manual・Assisted・Allow all。Manual では編集の許可をファイル単位かフォルダー単位で出せますが、フォルダー単位は Git リポジトリ全体が対象で、元コードも含みます。`chat.tools.edits.autoApprove` 設定で、ファイルパターンごとに承認の要否を決められます（例：`{"**/*": false, "openspec/**": true, "<移行先のフォルダー>/**": true}`） |
+  | Copilot app | Ask every time・Assisted・Approve all |
+  | Copilot CLI | `/permissions` で、毎回確認・assisted・allow-all を切り替えます。「このリポジトリでは今後確認しない」は Git リポジトリ全体が対象です。並列のファイル操作でこれを選ぶと、同時に出ていた確認もまとめて承認されます（1.0.109 から）。並列に起動した呼び出しのどれか1つを拒否すると、一緒に起動したものも取り消されます |
+
+  リポジトリ全体を許可した場合でも、オーケストレーターが波の前後に `gate.mjs guard` で元コード・review.md・ベースライン仕様などのハッシュを比べ、割り当て外の変更があれば止まって知らせます。
 
 ## 必要なもの
 
@@ -37,7 +46,7 @@ Windows を主な実行環境として扱います（macOS・Linux でも動き�
 |---|---|
 | Node.js 22.12 以上（OpenSpec の要件） | `winget install OpenJS.NodeJS.LTS` |
 | [OpenSpec CLI](https://github.com/Fission-AI/OpenSpec) 1.17.0（テストはこの版で実行） | `npm install -g @fission-ai/openspec@1.17.0` |
-| GitHub Copilot（CLI・VS Code・Copilot app のいずれか） | |
+| GitHub Copilot（CLI・VS Code・Copilot app のいずれか）。CLI は 1.0.109 以降、VS Code は 1.143 以降 | CLI は `npm install -g @github/copilot` |
 
 ## 導入
 
