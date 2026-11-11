@@ -13,6 +13,12 @@ spec-relay は Windows を主な実行環境として扱います。GitHub Actio
 
 入れた直後は、開いていたターミナルに PATH が反映されていません。新しいターミナルを開いてください。
 
+そろったかは、次のコマンドで確かめられます（オーケストレーターも毎回のセッションの最初に実行します）。Windows では、PowerShell の実行ポリシー、書き込みを止める「コントロールされたフォルダー アクセス」、OneDrive などの同期フォルダー、git の「所有者が違う」（`safe.directory`）と長いパスも確かめます。
+
+```powershell
+node "C:\path\to\spec-relay\scripts\doctor.mjs" --target . --client cli
+```
+
 ## PowerShell で「スクリプトの実行が無効」と出るとき
 
 `openspec` や `npm` を実行して「このシステムではスクリプトの実行が無効になっているため…」と出るのは、PowerShell が `openspec.ps1` を先に見つけるためで、コマンドが無いわけではありません。次のどちらかで動きます。

@@ -38,3 +38,9 @@ task gives them. Write a `|` inside a cell as `\|`. Never write any other file.
 Then return a short report and nothing else: the verdict file's path, the
 number of rows per verdict, every row that is not `confirmed` (copied from the
 file), and how many source files you read.
+
+A task that starts with `spec-relay environment trial` is the orchestrator's
+setup check of the host, not migration work. Do exactly what it says: write
+the one file it names with the one line it gives, read nothing, and reply
+`done`. That file is always `openspec/spec-relay/work/trial/checker.md`; refuse
+any other path. The other rules here do not apply to it.
