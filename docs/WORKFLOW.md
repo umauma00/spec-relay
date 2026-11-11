@@ -173,7 +173,7 @@ flowchart LR
 6. **抜け道を外す**：OpenSpec 標準の apply・archive・sync のスキルとコマンドは、チェックを付けて archive まで進めてしまうため、導入スクリプトが中身をオーケストレーターへの案内に置き換える（ファイルを消すと、`openspec update` が利用者の OpenSpec 全体のプロファイルを狭めてしまうため、消さない）。
 7. **記録**：review.md の各項目と質問への判断が change と一緒に archive に残る。
 
-8. **実行前に拒否する（フック、試験中・既定は無効）**：`com.github.copilot/hooks/hooks.json` の preToolUse フック（`scripts/hook.mjs`）が、`openspec/config.yaml` で `Hook enforcement` を `on` にしたリポジトリでだけ、gate を通らない archive、元コード・ベースライン仕様・archive 済みの change・スキーマ・設定・キットへの書き込み、サブエージェントによる review.md・questions.md・計画の書き込みを拒否する。サブエージェントの呼び出しにもフックは働く（呼び出しに `agentId`・`agentType` が付く）。フック自体が動かないとき（node がないなど）は、拒否せずに通常の許可確認へ進む。Copilot は command フックが 0 以外で終わるとそのツールを拒否するため、壊れたフックですべての操作が止まらないよう、ラッパーで必ず 0 を返す。
+8. **実行前に拒否する（フック、試験中・既定は無効）**：`com.github.copilot/hooks/hooks.json` の preToolUse フック（`scripts/hook.mjs`）が、`openspec/config.yaml` で `Hook enforcement` を `on` にしたリポジトリでだけ、gate を通らない archive、元コード・ベースライン仕様・archive 済みの change・スキーマ・設定・キットへの書き込み、サブエージェントによる review.md・questions.md・計画の書き込みを拒否する。サブエージェントの呼び出しにもフックは働く（呼び出しに `agentId`・`agentType` が付く。オーケストレーター自身が既定のエージェントのサブエージェントとして動くときは、オーケストレーターとして扱う）。コマンドの中の文字列（コミットメッセージや検索語）に書かれた `openspec archive` は呼び出しとして扱わない。拒否の理由は ASCII に変換して返すので、Windows のコンソールの文字コードで壊れない。フック自体が動かないとき（node がないなど）は、拒否せずに通常の許可確認へ進む。Copilot は command フックが 0 以外で終わるとそのツールを拒否するため、壊れたフックですべての操作が止まらないよう、ラッパーで必ず 0 を返す。
 
 フックでも区別できないことが2つ残ります。チャットで承認された項目は AI が review.md に書くので、AI が承認なしにチェックを付けることは止められません。シェルコマンドでの書き込みも読み取らないので、波の前後の `gate.mjs guard` が後から見つけます。チェック後に内容が変わったことを検出する（レビュー時点のハッシュ）ことも、次の段階の課題です（下の「今後の課題」）。
 

@@ -4,7 +4,7 @@
     "preToolUse": [
       {
         "type": "command",
-        "matcher": "bash|powershell|edit|create|write|str_replace_editor|str_replace|insert|apply_patch|multi_edit",
+        "matcher": "bash|powershell|write_bash|write_powershell|edit|create|str_replace_editor|apply_patch",
         "bash": "node \"$PLUGIN_ROOT/scripts/hook.mjs\" || true",
         "powershell": "node \"$env:PLUGIN_ROOT/scripts/hook.mjs\"; exit 0",
         "timeoutSec": 15

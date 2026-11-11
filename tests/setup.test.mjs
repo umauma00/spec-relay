@@ -223,4 +223,11 @@ test('--hooks writes the Hook enforcement line the hook reads, off by default', 
   assert.match(renderConfig(parseArgs(base)), /^  Hook enforcement \(on or off;[^:\n]*\): off$/m);
   assert.match(renderConfig(parseArgs([...base, '--hooks', 'ON'])), /^  Hook enforcement [^:\n]*: on$/m);
   assert.throws(() => parseArgs([...base, '--hooks', 'maybe']), /--hooks must be on or off/);
+  // On a repository set up before, the config is kept and setup says what to change.
+  const dir = tempDir();
+  write(dir, 'openspec/config.yaml', renderConfig(parseArgs(base)));
+  const keep = plan(parseArgs([...base, '--target', dir, '--hooks', 'on'])).steps.find((s) => s.path.endsWith('config.yaml'));
+  assert.equal(keep.action, 'keep');
+  assert.match(keep.reason, /--hooks on is not applied: change the "Hook enforcement" line in it yourself \(it says off\)/);
+  assert.doesNotMatch(plan(parseArgs([...base, '--target', dir])).steps.find((s) => s.path.endsWith('config.yaml')).reason, /--hooks/);
 });

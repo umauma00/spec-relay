@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { decide, main, archiveCalls, editPaths, findRoot } from '../scripts/hook.mjs';
+import { decide, main, archiveCalls, editPaths, findRoot, SHELL_TOOLS, EDIT_TOOLS } from '../scripts/hook.mjs';
 import { tempDir, write } from './helpers.mjs';
 
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -54,6 +54,8 @@ test('an archive waits for a passing gate, a change name and the orchestrator', 
   assert.equal(shell(path.join(dir, 'ts/app'), 'openspec archive extract-billing-invoice --yes'), null);
   assert.match(shell(dir, 'openspec archive extract-billing-invoice --yes --skip-specs'), /drop --skip-specs/);
   assert.match(shell(dir, 'openspec archive extract-billing-invoice --yes', { agentType: 'spec-relay-analyst' }), /only the orchestrator archives/);
+  // The orchestrator itself may run as a subagent of the default agent.
+  assert.equal(shell(dir, 'openspec archive extract-billing-invoice --yes', { agentId: 'o1', agentType: 'spec-relay-orchestrator' }), null);
   // Changes that are not spec-relay's are left to OpenSpec.
   write(dir, 'openspec/changes/add-login/.openspec.yaml', 'schema: spec-driven\n');
   assert.equal(shell(dir, 'openspec archive add-login --yes'), null);
@@ -62,7 +64,23 @@ test('an archive waits for a passing gate, a change name and the orchestrator', 
   write(dir, 'openspec/changes/port-billing-invoice/.openspec.yaml', 'schema: spec-relay-port\n');
   write(dir, 'openspec/changes/port-billing-invoice/tasks.md', '- [ ] 1.1 a\n');
   assert.match(shell(dir, 'node x.js; openspec archive port-billing-invoice --yes'), /gate.mjs port-done fails for port-billing-invoice, so it cannot be archived yet: not done: 1.1 a/);
-  assert.match(shell(dir, '(Get-Content openspec/config.yaml) -replace "Hook enforcement.*", "off"'), /setting is the person's/);
+  assert.match(shell(dir, '(Get-Content openspec/config.yaml) -replace "Hook enforcement.*", "off" | Set-Content openspec/config.yaml'), /Hook enforcement line included/);
+  assert.match(shell(dir, "sed -i 's/: on$/: off/' openspec/config.yaml"), /Hook enforcement line included/);
+  assert.equal(shell(dir, 'Select-String -Path openspec/config.yaml -Pattern "Hook enforcement"'), null);
+  // Other ways to write the call.
+  write(dir, 'openspec/changes/extract-billing-invoice/review.md', 'Reviewer: Uma\n- [ ] R1 Add two numbers\n');
+  for (const command of ['npx @fission-ai/openspec@1.17.0 archive extract-billing-invoice --yes', 'openspec.ps1 archive extract-billing-invoice', 'openspec --no-color archive extract-billing-invoice', '(openspec archive extract-billing-invoice --yes)', 'powershell -Command "openspec archive extract-billing-invoice --yes"']) {
+    assert.match(shell(dir, command), /gate.mjs review fails/, command);
+  }
+  assert.match(shell(dir, '$c = "extract-billing-invoice"; openspec archive $c --yes'), /write the change name itself/);
+  // Mentions are not calls.
+  for (const command of ['git commit -m "docs: when to run openspec archive"', 'openspec archive --help', 'Select-String -Path README.md -Pattern "openspec archive"', "git log --grep 'openspec archive'"]) {
+    assert.equal(shell(dir, command, { agentType: 'spec-relay-analyst' }), null, command);
+  }
+  // A cd in the command, or a cwd above the repository.
+  const parent = path.dirname(dir);
+  assert.match(shell(parent, `cd "${dir}"; openspec archive extract-billing-invoice --yes`), /gate.mjs review fails/);
+  assert.match(edit(parent, path.join(dir, 'src/a.php')), /source root src/);
 });
 
 test('agents may not write the source, baselines, archives, schemas, settings or the kit', () => {
@@ -81,6 +99,14 @@ test('agents may not write the source, baselines, archives, schemas, settings or
   assert.match(edit(dir, 'openspec/changes/extract-billing-invoice/review.md', sub), /only the orchestrator writes/);
   assert.match(edit(dir, 'openspec/spec-relay/plan.md', sub), /only the orchestrator writes/);
   assert.equal(edit(dir, 'openspec/changes/extract-billing-invoice/trace.md', sub), null);
+  assert.equal(edit(dir, 'openspec/spec-relay/plan.md', { agentId: 'o1', agentType: 'spec-relay:spec-relay-orchestrator' }), null);
+  // Viewing is not writing.
+  assert.equal(decide({ cwd: dir, toolName: 'str_replace_editor', toolArgs: { command: 'view', path: 'src/a.php' } }, { pluginRoot: KIT }), null);
+  // Removed lines that start with "-- " (SQL comments) are not file headers.
+  assert.equal(decide({ cwd: dir, toolName: 'apply_patch', toolArgs: '*** Begin Patch\n*** Update File: ts/db/migrate.sql\n@@\n--- old comment\n+-- new comment\n*** End Patch\n' }, { pluginRoot: KIT }), null);
+  // Windows paths: backslashes, and a different letter case on case-insensitive file systems.
+  assert.match(edit(dir, 'src\\billing\\Invoice.php'.replace(/\\/g, path.sep)), /source root src/);
+  if (process.platform === 'win32' || process.platform === 'darwin') assert.match(edit(dir, 'SRC/a.php'), /source root src/);
   // An apply_patch text and the VS Code compatible payload are read too.
   assert.match(decide({ cwd: dir, toolName: 'apply_patch', toolArgs: '*** Begin Patch\n*** Update File: src/a.php\n@@\n-a\n+b\n*** End Patch\n' }, { pluginRoot: KIT }), /source root src/);
   assert.match(decide({ cwd: dir, tool_name: 'create', tool_input: { file_path: 'src/new.php' } }, { pluginRoot: KIT }), /source root src/);
@@ -95,11 +121,12 @@ test('with the source root ".", agents write only openspec/ and the target root'
 });
 
 test('parses archive calls and patch paths', () => {
-  assert.deepEqual(archiveCalls('npx @fission-ai/openspec archive survey -y && echo ok'), [{ name: 'survey', flags: ['-y'] }]);
-  assert.deepEqual(archiveCalls('node "C:/kit/scripts/openspec.mjs" archive port-a --yes'), [{ name: 'port-a', flags: ['--yes'] }]);
+  assert.deepEqual(archiveCalls('npx @fission-ai/openspec archive survey -y && echo ok'), [{ name: 'survey', literal: true, flags: ['-y'] }]);
+  assert.deepEqual(archiveCalls('node "C:/kit/scripts/openspec.mjs" archive port-a --yes'), [{ name: 'port-a', literal: true, flags: ['--yes'] }]);
   assert.deepEqual(archiveCalls('openspec archived-list; myopenspec archive x'), []);
-  assert.deepEqual(editPaths({ input: '--- a/src/x.php\n+++ b/src/x.php\n' }), ['src/x.php']);
-  assert.deepEqual(editPaths({ edits: [{ path: 'a' }, { filePath: 'b' }] }), ['a', 'b']);
+  assert.deepEqual(archiveCalls('openspec archive --store s x'), [{ name: 'x', literal: true, flags: ['--store'] }]);
+  assert.deepEqual(editPaths({ input: '--- a/src/x.php\n+++ b/src/x.php\n@@ -1 +1 @@\n--- not a header\n' }), ['src/x.php']);
+  assert.deepEqual(editPaths({ path: 'a', filePath: 'b' }), ['a', 'b']);
 });
 
 test('prints one deny object or nothing, and always exits 0', () => {
@@ -111,6 +138,12 @@ test('prints one deny object or nothing, and always exits 0', () => {
   const run = spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ cwd: dir, toolName: 'edit', toolArgs: { path: 'src/a.php' } }), encoding: 'utf8' });
   assert.equal(run.status, 0);
   assert.equal(JSON.parse(run.stdout).permissionDecision, 'deny');
+  // A Japanese reason travels as ASCII escapes, so a console code page cannot garble it.
+  write(dir, 'openspec/changes/extract-billing-invoice/review.md', 'Reviewer: Uma\n- [ ] R1 Add two numbers\n');
+  const ja = main(JSON.stringify({ cwd: dir, toolName: 'bash', toolArgs: { command: 'openspec archive extract-billing-invoice --yes' } }), { pluginRoot: KIT });
+  assert.match(ja, /^[\x20-\x7e]+$/);
+  assert.match(JSON.parse(ja).permissionDecisionReason, /レビューで未承認の項目が 1 件/);
+  assert.equal(JSON.parse(main(`\uFEFF${JSON.stringify({ cwd: dir, toolName: 'edit', toolArgs: { path: 'src/a.php' } })}`, { pluginRoot: KIT })).permissionDecision, 'deny');
   const quiet = spawnSync(process.execPath, [HOOK], { input: '', encoding: 'utf8' });
   assert.equal(quiet.status, 0);
   assert.equal(quiet.stdout, '');
@@ -120,7 +153,7 @@ test('hooks.json runs the hook for shell and edit tools and never exits non-zero
   const config = JSON.parse(fs.readFileSync(path.join(KIT, 'com.github.copilot/hooks/hooks.json'), 'utf8'));
   assert.equal(config.version, 1);
   const [entry] = config.hooks.preToolUse;
-  for (const tool of ['bash', 'powershell', 'edit', 'create', 'apply_patch']) assert.match(tool, new RegExp(`^(?:${entry.matcher})$`));
+  assert.deepEqual(entry.matcher.split('|'), [...SHELL_TOOLS, ...EDIT_TOOLS]);
   assert.doesNotMatch('view', new RegExp(`^(?:${entry.matcher})$`));
   assert.match(entry.bash, /\$PLUGIN_ROOT\/scripts\/hook\.mjs" \|\| true$/);
   assert.match(entry.powershell, /\$env:PLUGIN_ROOT\/scripts\/hook\.mjs"; exit 0$/);

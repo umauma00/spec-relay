@@ -452,7 +452,11 @@ test('next separates what the person decides from what the agent fixes, in the p
   assert.match(nextSteps('review', checkReview(dir, 'extract-calc'), 'en').agent.join(), /crosscheck of requirement "Add two numbers" is "mismatch"/);
   assert.match(nextSteps('review', checkReview(repo(GOOD), 'extract-calc'), 'en').person.join(), /may be archived/);
   assert.deepEqual(nextSteps('port-ready', { ok: false, problems: ['extract change extract-calc is still active; finish its review and archive it first', 'no archived survey change: x'] }, 'ja'),
-    { person: ['extract-calc のレビューがまだ終わっていません。先にそのレビューを終えてください。'], agent: ['no archived survey change: x'] });
+    { person: ['extract-calc のレビューがまだ終わっていません。先にそのレビューを終えてください。', '調査（コンテキストの地図と capability の一覧）がまだレビュー・archive されていません。AI が用意するので、そのレビューをお願いします。この工程はそれを待ちます。'], agent: [] });
+  // A project from kit 0.1.0 with an extract change in flight and no survey: the survey review is the person's.
+  const old = repo(GOOD);
+  fs.rmSync(path.join(old, 'openspec/changes/archive'), { recursive: true });
+  assert.match(nextSteps('review', checkReview(old, 'extract-calc'), 'en').person.join(), /The survey .* is not reviewed and archived yet/);
   assert.match(nextSteps('guard', { ok: false, changed: ['src/a.php'], added: [], removed: [] }, 'ja').person[0], /割り当て外のファイルが変わりました（src\/a.php）/);
 
   write(dir, 'openspec/config.yaml', '# spec-relay: managed\ncontext: |\n  Artifact language: 日本語\n');
@@ -463,4 +467,14 @@ test('next separates what the person decides from what the agent fixes, in the p
   console.log = (s) => { out += s; };
   try { assert.equal(main(['review', '--change', 'extract-calc', '--root', dir]), 1); } finally { console.log = log; }
   assert.match(JSON.parse(out).next.person[0], /^レビューで未承認の項目が/);
+});
+
+test('plan capabilities come from the capability list only, and no capability may end like a rerun', () => {
+  const dir = surveyed(repo(GOOD), ['billing/invoice']);
+  write(dir, 'openspec/spec-relay/plan.md', '# Plan\n\n## Capabilities\n\n1. `billing/invoice`\n\n## Follow-up\n\n- `calc`: fix rounding\n');
+  assert.match(checkReview(dir, 'extract-calc').problems.join(), /capability calc is not in the archived survey/);
+  const v = surveyed(tempDir(), ['billing/api-v2']);
+  write(v, 'openspec/changes/extract-billing-api-v2/specs/billing/api-v2/spec.md', SPEC);
+  write(v, 'openspec/changes/extract-billing-api-v2/review.md', GOOD);
+  assert.match(checkReview(v, 'extract-billing-api-v2').problems.join(), /capability billing\/api-v2 ends like a rerun suffix/);
 });

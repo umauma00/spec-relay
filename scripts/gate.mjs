@@ -345,6 +345,19 @@ export function capabilityList(text) {
 
 export const PLAN = 'openspec/spec-relay/plan.md';
 
+// The capabilities of the plan's capability list: top-level items under the
+// "## Capabilities" heading (as status.mjs reads it), not follow-up notes.
+export function planCapabilities(text) {
+  const lines = [];
+  let inList = false;
+  for (const line of unfencedLines(stripComments(text ?? ''))) {
+    const h2 = line.match(/^##\s+(.*)$/);
+    if (h2) inList = /^(?:\d+[.)]?\s*)?(?:capabilit(?:y|ies)\b|機能|ケイパビリティ)/i.test(h2[1].trim());
+    else if (inList) lines.push(line);
+  }
+  return capabilityList(lines.join('\n'));
+}
+
 // The capability path of every spec file in a change (specs/<capability>/spec.md).
 function specCapabilities(dir) {
   return [...new Set(walk(path.join(dir, 'specs')).filter((f) => f.endsWith('.md'))
@@ -360,10 +373,11 @@ function checkSurveyed(root, change, dir, kind, problems) {
   if (!survey) problems.push(`no archived survey change: ${kind} changes need the reviewed capability list; finish the survey review and archive it first`);
   const listed = new Set([
     ...(survey ? capabilityList(readIf(path.join(survey, 'capabilities.md'), problems)) : []),
-    ...capabilityList(readIf(path.join(root, PLAN), problems)),
+    ...planCapabilities(readIf(path.join(root, PLAN), problems)),
   ]);
   for (const cap of specCapabilities(dir)) {
     if (survey && !listed.has(cap)) problems.push(`capability ${cap} is not in the archived survey's capabilities.md or in ${PLAN}; add it to the plan's capability list before this review`);
+    if (/-v\d+$/.test(cap.split('/').join('-'))) { problems.push(`capability ${cap} ends like a rerun suffix (-v<n>), so its change cannot be told from a rerun; rename it in the plan`); continue; }
     const expected = `${kind}-${cap.split('/').join('-')}`;
     if (baseName(change) !== expected) problems.push(`change ${change} holds the spec of ${cap}; a ${kind} change of ${cap} is named ${expected}`);
     if (kind === 'amend' && !readIf(path.join(root, 'openspec/specs', ...cap.split('/'), 'spec.md'), problems)) {
@@ -541,6 +555,9 @@ const NEXT = {
     archive: 'Everything is reviewed. Answer whether this change may be archived (that makes it final).',
     portArchive: 'Every task is done and checked. Answer whether the port may be archived.',
     activeReview: (name) => `${name} is still under review. Finish that review first.`,
+    foundation: (name) => (name === 'survey'
+      ? 'The survey (the map of contexts and the capability list) is not reviewed and archived yet. I prepare it; its review is yours, and this step waits for it.'
+      : 'The target design is not reviewed and archived yet. I prepare it; its review is yours, and implementation waits for it.'),
     guard: (list) => `Files outside the subagents' assignments changed (${list}). Decide: undo the change, or keep it. The results of this wave are not used until you decide.`,
   },
   ja: {
@@ -550,6 +567,9 @@ const NEXT = {
     archive: 'すべてレビュー済みです。この change を archive（確定）してよいかを答えてください。',
     portArchive: 'すべてのタスクが完了し、確認も済みました。実装を archive してよいかを答えてください。',
     activeReview: (name) => `${name} のレビューがまだ終わっていません。先にそのレビューを終えてください。`,
+    foundation: (name) => (name === 'survey'
+      ? '調査（コンテキストの地図と capability の一覧）がまだレビュー・archive されていません。AI が用意するので、そのレビューをお願いします。この工程はそれを待ちます。'
+      : '移行先の設計がまだレビュー・archive されていません。AI が用意するので、そのレビューをお願いします。実装はそれを待ちます。'),
     guard: (list) => `割り当て外のファイルが変わりました（${list}）。元に戻すか、そのまま受け入れるかを決めてください。決まるまで、この波の結果は使いません。`,
   },
 };
@@ -572,11 +592,13 @@ export function nextSteps(command, result, lang = 'en') {
   const unticked = problems.filter((p) => p.startsWith('not ticked: ')).map((p) => plain(p.slice('not ticked: '.length)).split(' ')[0]);
   const undecided = problems.filter((p) => p.startsWith('question has no recorded decision: ')).map((p) => p.slice('question has no recorded decision: '.length));
   const active = problems.map((p) => p.match(/^(?:extract|amend) change (\S+) is still active/)?.[1]).filter(Boolean);
+  const foundation = ['survey', 'target-design'].filter((name) => problems.some((p) => p.startsWith(`no archived ${name} change`)));
   if (unticked.length) person.push(words.unticked(unticked.length, shortList(unticked)));
   if (problems.some((p) => p.startsWith('review.md names no reviewer'))) person.push(words.reviewer);
   if (undecided.length) person.push(words.decision(shortList(undecided)));
   for (const name of active) person.push(words.activeReview(name));
-  agent = problems.filter((p) => !/^(not ticked: |review\.md names no reviewer|question has no recorded decision: |(?:extract|amend) change \S+ is still active)/.test(p));
+  for (const name of foundation) person.push(words.foundation(name));
+  agent = problems.filter((p) => !/^(not ticked: |review\.md names no reviewer|question has no recorded decision: |(?:extract|amend) change \S+ is still active|no archived (?:survey|target-design) change)/.test(p));
   if (result.ok && command === 'review') person.push(words.archive);
   if (result.ok && command === 'port-done') person.push(words.portArchive);
   return { person, agent };

@@ -96,6 +96,7 @@ export function parseArgs(argv) {
     if (!/^\d+$/.test(String(opts[key])) || n < 1 || n > max) throw new UsageError(`${flag} must be a whole number from 1 to ${max}`);
     opts[key] = n;
   }
+  opts.hooksGiven = argv.includes('--hooks');
   opts.hooks = String(opts.hooks).toLowerCase();
   if (!['on', 'off'].includes(opts.hooks)) throw new UsageError('--hooks must be on or off');
   const model = (value) => /^[^\r\n#{}"'`]{1,80}$/.test(value);
@@ -239,7 +240,10 @@ export function plan(opts) {
     steps.push({ action: 'conflict', path: configYml, reason: 'an existing OpenSpec config; merge templates/openspec-config.yaml into it by hand' });
   }
   if (managed) {
-    steps.push({ action: 'keep', path: configYaml, reason: 'already managed by spec-relay; edit it to change values' });
+    const hooks = readText(configYaml).match(/^\s*Hook enforcement[^:\n]*:[ \t]*(\S+)/m)?.[1]?.toLowerCase() ?? 'off';
+    const note = opts.hooksGiven && hooks !== opts.hooks
+      ? `; --hooks ${opts.hooks} is not applied: change the "Hook enforcement" line in it yourself (it says ${hooks})` : '';
+    steps.push({ action: 'keep', path: configYaml, reason: `already managed by spec-relay; edit it to change values${note}` });
   } else if (exists(configYaml)) {
     steps.push({ action: 'conflict', path: configYaml, reason: 'an existing OpenSpec config; merge templates/openspec-config.yaml into it by hand' });
   } else {
