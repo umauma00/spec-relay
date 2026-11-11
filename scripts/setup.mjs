@@ -41,7 +41,7 @@ const USAGE = `Usage: node scripts/setup.mjs --target DIR --source-language LANG
          --target-root DIR [--source-root DIR] [--language LANG]
          [--parallel N] [--ahead N] [--subagent-model ID]
          [--analyst-model ID] [--checker-model ID] [--implementer-model ID]
-         [--skip-init] [--apply]
+         [--hooks on|off] [--skip-init] [--apply]
 
   --target           repository being migrated (default: current directory)
   --source-language  language of the existing code, e.g. "C#"
@@ -56,18 +56,22 @@ const USAGE = `Usage: node scripts/setup.mjs --target DIR --source-language LANG
                      the model of the session that runs the orchestrator)
   --analyst-model, --checker-model, --implementer-model
                      model of one role, overriding --subagent-model
+  --hooks            on: the plugin hook denies an archive that fails its gate and
+                     agent writes to the source root, baseline specs and settings
+                     (default: off until it is checked on each Copilot client)
   --skip-init        do not run "openspec init" (for tests or a manual init)
   --apply            make the changes; without it only the plan is printed`;
 
 class UsageError extends Error {}
 
 export function parseArgs(argv) {
-  const opts = { target: process.cwd(), sourceRoot: '.', language: 'en', parallel: '4', ahead: '2', subagentModel: 'session', apply: false, skipInit: false };
+  const opts = { target: process.cwd(), sourceRoot: '.', language: 'en', parallel: '4', ahead: '2', subagentModel: 'session', hooks: 'off', apply: false, skipInit: false };
   const keys = {
     '--target': 'target', '--source-language': 'sourceLanguage', '--target-language': 'targetLanguage',
     '--source-root': 'sourceRoot', '--target-root': 'targetRoot', '--language': 'language',
     '--parallel': 'parallel', '--ahead': 'ahead', '--subagent-model': 'subagentModel',
     '--analyst-model': 'analystModel', '--checker-model': 'checkerModel', '--implementer-model': 'implementerModel',
+    '--hooks': 'hooks',
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -92,6 +96,9 @@ export function parseArgs(argv) {
     if (!/^\d+$/.test(String(opts[key])) || n < 1 || n > max) throw new UsageError(`${flag} must be a whole number from 1 to ${max}`);
     opts[key] = n;
   }
+  opts.hooksGiven = argv.includes('--hooks');
+  opts.hooks = String(opts.hooks).toLowerCase();
+  if (!['on', 'off'].includes(opts.hooks)) throw new UsageError('--hooks must be on or off');
   const model = (value) => /^[^\r\n#{}"'`]{1,80}$/.test(value);
   const modelHelp = 'must be a model name on one line (no #, quotes or braces), or "session"';
   opts.subagentModel = opts.subagentModel.trim();
@@ -151,7 +158,7 @@ export function renderConfig(opts) {
     SOURCE_ROOT: opts.sourceRoot, TARGET_ROOT: opts.targetRoot, ARTIFACT_LANGUAGE: opts.language,
     PARALLEL: opts.parallel ?? 4, AHEAD: opts.ahead ?? 2,
     ANALYST_MODEL: opts.analystModel ?? 'session', CHECKER_MODEL: opts.checkerModel ?? 'session',
-    IMPLEMENTER_MODEL: opts.implementerModel ?? 'session',
+    IMPLEMENTER_MODEL: opts.implementerModel ?? 'session', HOOKS: opts.hooks ?? 'off',
   };
   return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => {
     if (!(key in values)) throw new Error(`unknown placeholder ${key}`);
@@ -233,7 +240,10 @@ export function plan(opts) {
     steps.push({ action: 'conflict', path: configYml, reason: 'an existing OpenSpec config; merge templates/openspec-config.yaml into it by hand' });
   }
   if (managed) {
-    steps.push({ action: 'keep', path: configYaml, reason: 'already managed by spec-relay; edit it to change values' });
+    const hooks = readText(configYaml).match(/^\s*Hook enforcement[^:\n]*:[ \t]*(\S+)/m)?.[1]?.toLowerCase() ?? 'off';
+    const note = opts.hooksGiven && hooks !== opts.hooks
+      ? `; --hooks ${opts.hooks} is not applied: change the "Hook enforcement" line in it yourself (it says ${hooks})` : '';
+    steps.push({ action: 'keep', path: configYaml, reason: `already managed by spec-relay; edit it to change values${note}` });
   } else if (exists(configYaml)) {
     steps.push({ action: 'conflict', path: configYaml, reason: 'an existing OpenSpec config; merge templates/openspec-config.yaml into it by hand' });
   } else {

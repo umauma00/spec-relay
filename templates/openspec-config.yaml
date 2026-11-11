@@ -13,6 +13,7 @@ context: |
   Analyst model: {{ANALYST_MODEL}}
   Checker model: {{CHECKER_MODEL}}
   Implementer model: {{IMPLEMENTER_MODEL}}
+  Hook enforcement (on or off; on denies archives that fail the gate and agent writes to protected files): {{HOOKS}}
   Write all artifacts in the artifact language, but keep OpenSpec structural
   headings and SHALL/MUST keywords in English.
   The survey (schema spec-relay-survey) splits the source code into DDD bounded

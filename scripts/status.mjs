@@ -28,7 +28,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkboxes, readIf, capabilitySegments, checkReview, baseName, archivedChange, baselineHash, configValue, cleanValue } from './gate.mjs';
+import { checkboxes, readIf, capabilitySegments, checkReview, baseName, archivedChange, baselineHash, configValue, cleanValue, language } from './gate.mjs';
+
+export { language };
 
 const PLAN = 'openspec/spec-relay/plan.md';
 // Used when a change's schema file cannot be read. The schema's own list wins,
@@ -242,14 +244,6 @@ function counts(text) {
   return { done: boxes.filter((b) => b.done).length, total: boxes.length };
 }
 
-export function language(root, requested) {
-  let value = requested;
-  if (!value) {
-    const config = readIf(path.join(root, 'openspec/config.yaml'), []) ?? '';
-    value = config.match(/^\s*Artifact language:\s*(.+?)\s*$/m)?.[1] ?? 'en';
-  }
-  return /^["']?(ja|jp|japanese|日本語)/i.test(value.trim()) ? 'ja' : 'en';
-}
 
 export function collect(root) {
   const problems = [];

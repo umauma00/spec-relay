@@ -14,8 +14,10 @@
 //                                                          (exit 1 when any did: read the lists)
 //   node gate.mjs guard                                    one hash over the same files
 //
-// Prints { ok, problems } as JSON (guard --compare: { ok, changed, added, removed })
-// and exits 0 when ok, 1 when not, 2 on bad usage.
+// Prints { ok, problems, next } as JSON (guard --compare: { ok, changed, added, removed, next })
+// and exits 0 when ok, 1 when not, 2 on bad usage. `next.person` holds sentences in
+// the person's language (--lang ja|en, else the artifact language) for what only the
+// person can do; `next.agent` holds the problems the agent fixes itself.
 // Run it from the repository root (or pass --root DIR). Files may use CRLF line
 // endings and a UTF-8 BOM; UTF-16 files are rejected.
 import { spawnSync } from 'node:child_process';
@@ -317,11 +319,7 @@ function checkSurvey(root, dir, boxes, problems) {
   for (const file of uncovered.slice(0, 20)) problems.push(`source file not in the inventory: ${file}`);
   if (uncovered.length > 20) problems.push(`...and ${uncovered.length - 20} more source files not in the inventory`);
 
-  const caps = [];
-  for (const line of unfencedLines(stripComments(readIf(path.join(dir, 'capabilities.md'), problems) ?? ''))) {
-    const m = line.match(/^ ?(?:[-*+]|\d+[.)])\s+`([^`]+)`/);
-    if (m) caps.push(m[1]);
-  }
+  const caps = capabilityList(readIf(path.join(dir, 'capabilities.md'), problems));
   if (caps.length === 0) problems.push('capabilities.md lists no capability ("1. `billing/invoice` ...")');
   const keys = new Map();
   for (const cap of caps) {
@@ -331,6 +329,60 @@ function checkSurvey(root, dir, boxes, problems) {
     if (/-v\d+$/.test(key)) problems.push(`capability "${cap}" gives the change name extract-${key}, which ends like a rerun suffix (-v<n>); rename it`);
     if (keys.has(key)) problems.push(`capabilities ${keys.get(key)} and ${cap} get the same change name`);
     keys.set(key, cap);
+  }
+}
+
+// Capability paths listed as top-level items that start with a backticked path
+// ("1. `billing/invoice` ..."), as in the survey's capabilities.md and the plan.
+export function capabilityList(text) {
+  const caps = [];
+  for (const line of unfencedLines(stripComments(text ?? ''))) {
+    const m = line.match(/^ ?(?:[-*+]|\d+[.)])\s+`([^`]+)`/);
+    if (m) caps.push(m[1]);
+  }
+  return caps;
+}
+
+export const PLAN = 'openspec/spec-relay/plan.md';
+
+// The capabilities of the plan's capability list: top-level items under the
+// "## Capabilities" heading (as status.mjs reads it), not follow-up notes.
+export function planCapabilities(text) {
+  const lines = [];
+  let inList = false;
+  for (const line of unfencedLines(stripComments(text ?? ''))) {
+    const h2 = line.match(/^##\s+(.*)$/);
+    if (h2) inList = /^(?:\d+[.)]?\s*)?(?:capabilit(?:y|ies)\b|機能|ケイパビリティ)/i.test(h2[1].trim());
+    else if (inList) lines.push(line);
+  }
+  return capabilityList(lines.join('\n'));
+}
+
+// The capability path of every spec file in a change (specs/<capability>/spec.md).
+function specCapabilities(dir) {
+  return [...new Set(walk(path.join(dir, 'specs')).filter((f) => f.endsWith('.md'))
+    .map((f) => path.relative(path.join(dir, 'specs'), path.dirname(f)).split(path.sep).join('/'))
+    .filter((cap) => cap && cap !== '.'))];
+}
+
+// An extract or amend change needs the reviewed capability list: the archived
+// survey, a capability from its list (or the plan), and the change name that
+// belongs to that capability. An amendment also needs the baseline it corrects.
+function checkSurveyed(root, change, dir, kind, problems) {
+  const survey = archivedChange(root, 'survey');
+  if (!survey) problems.push(`no archived survey change: ${kind} changes need the reviewed capability list; finish the survey review and archive it first`);
+  const listed = new Set([
+    ...(survey ? capabilityList(readIf(path.join(survey, 'capabilities.md'), problems)) : []),
+    ...planCapabilities(readIf(path.join(root, PLAN), problems)),
+  ]);
+  for (const cap of specCapabilities(dir)) {
+    if (survey && !listed.has(cap)) problems.push(`capability ${cap} is not in the archived survey's capabilities.md or in ${PLAN}; add it to the plan's capability list before this review`);
+    if (/-v\d+$/.test(cap.split('/').join('-'))) { problems.push(`capability ${cap} ends like a rerun suffix (-v<n>), so its change cannot be told from a rerun; rename it in the plan`); continue; }
+    const expected = `${kind}-${cap.split('/').join('-')}`;
+    if (baseName(change) !== expected) problems.push(`change ${change} holds the spec of ${cap}; a ${kind} change of ${cap} is named ${expected}`);
+    if (kind === 'amend' && !readIf(path.join(root, 'openspec/specs', ...cap.split('/'), 'spec.md'), problems)) {
+      problems.push(`no baseline spec at openspec/specs/${cap}/spec.md to amend; an amendment corrects an archived extract change`);
+    }
   }
 }
 
@@ -357,8 +409,8 @@ export function checkReview(root, change) {
   const boxes = commonReview(dir, problems);
   if (boxes === null) return { ok: false, problems: ['review.md is missing'] };
   const schema = changeSchema(dir);
-  if (schema === 'spec-relay-extract') checkExtract(dir, boxes, problems);
-  else if (schema === 'spec-relay-amend') checkAmend(dir, boxes, problems);
+  if (schema === 'spec-relay-extract') { checkSurveyed(root, change, dir, 'extract', problems); checkExtract(dir, boxes, problems); }
+  else if (schema === 'spec-relay-amend') { checkSurveyed(root, change, dir, 'amend', problems); checkAmend(dir, boxes, problems); }
   else if (schema === 'spec-relay-survey') checkSurvey(root, dir, boxes, problems);
   else if (schema === 'spec-relay-target') checkTarget(root, dir, boxes, problems);
   else problems.push(`schema ${schema} has no review gate`);
@@ -485,11 +537,78 @@ export function checkPortDone(root, change) {
   return { ok: problems.length === 0, problems };
 }
 
+// The person's language for `next`: --lang, else the artifact language in openspec/config.yaml.
+export function language(root, requested) {
+  let value = requested;
+  if (!value) {
+    const config = readIf(path.join(root, 'openspec/config.yaml'), []) ?? '';
+    value = config.match(/^\s*Artifact language:\s*(.+?)\s*$/m)?.[1] ?? 'en';
+  }
+  return /^["']?(ja|jp|japanese|日本語)/i.test(value.trim()) ? 'ja' : 'en';
+}
+
+const NEXT = {
+  en: {
+    unticked: (n, list) => `${n} review item${n === 1 ? ' is' : 's are'} not approved yet (${list}). Approve them in the chat, or tick them in review.md yourself.`,
+    reviewer: 'review.md has no reviewer name ("Reviewer:"). Tell me the name to record.',
+    decision: (list) => `These questions have no decision yet: ${list}. Decide what the new system should do.`,
+    archive: 'Everything is reviewed. Answer whether this change may be archived (that makes it final).',
+    portArchive: 'Every task is done and checked. Answer whether the port may be archived.',
+    activeReview: (name) => `${name} is still under review. Finish that review first.`,
+    foundation: (name) => (name === 'survey'
+      ? 'The survey (the map of contexts and the capability list) is not reviewed and archived yet. I prepare it; its review is yours, and this step waits for it.'
+      : 'The target design is not reviewed and archived yet. I prepare it; its review is yours, and implementation waits for it.'),
+    guard: (list) => `Files outside the subagents' assignments changed (${list}). Decide: undo the change, or keep it. The results of this wave are not used until you decide.`,
+  },
+  ja: {
+    unticked: (n, list) => `レビューで未承認の項目が ${n} 件あります（${list}）。チャットで承認を伝えるか、review.md で自分でチェックしてください。`,
+    reviewer: 'review.md に承認者の名前（Reviewer:）がありません。記録する名前を教えてください。',
+    decision: (list) => `判断がまだの質問があります（${list}）。新しいシステムでどうするかを決めてください。`,
+    archive: 'すべてレビュー済みです。この change を archive（確定）してよいかを答えてください。',
+    portArchive: 'すべてのタスクが完了し、確認も済みました。実装を archive してよいかを答えてください。',
+    activeReview: (name) => `${name} のレビューがまだ終わっていません。先にそのレビューを終えてください。`,
+    foundation: (name) => (name === 'survey'
+      ? '調査（コンテキストの地図と capability の一覧）がまだレビュー・archive されていません。AI が用意するので、そのレビューをお願いします。この工程はそれを待ちます。'
+      : '移行先の設計がまだレビュー・archive されていません。AI が用意するので、そのレビューをお願いします。実装はそれを待ちます。'),
+    guard: (list) => `割り当て外のファイルが変わりました（${list}）。元に戻すか、そのまま受け入れるかを決めてください。決まるまで、この波の結果は使いません。`,
+  },
+};
+
+const shortList = (items, max = 3) => `${items.slice(0, max).join(', ')}${items.length > max ? ', ...' : ''}`;
+
+// What a stop needs from whom: `person` holds sentences in the person's language
+// to pass on as they are; `agent` holds the problems the agent fixes itself
+// (in English, for the agent). A passing review or port-done still needs the
+// person's answer before the archive.
+export function nextSteps(command, result, lang = 'en') {
+  const words = NEXT[lang] ?? NEXT.en;
+  const person = [];
+  let agent = [];
+  if (command === 'guard') {
+    if (!result.ok && result.changed) person.push(words.guard(shortList([...result.changed, ...result.added, ...result.removed])));
+    return { person, agent: result.problems ?? [] };
+  }
+  const problems = result.problems ?? [];
+  const unticked = problems.filter((p) => p.startsWith('not ticked: ')).map((p) => plain(p.slice('not ticked: '.length)).split(' ')[0]);
+  const undecided = problems.filter((p) => p.startsWith('question has no recorded decision: ')).map((p) => p.slice('question has no recorded decision: '.length));
+  const active = problems.map((p) => p.match(/^(?:extract|amend) change (\S+) is still active/)?.[1]).filter(Boolean);
+  const foundation = ['survey', 'target-design'].filter((name) => problems.some((p) => p.startsWith(`no archived ${name} change`)));
+  if (unticked.length) person.push(words.unticked(unticked.length, shortList(unticked)));
+  if (problems.some((p) => p.startsWith('review.md names no reviewer'))) person.push(words.reviewer);
+  if (undecided.length) person.push(words.decision(shortList(undecided)));
+  for (const name of active) person.push(words.activeReview(name));
+  for (const name of foundation) person.push(words.foundation(name));
+  agent = problems.filter((p) => !/^(not ticked: |review\.md names no reviewer|question has no recorded decision: |(?:extract|amend) change \S+ is still active|no archived (?:survey|target-design) change)/.test(p));
+  if (result.ok && command === 'review') person.push(words.archive);
+  if (result.ok && command === 'port-done') person.push(words.portArchive);
+  return { person, agent };
+}
+
 export function main(argv) {
   const [command, ...rest] = argv;
   const opts = { root: process.cwd() };
   for (let i = 0; i < rest.length; i += 2) {
-    const key = { '--change': 'change', '--capability': 'capability', '--root': 'root', '--save': 'save', '--compare': 'compare' }[rest[i]];
+    const key = { '--change': 'change', '--capability': 'capability', '--root': 'root', '--save': 'save', '--compare': 'compare', '--lang': 'lang' }[rest[i]];
     if (!key || rest[i + 1] === undefined) return usage();
     opts[key] = rest[i + 1];
   }
@@ -509,12 +628,15 @@ export function main(argv) {
     result = sha256 ? { ok: true, capability: opts.capability, sha256 } : { ok: false, problems: [`no baseline spec for ${opts.capability}`] };
   }
   else return usage();
+  if (command !== 'baseline' && !(command === 'guard' && opts.compare === undefined)) {
+    result.next = nextSteps(command, result, language(opts.root, opts.lang));
+  }
   console.log(JSON.stringify(result, null, 2));
   return result.ok ? 0 : 1;
 }
 
 function usage() {
-  console.error('Usage: node gate.mjs review --change NAME | port-ready --capability PATH | port-done --change NAME | baseline --capability PATH | guard [--save NAME | --compare NAME] [--root DIR]');
+  console.error('Usage: node gate.mjs review --change NAME | port-ready --capability PATH | port-done --change NAME | baseline --capability PATH | guard [--save NAME | --compare NAME] [--root DIR] [--lang ja|en]');
   return 2;
 }
 
