@@ -46,7 +46,7 @@ test('the skill is hidden and the kit files it names exist', () => {
   const meta = frontmatter(text);
   assert.equal(meta.name, 'spec-relay');
   assert.equal(meta['user-invocable'], 'false');
-  for (const rel of ['scripts/setup.mjs', 'scripts/gate.mjs', 'scripts/status.mjs', 'scripts/merge.mjs', 'docs/WORKFLOW.md', 'openspec-schemas']) {
+  for (const rel of ['scripts/setup.mjs', 'scripts/gate.mjs', 'scripts/status.mjs', 'scripts/merge.mjs', 'scripts/doctor.mjs', 'docs/WORKFLOW.md', 'openspec-schemas']) {
     assert.ok(text.includes(rel.split('/').pop()), `skill does not mention ${rel}`);
     assert.ok(fs.existsSync(path.join(KIT_ROOT, rel)), `${rel} is missing`);
   }

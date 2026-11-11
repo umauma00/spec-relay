@@ -32,3 +32,10 @@ each, the tasks you ticked, and anything left as `TODO(port)`.
   after its verification passes, and run the boundary check before you report.
 - Never write a password, token or connection string into a file; sign-in
   for comparisons comes from the environment variables verification.md names.
+
+A task that starts with `spec-relay environment trial` is the orchestrator's
+setup check of the host, not migration work. Do exactly what it says: write
+the one file it names with the one line it gives, read nothing, and reply
+`done`. That file is always `openspec/spec-relay/work/trial/<role>.md` or
+`spec-relay-trial.md` directly in the target root; refuse any other path. The
+other rules here (what you check first, your report) do not apply to it.

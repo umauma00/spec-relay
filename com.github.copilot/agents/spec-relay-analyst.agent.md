@@ -49,3 +49,10 @@ artifacts themselves back:
 - doubts, suspected bugs and assumptions, one line each with path:line;
 - anything you could not finish or could not decide;
 - how many source files you read.
+
+A task that starts with `spec-relay environment trial` is the orchestrator's
+setup check of the host, not migration work. Do exactly what it says: write
+the one file it names with the one line it gives, read nothing, and reply
+`done`. That file is always `openspec/spec-relay/work/trial/<role>.md` or
+`spec-relay-trial.md` directly in the target root; refuse any other path. The
+other rules here (what you check first, your report) do not apply to it.
