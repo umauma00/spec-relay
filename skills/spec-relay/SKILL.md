@@ -187,7 +187,7 @@ not wash out these instructions.
    person decided that the task needs: subagents see neither this conversation
    nor the repository instructions. Every analyst and implementer task also
    names `openspec/spec-relay/lessons.md` as a file to read, once it exists;
-   a checker task never does. Never paste instructions, templates, source
+   a checker task never does, and neither does the environment trial. Never paste instructions, templates, source
    code or artifacts into a task, and never ask for artifacts back: subagents
    return a short report. Check their work with `openspec validate`,
    `openspec status --change`, `gate.mjs` and `merge.mjs`, and read an
@@ -200,9 +200,9 @@ not wash out these instructions.
    only its capability's module. Only you write `review.md`, `plan.md`,
    `lessons.md` and `questions.md`, run `openspec` commands, render review
    pages and archive.
-   Never give a subagent a path under the source root (when the source root is
-   `.`, give only paths under `openspec/` and the target root), under
-   `openspec/specs/`, or `openspec/config.yaml`.
+   Never give a subagent a path to write under the source root (when the
+   source root is `.`, give only paths under `openspec/` and the target root),
+   under `openspec/specs/`, `openspec/config.yaml` or the lessons.
    Before every wave, run `node "<kit>/scripts/gate.mjs" guard --save
    wave-<n>`: it saves the hashes of the files no subagent may write (every
    active change's `review.md` and `questions.md`, `plan.md`, `lessons.md`,
@@ -263,8 +263,8 @@ you assist. This gate is the point of the kit.
    stops says. Then ask whether to archive, and archive only on an explicit
    yes: `openspec archive <change> --yes`. Extract and amend changes also need
    the archived survey with the capability in its list or in the plan.
-5. Before you hand over the next review, write what this one taught to the
-   lessons (below).
+5. When the person corrects something that could recur, propose the lesson
+   (below) right then, not after the review.
 
 ## Lessons
 
@@ -278,27 +278,39 @@ the same correction is never needed twice.
    word or wording the person wants, how screens or questions should be
    written, an implementation habit to keep or avoid. Not a decision that
    belongs to one capability only: that stays in its questions.md or design.md.
-2. **Only the person's word.** Write a lesson only from what the person said or
-   agreed to, never from your own guess. In your next reply, show the lines you
-   added in one short list, so they can correct or remove one.
+2. **Only the person's word.** A lesson comes only from what the person said,
+   never from your own guess. Show the exact line you want to add and write it
+   when they agree (or reword it as they say). Do this right when the
+   correction is made, and before you start any analyst or implementer task
+   it should reach: a compaction can lose a correction that is not written
+   down. Delete or change a line whenever the person asks.
 3. **Never a rule change.** A lesson never contradicts a baseline spec, a
-   schema, the archived target design or the agents' rules, and never changes
-   behavior. A wish to fix a bug is follow-up work in the plan, not a lesson. If
-   a lesson shows that an archived baseline spec misread the source code,
-   propose an amendment for it.
-4. **Shape.** Headings `## Reading the source code`, `## Specs and screens`,
-   `## Questions`, `## Implementation`, then one line per lesson: the rule as an
-   instruction, then where it came from in parentheses (`(review of
-   extract-billing-invoice)`). Keep the file short: merge a lesson into an
-   existing line rather than adding a near-duplicate, and delete a line the
-   person withdraws.
+   schema, the archived survey's glossary, the archived target design, the
+   context and rules of `openspec/config.yaml` or the agents' rules, and never
+   changes behavior. A wish to fix a bug is follow-up work in the plan, not a
+   lesson. If a lesson shows that an archived baseline spec misread the source
+   code, propose an amendment for it.
+4. **Shape.** The headings `## Reading the source code`, `## Specs and
+   screens`, `## Questions` and `## Implementation`, always in English exactly
+   like this (the implementer looks for the last one), then one line per lesson
+   in the artifact language: the rule as an instruction, then where it came
+   from in parentheses (`(review of extract-billing-invoice)`). Keep the file
+   short: merge a lesson into an existing line rather than adding a
+   near-duplicate.
 5. **Who reads it.** Name it in every analyst and implementer task (Working in
-   parallel), and read it yourself on resume. Never give it to a checker: the
-   crosscheck stays independent of what the analysts were told.
+   parallel). Read it yourself on resume, after every compaction, and before
+   you write questions.md, review.md or a port's design and tasks. Never give
+   it to a checker: the crosscheck stays independent of what the analysts were
+   told.
 6. **Changes already drafted.** When a new lesson applies to an extract or
-   amend change that the person has not reviewed yet, give that change's
-   analyst the lesson to apply (and a checker the changed items) before you
-   hand it over for review.
+   amend change that the person has not started reviewing yet, start an
+   analyst task for that change that names lessons.md and the new line, and a
+   checker task for the items it changed, before you hand the change over. For
+   a change already in review, ask the person whether to apply it there too.
+7. **A checker disagrees.** When a `mismatch` or `unclear` row concerns
+   something an analyst wrote because of a lesson, do not loop: put the row and
+   the lesson side by side in questions.md, so the person decides once
+   (and corrects the lesson if it was too broad).
 
 ## 1. Survey: map the bounded contexts
 
@@ -426,7 +438,7 @@ port.
    design.md.
 3. Show the person the design's structure, any additions to the conventions,
    the verification plan and open risks, and start implementing after they
-   agree. Write what their corrections taught to the lessons.
+   agree. Propose lessons from their corrections (see Lessons).
 4. Run `openspec instructions apply --change port-<capability> --json` and work
    through tasks.md. Give groups of tasks to the `spec-relay-implementer`
    subagent, one at a time; check its report and its verification results

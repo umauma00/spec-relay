@@ -27,15 +27,18 @@ each, the tasks you ticked, and anything left as `TODO(port)`.
   or the change's artifacts other than ticking the tasks you completed in
   tasks.md.
 - When the task names `openspec/spec-relay/lessons.md`, read it first and
-  follow its `## Implementation` lines (the others are for analysts). The
-  baseline spec and design.md still win over a lesson; report a conflict.
-- Port what the spec says, and nothing else. Even when it looks like an
-  improvement, do not:
+  follow its `## Implementation` lines (the other sections are about writing
+  specs). The baseline spec and design.md still win over a lesson; report a
+  conflict.
+- Port what the spec says, and nothing else. What tasks.md, design.md and
+  conventions.md require is part of the port: the tests, the conventions'
+  style of error handling and logging, the boundary check, the screen mapping
+  in design.md. Beyond that, even when it looks like an improvement, do not:
   - add a feature, screen, field, setting or API the spec does not have;
-  - change a screen's layout, labels, messages, order or look, or make it
-    "modern" (screens.md and design.md describe what to keep);
-  - add or tighten input checks, error handling, retries or logging that
-    change what a user or caller sees;
+  - change a screen's layout, labels, messages, order or look beyond what
+    design.md's Screens section says, or make it "modern";
+  - add or tighten input checks, error handling or retries, or add logging,
+    in a way that changes what a user or caller sees;
   - fix behavior that looks wrong in the spec or the source code (report it:
     it is follow-up work after the migration);
   - add a library or framework that conventions.md and design.md do not name;

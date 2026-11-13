@@ -403,6 +403,14 @@ test('guard --save and --compare list only the protected files that changed', as
     removed: ['src/b.php'],
   });
   assert.match(guardCompare(dir, 'wave-2').problems.join(), /no snapshot .*wave-2\.json; run gate\.mjs guard --save wave-2/);
+  // The lessons file appears with the first lesson; a subagent creating or deleting it shows too.
+  fs.rmSync(path.join(dir, 'openspec/spec-relay/lessons.md'));
+  guardSave(dir, 'wave-3');
+  write(dir, 'openspec/spec-relay/lessons.md', '## Implementation\n- x\n');
+  assert.deepEqual(guardCompare(dir, 'wave-3').added, ['openspec/spec-relay/lessons.md']);
+  guardSave(dir, 'wave-4');
+  fs.rmSync(path.join(dir, 'openspec/spec-relay/lessons.md'));
+  assert.deepEqual(guardCompare(dir, 'wave-4').removed, ['openspec/spec-relay/lessons.md']);
   assert.equal(guardSave(dir, '../x').ok, false);
   assert.equal(quiet(() => main(['guard', '--compare', '', '--root', dir])), 1, 'an empty name never falls back to the plain hash');
   write(dir, 'openspec/config.yaml', 'context: |\n  Source root: missing\n');

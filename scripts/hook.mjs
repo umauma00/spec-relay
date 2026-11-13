@@ -103,7 +103,7 @@ export function protectedPath(root, file, { subagent = false, pluginRoot = KIT_R
     ['openspec/changes/archive', 'archived changes are the record of what was reviewed'],
     ['openspec/schemas', 'the kit\'s schemas are installed by setup.mjs'],
   ]) if (under(rel, dir)) return why;
-  if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions)\.md$/i.test(rel) || [PLAN, LESSONS].includes(fold(rel)))) {
+  if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions)\.md$/i.test(rel) || [PLAN, LESSONS].some((p) => fold(p) === fold(rel)))) {
     return 'only the orchestrator writes review.md, questions.md, the plan and the lessons';
   }
   if (source === '.') {
