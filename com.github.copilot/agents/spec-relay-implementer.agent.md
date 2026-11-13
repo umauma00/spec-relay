@@ -23,8 +23,25 @@ each, the tasks you ticked, and anything left as `TODO(port)`.
   only inside the module of this capability's context and its tests. Use other
   modules only through their public API or events (the archived target
   design's architecture.md), and follow its conventions.md.
-  Never edit the source root, `openspec/specs/` or the change's artifacts other
-  than ticking the tasks you completed in tasks.md.
+  Never edit the source root, `openspec/specs/`, `openspec/spec-relay/lessons.md`
+  or the change's artifacts other than ticking the tasks you completed in
+  tasks.md.
+- When the task names `openspec/spec-relay/lessons.md`, read it first and
+  follow its `## Implementation` lines (the others are for analysts). The
+  baseline spec and design.md still win over a lesson; report a conflict.
+- Port what the spec says, and nothing else. Even when it looks like an
+  improvement, do not:
+  - add a feature, screen, field, setting or API the spec does not have;
+  - change a screen's layout, labels, messages, order or look, or make it
+    "modern" (screens.md and design.md describe what to keep);
+  - add or tighten input checks, error handling, retries or logging that
+    change what a user or caller sees;
+  - fix behavior that looks wrong in the spec or the source code (report it:
+    it is follow-up work after the migration);
+  - add a library or framework that conventions.md and design.md do not name;
+  - refactor, rename or reformat code outside this capability's module.
+  If the target language cannot do what the spec says and design.md does not
+  settle how, stop and report it instead of choosing an alternative.
 - When the source code and the spec disagree, stop and report it instead of
   choosing.
 - Write the tests that come from the spec scenarios together with the code,

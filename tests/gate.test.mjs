@@ -378,25 +378,27 @@ test('guard --save and --compare list only the protected files that changed', as
   const dir = tempDir();
   write(dir, 'openspec/config.yaml', 'context: |\n  Source root: src\n  Target root: new\n');
   write(dir, 'openspec/spec-relay/plan.md', '## Capabilities\n');
+  write(dir, 'openspec/spec-relay/lessons.md', '## Specs and screens\n');
   write(dir, 'openspec/changes/extract-a/review.md', '- [ ] R1 a\n');
   write(dir, 'openspec/changes/extract-a/questions.md', '- Q1 a\n');
   write(dir, 'openspec/changes/extract-a/specs/a/spec.md', 'draft\n');
   write(dir, 'src/a.php', '<?php\n');
   write(dir, 'src/b.php', '<?php\n');
   write(dir, 'new/A.java', 'class A {}\n');
-  assert.deepEqual(guardSave(dir, 'wave-1'), { ok: true, snapshot: 'openspec/spec-relay/work/guard/wave-1.json', files: 6 });
+  assert.deepEqual(guardSave(dir, 'wave-1'), { ok: true, snapshot: 'openspec/spec-relay/work/guard/wave-1.json', files: 7 });
   write(dir, 'openspec/changes/extract-a/specs/a/spec.md', 'draft 2\n');
   write(dir, 'new/A.java', 'class A { }\n');
   write(dir, 'openspec/spec-relay/work/extract-a/crosscheck-01.md', '| Item | Verdict | Evidence |\n');
   assert.deepEqual(guardCompare(dir, 'wave-1'), { ok: true, changed: [], added: [], removed: [] }, 'artifacts, the target and work files may change');
   write(dir, 'openspec/changes/extract-a/questions.md', '- Q1 b\n');
   write(dir, 'openspec/spec-relay/plan.md', '## Capabilities\n- x\n');
+  write(dir, 'openspec/spec-relay/lessons.md', '## Specs and screens\n- x\n');
   write(dir, 'src/a.php', '<?php // fixed\n');
   write(dir, 'src/c.php', '<?php\n');
   fs.rmSync(path.join(dir, 'src/b.php'));
   assert.deepEqual(guardCompare(dir, 'wave-1'), {
     ok: false,
-    changed: ['openspec/changes/extract-a/questions.md', 'openspec/spec-relay/plan.md', 'src/a.php'],
+    changed: ['openspec/changes/extract-a/questions.md', 'openspec/spec-relay/lessons.md', 'openspec/spec-relay/plan.md', 'src/a.php'],
     added: ['src/c.php'],
     removed: ['src/b.php'],
   });

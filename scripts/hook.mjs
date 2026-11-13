@@ -11,7 +11,7 @@
 //   - file edits under the source root (with source root ".", everything outside
 //     openspec/ and the target root), under openspec/specs/, openspec/changes/archive/,
 //     openspec/schemas/, of openspec/config.yaml, and inside the kit itself;
-//   - subagent edits of review.md, questions.md and the plan;
+//   - subagent edits of review.md, questions.md, the plan and the lessons;
 //   - shell commands that mention the "Hook enforcement" setting.
 // Shell commands that write files some other way are not parsed; the wave guard
 // (gate.mjs guard) still finds those changes afterwards.
@@ -23,7 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkReview, checkPortDone, changeSchema, configValue, cleanValue, nextSteps, language, readIf } from './gate.mjs';
+import { checkReview, checkPortDone, changeSchema, configValue, cleanValue, nextSteps, language, readIf, PLAN, LESSONS } from './gate.mjs';
 
 const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Tool names of the Copilot runtime (CLI hooks reference; VS Code's Copilot
@@ -103,8 +103,8 @@ export function protectedPath(root, file, { subagent = false, pluginRoot = KIT_R
     ['openspec/changes/archive', 'archived changes are the record of what was reviewed'],
     ['openspec/schemas', 'the kit\'s schemas are installed by setup.mjs'],
   ]) if (under(rel, dir)) return why;
-  if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions)\.md$/i.test(rel) || fold(rel) === 'openspec/spec-relay/plan.md')) {
-    return 'only the orchestrator writes review.md, questions.md and the plan';
+  if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions)\.md$/i.test(rel) || [PLAN, LESSONS].includes(fold(rel)))) {
+    return 'only the orchestrator writes review.md, questions.md, the plan and the lessons';
   }
   if (source === '.') {
     if (!under(rel, 'openspec') && !(target !== '.' && under(rel, target))) return 'with the source root ".", agents change only openspec/ and the target root';

@@ -3,14 +3,14 @@
   "owner": { "name": "umauma00" },
   "metadata": {
     "description": "spec-relay for GitHub Copilot CLI, VS Code and the GitHub Copilot app.",
-    "version": "0.5.0"
+    "version": "0.6.0"
   },
   "plugins": [
     {
       "name": "spec-relay",
       "source": "./",
       "description": "Spec-driven language migration with OpenSpec: extract specs from the code, review them, implement them in the new language.",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "author": { "name": "umauma00", "url": "https://github.com/umauma00" },
       "homepage": "https://github.com/umauma00/spec-relay",
       "repository": "https://github.com/umauma00/spec-relay",

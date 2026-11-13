@@ -69,6 +69,8 @@ need the reasoning behind a step.
 - **Baseline spec**: `openspec/specs/<capability>/spec.md`, created when a
   reviewed extract change is archived.
 - **Plan**: `openspec/spec-relay/plan.md`, the capability list and order.
+- **Lessons**: `openspec/spec-relay/lessons.md`, what the person's corrections
+  taught that later analyses and ports must follow (see Lessons).
 - **Rerun**: OpenSpec cannot archive two changes of the same name on one day,
   so a second survey, port or amendment of the same thing gets a `-v<n>`
   suffix (`port-billing-invoice-v2`). The scripts treat it as the same change.
@@ -183,7 +185,9 @@ not wash out these instructions.
    (folders or files), the exact files to write, the schema file and artifact
    id to follow (`openspec/schemas/<schema>/schema.yaml`), and anything the
    person decided that the task needs: subagents see neither this conversation
-   nor the repository instructions. Never paste instructions, templates, source
+   nor the repository instructions. Every analyst and implementer task also
+   names `openspec/spec-relay/lessons.md` as a file to read, once it exists;
+   a checker task never does. Never paste instructions, templates, source
    code or artifacts into a task, and never ask for artifacts back: subagents
    return a short report. Check their work with `openspec validate`,
    `openspec status --change`, `gate.mjs` and `merge.mjs`, and read an
@@ -193,19 +197,20 @@ not wash out these instructions.
    `### Requirement:` and `### Screen:` instead of reading the files.
 4. **One writer per file.** No two subagents of a wave write the same file.
    Analysts and checkers write only the paths you give them, the implementer
-   only its capability's module. Only you write `review.md`, `plan.md` and
-   `questions.md`, run `openspec` commands, render review pages and archive.
+   only its capability's module. Only you write `review.md`, `plan.md`,
+   `lessons.md` and `questions.md`, run `openspec` commands, render review
+   pages and archive.
    Never give a subagent a path under the source root (when the source root is
    `.`, give only paths under `openspec/` and the target root), under
    `openspec/specs/`, or `openspec/config.yaml`.
    Before every wave, run `node "<kit>/scripts/gate.mjs" guard --save
    wave-<n>`: it saves the hashes of the files no subagent may write (every
-   active change's `review.md` and `questions.md`, `plan.md`,
+   active change's `review.md` and `questions.md`, `plan.md`, `lessons.md`,
    `openspec/specs/`, `openspec/config.yaml` and the source files). After the
    wave, run `gate.mjs guard --compare wave-<n>`, which lists only the paths
    that changed (exit code 1 then: read the lists). If the wave is still
-   running when you must write a guarded file yourself (a tick, a question, an
-   archive), run `--compare` first: if that path already changed, a subagent
+   running when you must write a guarded file yourself (a tick, a question, a
+   lesson, an archive), run `--compare` first: if that path already changed, a subagent
    changed it; otherwise write, then `--save wave-<n>` again. For any change
    you did not make, stop, tell the person what changed, and do not use that
    wave's results until they decide. If `--save` prints `warnings`, tell the
@@ -227,10 +232,11 @@ not wash out these instructions.
 7. **Ahead of the review, not further.** Start an extract change only for a
    capability in `nextToAnalyze`. A longer queue only waits, and what the
    person finds in one review (a misread pattern, a glossary term, a wish about
-   wording) should reach the next analyses before they are written.
+   wording) should reach the next analyses before they are written: write it
+   to the lessons first (see Lessons).
 8. **Pilot first.** Analyze the first capability (`platform`) on its own
-   (`nextToAnalyze` holds one capability until the first is reviewed) and
-   bring what its review taught into the tasks of later analysts.
+   (`nextToAnalyze` holds one capability until the first is reviewed), and
+   write what its review taught to the lessons before later analysts start.
 9. Hand the person reviews of the same context one after another where the
    order allows, because they share words and data.
 
@@ -257,6 +263,42 @@ you assist. This gate is the point of the kit.
    stops says. Then ask whether to archive, and archive only on an explicit
    yes: `openspec archive <change> --yes`. Extract and amend changes also need
    the archived survey with the capability in its list or in the plan.
+5. Before you hand over the next review, write what this one taught to the
+   lessons (below).
+
+## Lessons
+
+A migration runs over many sessions, and neither you nor the subagents remember
+the last one. When the person corrects work in a way that could happen again in
+another capability, write it down once in `openspec/spec-relay/lessons.md`, so
+the same correction is never needed twice.
+
+1. **What goes in.** Corrections from any review, the port design talk or a
+   port: a pattern the analysts misread (`a NULL end date means open-ended`), a
+   word or wording the person wants, how screens or questions should be
+   written, an implementation habit to keep or avoid. Not a decision that
+   belongs to one capability only: that stays in its questions.md or design.md.
+2. **Only the person's word.** Write a lesson only from what the person said or
+   agreed to, never from your own guess. In your next reply, show the lines you
+   added in one short list, so they can correct or remove one.
+3. **Never a rule change.** A lesson never contradicts a baseline spec, a
+   schema, the archived target design or the agents' rules, and never changes
+   behavior. A wish to fix a bug is follow-up work in the plan, not a lesson. If
+   a lesson shows that an archived baseline spec misread the source code,
+   propose an amendment for it.
+4. **Shape.** Headings `## Reading the source code`, `## Specs and screens`,
+   `## Questions`, `## Implementation`, then one line per lesson: the rule as an
+   instruction, then where it came from in parentheses (`(review of
+   extract-billing-invoice)`). Keep the file short: merge a lesson into an
+   existing line rather than adding a near-duplicate, and delete a line the
+   person withdraws.
+5. **Who reads it.** Name it in every analyst and implementer task (Working in
+   parallel), and read it yourself on resume. Never give it to a checker: the
+   crosscheck stays independent of what the analysts were told.
+6. **Changes already drafted.** When a new lesson applies to an extract or
+   amend change that the person has not reviewed yet, give that change's
+   analyst the lesson to apply (and a checker the changed items) before you
+   hand it over for review.
 
 ## 1. Survey: map the bounded contexts
 
@@ -384,7 +426,7 @@ port.
    design.md.
 3. Show the person the design's structure, any additions to the conventions,
    the verification plan and open risks, and start implementing after they
-   agree.
+   agree. Write what their corrections taught to the lessons.
 4. Run `openspec instructions apply --change port-<capability> --json` and work
    through tasks.md. Give groups of tasks to the `spec-relay-implementer`
    subagent, one at a time; check its report and its verification results
@@ -527,6 +569,6 @@ person asks to skip a step, a review or a check:
   changes stay as they are; put their capabilities into the survey's list
   unchanged), because `gate.mjs port-ready` needs both. Until then,
   `status.mjs --capability <capability>` still shows that capability's steps.
-- On resume, run the environment check (step 0), read the plan and these
-  commands, refresh the TODO list, tell the person where things stand, and
+- On resume, run the environment check (step 0), read the plan, the lessons
+  and these commands, refresh the TODO list, tell the person where things stand, and
   continue the first unfinished step.

@@ -9,7 +9,8 @@
 //   node gate.mjs baseline --capability <capability>       the baseline hash a port records
 //   node gate.mjs guard --save <name>                      before a wave: snapshot the hashes of the files no
 //                                                          subagent may write (active review.md and questions.md,
-//                                                          plan.md, openspec/specs/, openspec/config.yaml, source files)
+//                                                          plan.md, lessons.md, openspec/specs/, openspec/config.yaml,
+//                                                          source files)
 //   node gate.mjs guard --compare <name>                   after the wave: list the paths that changed since
 //                                                          (exit 1 when any did: read the lists)
 //   node gate.mjs guard                                    one hash over the same files
@@ -344,6 +345,8 @@ export function capabilityList(text) {
 }
 
 export const PLAN = 'openspec/spec-relay/plan.md';
+// What the person's corrections taught; only the orchestrator writes it.
+export const LESSONS = 'openspec/spec-relay/lessons.md';
 
 // The capabilities of the plan's capability list: top-level items under the
 // "## Capabilities" heading (as status.mjs reads it), not follow-up notes.
@@ -430,7 +433,8 @@ export function baselineHash(root, capability) {
 export const capabilitySegments = (capability) => capability.split(/[\\/]+/).filter((part) => part && part !== '.');
 
 // The files subagents must never write: every active change's review.md and
-// questions.md, the plan, the baseline specs, the config and the source files.
+// questions.md, the plan, the lessons, the baseline specs, the config and the
+// source files.
 // The orchestrator saves a snapshot of their hashes before a wave and compares
 // after it. Git cannot show a tick in an untracked or already modified
 // review.md, nor an edit to an already modified or untracked source file; this
@@ -443,7 +447,7 @@ export function guardFiles(root, warnings = []) {
       if (e.isDirectory() && e.name !== 'archive') files.push(path.join(changes, e.name, 'review.md'), path.join(changes, e.name, 'questions.md'));
     }
   } catch { /* no changes yet */ }
-  files.push(path.join(root, 'openspec/spec-relay/plan.md'), ...walk(path.join(root, 'openspec/specs')), path.join(root, 'openspec/config.yaml'));
+  files.push(path.join(root, PLAN), path.join(root, LESSONS), ...walk(path.join(root, 'openspec/specs')), path.join(root, 'openspec/config.yaml'));
   const out = {};
   for (const f of files) {
     try { if (fs.statSync(f).isFile()) out[path.relative(root, f).split(path.sep).join('/')] = crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex'); } catch { /* gone */ }

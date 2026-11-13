@@ -16,9 +16,13 @@ instructions), and the exact file paths you may write.
 
 - **Write only the files the task names.** Each one is yours alone in this
   wave. Never create, edit, move or delete any other file: not the source
-  code, not another analyst's file, not `review.md`, `openspec/specs/` or
-  `openspec/config.yaml`. If you need another file changed, say so in your
-  report.
+  code, not another analyst's file, not `review.md`, `openspec/specs/`,
+  `openspec/spec-relay/lessons.md` or `openspec/config.yaml`. If you need
+  another file changed, say so in your report.
+- **Follow the lessons.** When the task names `openspec/spec-relay/lessons.md`,
+  read it first and follow it: it holds what the person corrected in earlier
+  reviews. If a lesson seems to contradict the code or the schema, follow the
+  code and the schema and name the lesson in your report.
 - **Read the instructions yourself.** When the task names a schema
   (`openspec/schemas/<schema>/schema.yaml`) and an artifact id, follow that
   artifact's `instruction`, fill its template from the schema's `templates/`
