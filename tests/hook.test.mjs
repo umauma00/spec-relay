@@ -94,12 +94,16 @@ test('agents may not write the source, baselines, archives, schemas, settings or
   assert.equal(edit(dir, 'ts/billing/invoice.ts'), null);
   assert.equal(edit(dir, 'openspec/changes/extract-billing-invoice/review.md'), null);
   assert.equal(edit(dir, path.join(path.dirname(dir), 'elsewhere.txt')), null);
-  // Subagents leave review.md, questions.md and the plan to the orchestrator.
+  // Subagents leave review.md, questions.md, the plan and the lessons to the orchestrator.
   const sub = { agentId: 'a1', agentType: 'spec-relay-analyst' };
   assert.match(edit(dir, 'openspec/changes/extract-billing-invoice/review.md', sub), /only the orchestrator writes/);
   assert.match(edit(dir, 'openspec/spec-relay/plan.md', sub), /only the orchestrator writes/);
+  assert.match(edit(dir, 'openspec/spec-relay/lessons.md', sub), /only the orchestrator writes/);
+  assert.match(edit(dir, 'openspec/spec-relay/lessons.md', { agentId: 'i1', agentType: 'spec-relay-implementer' }), /only the orchestrator writes/);
+  assert.match(edit(dir, 'openspec/spec-relay/lessons.md', { agentId: 'c1', agentType: 'spec-relay:spec-relay-checker' }), /only the orchestrator writes/);
   assert.equal(edit(dir, 'openspec/changes/extract-billing-invoice/trace.md', sub), null);
   assert.equal(edit(dir, 'openspec/spec-relay/plan.md', { agentId: 'o1', agentType: 'spec-relay:spec-relay-orchestrator' }), null);
+  assert.equal(edit(dir, 'openspec/spec-relay/lessons.md'), null, 'the orchestrator writes the lessons');
   // Viewing is not writing.
   assert.equal(decide({ cwd: dir, toolName: 'str_replace_editor', toolArgs: { command: 'view', path: 'src/a.php' } }, { pluginRoot: KIT }), null);
   // Removed lines that start with "-- " (SQL comments) are not file headers.

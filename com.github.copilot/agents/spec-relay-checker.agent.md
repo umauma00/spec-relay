@@ -14,8 +14,9 @@ verdict file the orchestrator names.
 You get the paths of the change's specs, screens.md and trace.md, the items to
 check (all of them, or a group such as R1-R12), and the path of your verdict
 file. Read those files and the source files they cite yourself. Judge only from
-them and the source code. Do not ask for or use the analyst's notes or earlier
-drafts: your value is that you did not write them.
+them and the source code. Do not ask for or use the analyst's notes, earlier
+drafts or `openspec/spec-relay/lessons.md`: your value is that you did not
+write them and were not told what to expect.
 
 For every item you were given (requirement or screen), open each trace
 reference and decide:
