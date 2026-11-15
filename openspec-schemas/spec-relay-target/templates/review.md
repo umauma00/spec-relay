@@ -17,3 +17,7 @@ Reviewer: <!-- name -->
 ## 3. Verification
 - [ ] E1 <!-- context -->: levels
 - [ ] E90 Sign-in and recorded data
+
+## 4. Screens
+- [ ] U1 <!-- context -->: screens
+- [ ] U90 Shared look, carried files and client-side scripts

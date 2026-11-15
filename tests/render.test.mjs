@@ -201,14 +201,17 @@ test('review items are any <Letter><n> id, grouped by the headings of review.md'
   assert.deepEqual(groups.map((g) => [g.title, g.items.map((i) => `${i.id}:${i.done}`)]), [['Architecture', ['A0:true', 'A90:false']], ['Conventions', ['V1:false', ':false']]]);
   const dir = repo();
   const page = change(dir, 'target-design', 'spec-relay-target', {
-    'review.md': 'Reviewer: Uma\n\n## 1. Architecture\n- [x] A0 The style\n- [ ] A1 billing\n\n## 3. Verification\n- [ ] E1 billing: levels\n',
+    'review.md': 'Reviewer: Uma\n\n## 1. Architecture\n- [x] A0 The style\n- [ ] A1 billing\n\n## 3. Verification\n- [ ] E1 billing: levels\n\n## 4. Screens\n- [ ] U1 billing: screens\n',
     'architecture.md': '# Architecture\n\n| Context | Module |\n|---|---|\n| billing | Billing |\n',
+    'ui.md': '# UI\n\n## Screens\n| Context | Policy |\n|---|---|\n| billing | layout |\n',
   });
+  assert.match(page, /<h2 id="g3">画面<span class="n">確認済み 0 \/ 1<\/span>/);
+  assert.match(page, /id="doc-ui-md"/);
   assert.match(page, /移行先設計レビュー/);
   assert.match(page, /<h2 id="g1">アーキテクチャ<span class="n">確認済み 1 \/ 2<\/span>/);
   assert.match(page, /class="item small is-open" id="E1"/);
   assert.match(page, /id="doc-architecture-md"/);
-  assert.match(page, /<b>2<\/b>件が未確認/);
+  assert.match(page, /<b>3<\/b>件が未確認/);
 });
 
 test('questions are found in every shape the gate accepts', () => {

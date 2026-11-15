@@ -99,7 +99,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   openspec(dir, 'new', 'change', 'survey', '--schema', 'spec-relay-survey');
   assert.deepEqual(keys(), ['survey', 'target']);
   fill(dir, 'survey', {
-    'inventory.md': '| Path | Context | Notes |\n|---|---|---|\n| src/ | calc | |\n',
+    'inventory.md': '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | calc | port | |\n',
     'context-map.md': '## Contexts\n\n### Context: platform\n- generic\n\n### Context: calc\n- core\n',
     'glossary.md': '# Glossary\n',
     'capabilities.md': '# Capabilities\n\n### calc\n1. `calc/add` 足し算\n',
@@ -114,8 +114,9 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   fill(dir, 'target-design', {
     'architecture.md': '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| calc | ts/calc |\n',
     'conventions.md': '# Conventions\n\n## Commands\n| Purpose | Command |\n|---|---|\n| Test | node test.js |\n| Boundary check | node boundary.js |\n',
+    'ui.md': '# UI\n\n## Screens\n| Context | Screens | Source kind | Target | Policy | Why |\n|---|---|---|---|---|---|\n| platform | all | none | none | none | |\n| calc | all | none | none | none | |\n\n## Carried files\nNone\n',
     'verification.md': '| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| platform | yes | no | no | no |\n| calc | yes | no | no | no |\n',
-    'review.md': 'Reviewer: Uma\n\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 calc\n- [x] E1 platform: levels\n- [x] E2 calc: levels\n',
+    'review.md': 'Reviewer: Uma\n\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 calc\n- [x] E1 platform: levels\n- [x] E2 calc: levels\n- [x] U1 platform: screens\n- [x] U2 calc: screens\n- [x] U90 shared look\n',
   });
   assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
   openspec(dir, 'archive', 'target-design', '--yes');

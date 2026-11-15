@@ -1,6 +1,6 @@
 name: spec-relay-target
 version: 1
-description: spec-relay step 2 - decide once how the new system is built (modules per bounded context, conventions, verification), then gate it on a human review
+description: spec-relay step 2 - decide once how the new system is built (modules per bounded context, conventions, screens, verification), then gate it on a human review
 artifacts:
   - id: architecture
     generates: architecture.md
@@ -65,6 +65,65 @@ artifacts:
     requires:
       - architecture
 
+  - id: ui
+    generates: ui.md
+    description: How the screens are built in the new system and how close their look stays to today's
+    template: ui.md
+    instruction: |
+      Decide once, for every context, how its screens (web pages, forms,
+      dialogs, printed reports) are built in the new system and how much of
+      today's look they keep. Every extract and port follows this file, so
+      the look does not drift from one port to the next. Read the archived
+      survey (inventory.md for the files marked carry, context-map.md for
+      each context's entry points) and the screens themselves; ask the person
+      what only they know: who uses the screens, whether manuals, training or
+      printed forms show them, and which target UI technology they want.
+
+      Sections:
+      - **Screens**: a table with at least one row per context: context id,
+        which screens the row covers (`all`, names, or a kind such as printed
+        reports), the source kind (PHP pages, ASP.NET WebForms, ASP.NET MVC,
+        WinForms, WPF, printed report, none), the target framework and
+        template engine, the policy and why. A context may have several rows
+        (screens `layout`, printed reports `same`). Policy is one of:
+        - `same`: the look stays too. Web to web, keep the markup structure
+          and the ids and classes the stylesheets select on, and carry the
+          stylesheets, images and fonts unchanged. Printed reports keep their
+          page layout.
+        - `layout`: the regions, order, labels, positions, sizes, tab order
+          and keys stay; the new toolkit draws the controls in its own look.
+          The usual choice when a WinForms or WPF form becomes a web page or
+          another desktop toolkit, where the same pixels are not realistic.
+        - `new`: a new look under the Shared look. Items, labels, messages,
+          order and transitions still follow screens.md.
+        - `none`: the context has no screens.
+        Propose the policy; the person decides. Suggest `same` when users are
+        many or are trained on the screens, when manuals or forms show them,
+        for printed or submitted documents, and web to web (carrying the
+        stylesheets is cheap). Suggest `layout` from desktop to anything, and
+        from ASP.NET WebForms when the rendered HTML cannot be taken from the
+        running program. Never choose `new` on your own.
+      - **Shared look**: what all screens share: base layout or master page,
+        stylesheets or theme, fonts, colours, window or viewport size, DPI and
+        scaling (WinForms AutoScaleMode), supported browsers. For `layout`
+        from desktop, how designer positions and sizes map to the target
+        (pixels, a grid, or relative layout).
+      - **Carried files**: a table `| Source | Target |` with one row per
+        carry row of the inventory, with the same path, and the folder or file
+        under the target root that receives it. A source folder (ending in
+        `/`) needs a target folder ending in `/`; a file sent to a folder also
+        ends the target with `/` and keeps its name. Never a target under
+        `openspec/` or on a source file. A carried file is copied unchanged
+        (text may differ only in CRLF or LF line endings); `gate.mjs
+        port-done` compares the copy with the source. Write "None" under the
+        heading when nothing is carried; keep the heading.
+      - **Client-side scripts**: the script libraries carried as they are,
+        the scripts that are ported, and why. What a script makes users see
+        (validation, enabling items, calculations in the browser) is behavior
+        and belongs in the specs either way.
+    requires:
+      - architecture
+
   - id: verification
     generates: verification.md
     description: How each context proves the new code behaves like the old one
@@ -84,7 +143,8 @@ artifacts:
         important flows; needs both systems running.
       - **C - screenshot comparison**: capture the screens of screens.md in the
         old and the new system and compare them. For screens whose design must
-        stay the same.
+        stay the same: suggest it for contexts with the policy `same` in
+        ui.md, and consider it for `layout`.
 
       Each port gives the command of every chosen level in its design.md, and
       `gate.mjs port-done` fails until that command passed on the current
@@ -105,6 +165,7 @@ artifacts:
         (under the target root's tests), and how to re-record them.
     requires:
       - architecture
+      - ui
 
   - id: review
     generates: review.md
@@ -119,10 +180,14 @@ artifacts:
       - Under `## 2. Conventions`: one checkbox per section of conventions.md.
       - Under `## 3. Verification`: one checkbox per context's levels, and one
         for sign-in and recorded data.
+      - Under `## 4. Screens`: one checkbox per context's screen rows in ui.md
+        (`- [ ] U<n> <context>: screens`), and `- [ ] U90` for the shared
+        look, the carried files and the client-side scripts.
       Do not tick any box. Only the reviewer decides.
     requires:
       - architecture
       - conventions
+      - ui
       - verification
 
 apply:

@@ -19,6 +19,15 @@ artifacts:
         covers every file below it. A more specific row wins over a folder row,
         so a folder can go to one context and one file in it to another.
       - **Context**: a context id from context-map.md, or `excluded`.
+      - **Handling**: `port` (rewritten in the target language, the usual
+        case) or `carry`: the file goes to the new system unchanged, byte for
+        byte. Carry fits files the new system can use as they are and whose
+        look the screens depend on: stylesheets, images, icons, fonts,
+        client-side script libraries (jQuery and its plugins), report or
+        document templates, static HTML. A file that needs any edit (paths,
+        encoding, server-side code inside it) is `port`. Leave it blank for
+        `excluded`. Propose carry; the person decides in the review, and the
+        target design (ui.md) says where carried files go.
       - **Notes**: for `excluded`, why (generated code, vendored library, build
         output, dead code). For a file whose parts belong to several contexts
         (a god class, a shared include), name the main context here and list
@@ -108,8 +117,8 @@ artifacts:
       - One checkbox per context under `## 1. Contexts`, in context-map order:
         `- [ ] K<n> <context-id>: <name>`.
       - Under `## 2. Map`, one checkbox each for: the relationships, the owners
-        of shared data, the glossary conflicts, and the capability list and
-        order.
+        of shared data, the glossary conflicts, the capability list and
+        order, and the files marked carry.
       - Under `## 3. Coverage`, one checkbox that every source file is in the
         inventory (`gate.mjs review` also checks this).
       Do not tick any box. Only the reviewer decides; see the apply instruction.

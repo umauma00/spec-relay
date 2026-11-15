@@ -2,19 +2,19 @@
 
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) を使って、コードベースを別のプログラミング言語へ移すための GitHub Copilot 用キットです。元のコードから仕様を起こし、人間がその仕様をレビューし、レビュー済みの仕様をもとに新しい言語で実装します。
 
-> **状態：0.8.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
+> **状態：0.9.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
 
 ## 流れ
 
 ```mermaid
 flowchart LR
-  S[1. 調査<br/>コンテキストに分ける] --> D[2. 移行先の設計<br/>モジュール・規約・比べ方] --> A[3. 解析<br/>元コード → 仕様<br/>AI が照合] --> B[4. 人間がレビュー<br/>承認で仕様を確定] --> C[5. 実装<br/>仕様 → 新しい言語]
+  S[1. 調査<br/>コンテキストに分ける] --> D[2. 移行先の設計<br/>モジュール・規約・画面・比べ方] --> A[3. 解析<br/>元コード → 仕様<br/>AI が照合] --> B[4. 人間がレビュー<br/>承認で仕様を確定] --> C[5. 実装<br/>仕様 → 新しい言語]
 ```
 
 | 工程 | やること | OpenSpec 上の形 |
 |---|---|---|
 | 1. 調査 | コード全体を読み、DDD の境界付けられたコンテキストと capability に分ける。人がレビュー | `survey` change（スキーマ `spec-relay-survey`） |
-| 2. 移行先の設計 | モジュール構成（既定は Spring Modulith 型）、共通の規約、コンテキストごとの比べ方を決める。人がレビュー | `target-design` change（スキーマ `spec-relay-target`） |
+| 2. 移行先の設計 | モジュール構成（既定は Spring Modulith 型）、共通の規約、画面の作り方と見た目の方針、コンテキストごとの比べ方を決める。人がレビュー | `target-design` change（スキーマ `spec-relay-target`） |
 | 3. 解析 | 元のコードを読み、今の動作を言語に依存しない仕様と画面の記録にする。別の AI が元コードと照合 | `extract-<capability>` change（スキーマ `spec-relay-extract`） |
 | 4. レビュー | 人が HTML で見て、要件・画面・疑問点を確認し、承認したら archive | extract change の apply と archive |
 | 5. 実装 | 確定した仕様をモジュールごとに実装し、選んだ方式で元と比べる。細かいロジックは元コードを参照。テストはキットが実行して記録し、別の AI が新旧のコードを突き合わせる | `port-<capability>` change（スキーマ `spec-relay-port`） |
@@ -126,6 +126,7 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 - **元のコードは書き換えない。** すべてのエージェントにとって読み取り専用です。
 - **仕様の確定は人が決める。** AI は人が認めた項目だけをチェックし、明示的な承認なしに archive しません。レビューはチャットで1項目ずつでも、ファイルや PR でまとめてでもかまいません。archive の前に `scripts/gate.mjs review` で、すべての要件・画面・質問・コンテキストがチェックリストにあり、チェック済みで、質問への判断とレビュー担当の名前が書かれ、AI の照合が解決し、元ファイルがすべて調査に含まれていることを確かめます（`openspec archive --yes` 自体はこれを確かめません）。
 - **実装の前後も確かめる。** port は、調査・移行先の設計・ベースライン仕様がそろい、修正中でないことを `gate.mjs port-ready` で確かめてから始めます。archive の前に `gate.mjs port-done` が、すべてのタスクの完了、着手時から仕様が変わっていないこと（ハッシュ）、今のコードでテストと境界チェックと選んだ比べ方が通った記録（`verify.mjs` が実行して書く）、仕様のシナリオごとのテスト、`TODO(port)` が残っていないこと、照合担当が新しいコードを元コードと突き合わせた結果を確かめます。比べ方が A だけのときは、同じ動きであることは元を動かして比べたのではなく推定だ、と完了時に知らせます（[詳しく](docs/WORKFLOW.md#実装が終わったときの確かめ方)）。
+- **画面の見た目は方針で決める。** 見た目まで同じ（`same`）、配置と文言は同じ（`layout`）、作り直す（`new`）のどれにするかを、移行先の設計でコンテキストごとに1回だけ人が決めます。CSS・画像・フォントなど変換しないファイルは調査で `carry` にでき、`gate.mjs port-done` がコピーの中身が元と同じかを確かめます（[詳しく](docs/WORKFLOW.md#画面の見た目)）。
 - **仕様の修正は読み違いだけ。** 動きそのものを変えたいときは、移行後の別作業にします。
 - **正は markdown、見るのは HTML。** レビューでは `scripts/render.mjs` が成果物を1枚の HTML にします（要件ごとのカード、シナリオ、元コードの該当行、質問と判断、進み具合）。デザインはスクリプトに固定しているので、どのモデルでも同じ見た目になります。判断は markdown（review.md）に記録します。
 - **仕様が契約。** 実装中に元コードと仕様が食い違ったら、AI はどちらかを選ばず人に聞きます。実装担当は「良かれと思って」の手直し（仕様にない機能、画面の今風の作り直し、入力チェックやエラー処理の追加、元のバグの修正、決めていないライブラリの追加）をしません。
@@ -178,9 +179,20 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 
 ## 0.7.0 から更新するとき
 
-0.8.0 で、実装の完了の確かめ方が強くなりました（`verify.mjs` によるテストの実行記録、シナリオごとのテストの印、`TODO(port)`、照合担当による実装の照合）。port と移行先の設計のスキーマが変わったので、`openspec/schemas/spec-relay-port/` と `openspec/schemas/spec-relay-target/` を削除してから導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。
+0.8.0 で、画面の見た目を引き継ぐ決まりが加わりました。調査の一覧に扱いの列（`port` か `carry`）、移行先の設計に `ui.md`、screens.md に見た目の出どころと詳細、port の design.md に画面ごとの方針と carry のファイルの欄があります。
 
-- archive 済みの移行先の設計はそのままです。conventions.md の Test と Boundary check のコマンドは、0.8.0 から移行先のフォルダーで実行します。リポジトリの一番上で動く書き方になっていたら、port の design.md の Verification 表で、A と `Boundary check` の行にコマンドを書けば、そちらを使います。
+1. スキーマが変わったので、導入スクリプトは「キットの版と違う」と表示して止まります。`openspec/schemas/spec-relay-*` を削除してから、導入スクリプトをもう一度実行してください。
+2. archive 済みの調査はそのまま使えます。扱いの列がない一覧は、すべて `port` として読みます。CSS などを `carry` にしたいときは、調査をやり直します（`survey-v2`）。進行中の調査は、inventory.md に扱いの列（`| Path | Context | Handling | Notes |`）を足さないと gate を通りません。分担して書いている途中の部分ファイルも同じ列にそろえてください。
+3. 進行中の target-design は、`ui.md` と review.md の `## 4. Screens`（コンテキストごとの `U<n>` と `U90`）を書き足さないと gate を通りません。archive 済みのときは、前の版の architecture.md・conventions.md・verification.md をそのまま写し、`ui.md` を足した `target-design-v2` を作ってレビューすると、以後の port が方針に従います。
+4. 進行中の extract の screens.md には、見た目の出どころと詳細を書き足すと、実装で見た目を再現しやすくなります（gate はこの欄を見ないので、なくても通ります）。archive 済みの target-design に `ui.md` がないまま port を始めると、オーケストレーターは画面ごとの方針を人に聞いて design.md に記録します。
+
+## 0.8.0 から更新するとき
+
+0.7.0 から 0.9.0 に上げるときは、上と下の両方を読んでください。スキーマの削除と導入スクリプトの再実行は1回で済みます。
+
+0.9.0 で、実装の完了の確かめ方が強くなりました（`verify.mjs` によるテストの実行記録、シナリオごとのテストの印、`TODO(port)`、照合担当による実装の照合）。port と移行先の設計のスキーマが変わったので、`openspec/schemas/spec-relay-port/` と `openspec/schemas/spec-relay-target/` を削除してから導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。
+
+- archive 済みの移行先の設計はそのままです。conventions.md の Test と Boundary check のコマンドは、0.9.0 から移行先のフォルダーで実行します。リポジトリの一番上で動く書き方になっていたら、port の design.md の Verification 表で、A と `Boundary check` の行にコマンドを書けば、そちらを使います。
 - archive 済みの verification.md の比べ方の欄は `yes` か `no` で読みます（`はい`・`✓`・`なし`・`-` なども可）。それ以外の言葉があると port-done が止まるので、移行先の設計をやり直す（`target-design-v2`）か、オーケストレーターに相談してください。
 - archive 済みの conventions.md の Test や Boundary check が `npm run build; npm test` のように複数のコマンドをつないでいると、前の失敗が隠れるので port-done が止まります。port の design.md の Verification 表に1つのコマンド（スクリプトやビルドツールのタスク）を書けば、そちらを使います。
 - 進行中の port は、タスクがすべて完了していても `gate.mjs port-done` を通らなくなります。オーケストレーターがテストに印を付け、`verify.mjs` と照合を行ってから、改めて archive してよいかを聞きます。

@@ -44,7 +44,8 @@ artifacts:
       Explain HOW to implement the baseline specs in the target language,
       inside the target design of the newest archived `target-design` change
       (`openspec/changes/archive/*-target-design*/`): its architecture.md,
-      conventions.md and verification.md. Follow them; do not re-decide them.
+      conventions.md, ui.md and verification.md. Follow them; do not
+      re-decide them.
 
       Sections:
       - **Structure**: The module of this capability's context (from
@@ -54,8 +55,30 @@ artifacts:
       - **Language mapping**: Only additions to conventions.md that these specs
         need. If a spec needs a rule that contradicts conventions.md, stop and
         ask the person.
-      - **Screens**: For each screen in the extract change's screens.md, the
-        target page or form and how labels, layout and messages are kept.
+      - **Screens**: For each screen in the extract change's screens.md
+        (`openspec/changes/archive/*-extract-<capability>/screens.md`), its
+        policy from ui.md, the target page or form, and how the design is
+        kept under that policy. If the archived target design has no ui.md
+        (made before kit 0.8.0), ask the person for each screen's policy and
+        write their answer under Decisions; never choose it yourself.
+        - `same`: the markup keeps the structure and the ids and classes of
+          Look details, the carried stylesheets, images and fonts are linked
+          unchanged, and the page looks as it does today.
+        - `layout`: regions, order, labels, positions and sizes from Look
+          details (mapped as ui.md's Shared look says), tab order and keys
+          are kept; the target toolkit draws the controls.
+        - `new`: the Shared look of ui.md; items, labels, messages, order and
+          transitions are still those of screens.md.
+      - **Carried files**: a table `| Source | Target |` of the files this
+        port copies unchanged: carry rows of the survey's inventory, placed
+        exactly where ui.md's Carried files says. A folder row (ending in `/`)
+        copies the carry files below it (not the files a more specific
+        inventory row marks port); a target ending in `/` receives the file
+        under its own name. `gate.mjs port-done` fails when a copy differs
+        from its source (text may differ only in CRLF or LF line endings) or
+        goes elsewhere than ui.md says. A file that needs any edit is ported,
+        not carried: leave it out here and say why under Decisions. Keep the
+        heading and write "None" under it when the port carries nothing.
       - **Verification**: A table `| Level | Covers | Command |`, one row for
         A and one for each of B1, B2 and C that verification.md chose for this
         context, with what it covers here. Command is the one-line command
@@ -98,6 +121,7 @@ artifacts:
         `spec-relay:`), with the names exactly as in the baseline spec; `gate.mjs port-done` fails for a scenario without a tagged test.
         Add tasks for the other levels design.md names: B1 record source
         outputs and compare, B2 replay, C screenshot comparison.
+      - When design.md lists carried files, one task copies them unchanged.
       - The last group runs the boundary check from conventions.md.
       - Order by dependency. A final group may only run integration checks and
         compare results with the source program when it can run.
@@ -158,8 +182,11 @@ apply:
       and its result.
     - Write tests from the spec scenarios before or with the code they check,
       each tagged `spec-relay: <capability> | <requirement> | <scenario>`.
-    - Write only inside this context's module and its tests; keep the module
-      boundaries of architecture.md, and run the boundary check.
+    - Write only inside this context's module and its tests, and the carried
+      files design.md lists; keep the module boundaries of architecture.md,
+      and run the boundary check.
+    - Copy carried files byte for byte and never edit them. Build each screen
+      as design.md's Screens section says for its policy; do not restyle it.
     - Leave a `TODO(port)` comment for anything unresolved and list it in your
       report. The port is not done while one is left, unless the person agrees
       to leave it as follow-up work.

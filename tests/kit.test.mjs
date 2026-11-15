@@ -60,3 +60,17 @@ test('the view skill names the renderer, which exists', () => {
   assert.ok(text.includes('scripts/render.mjs'));
   assert.ok(fs.existsSync(path.join(KIT_ROOT, 'scripts/render.mjs')));
 });
+
+test('the templates have the headings and columns the gate reads', async () => {
+  const { headedRows, section, column } = await import('../scripts/gate.mjs');
+  const header = (text) => headedRows(text.replace(/<!--[\s\S]*?-->/g, 'x'))[0]?.header ?? [];
+  const inventory = read('openspec-schemas/spec-relay-survey/templates/inventory.md');
+  assert.ok(column(header(inventory), /^handling$/) >= 0, 'inventory template has a Handling column');
+  const ui = read('openspec-schemas/spec-relay-target/templates/ui.md');
+  assert.ok(column(header(section(ui, /^screens$/i) ?? ''), /^policy$/) >= 0, 'ui.md template has ## Screens with a Policy column');
+  assert.notEqual(section(ui, /^carried files\b/i), null, 'ui.md template has ## Carried files');
+  const design = read('openspec-schemas/spec-relay-port/templates/design.md');
+  assert.notEqual(section(design, /^carried files\b/i), null, 'port design template has ## Carried files');
+  assert.ok(column(header(section(design, /^screens$/i) ?? ''), /^policy/) >= 0, 'port design template has a Policy column');
+  assert.match(read('openspec-schemas/spec-relay-target/templates/review.md'), /^## 4\. Screens\n- \[ \] U1 /m);
+});
