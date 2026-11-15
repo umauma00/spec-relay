@@ -97,9 +97,67 @@ test('in a git repository, ignored files (build output) are not part of the targ
   write(dir, '.gitignore', 'ts/dist/\n');
   write(dir, 'ts/dist/bundle.js', '// TODO(port) built\n');
   const before = targetHash(dir);
-  assert.deepEqual(collect(dir).markers.map((m) => m.file), ['ts/billing/invoice.ts', 'ts/node_modules/x/index.js']);
+  // node_modules is left out even when git does not ignore it.
+  assert.deepEqual(collect(dir).markers.map((m) => m.file), ['ts/billing/invoice.ts']);
   write(dir, 'ts/dist/bundle.js', '// rebuilt\n');
   assert.equal(targetHash(dir), before);
+  // A nested repository (a cloned starter) is listed as a folder; its files still count.
+  write(dir, 'ts/web/main.ts', '// TODO(port) web\n');
+  assert.equal(spawnSync('git', ['init', '-q'], { cwd: path.join(dir, 'ts/web') }).status, 0);
+  assert.deepEqual(collect(dir).markers.map((m) => m.file), ['ts/billing/invoice.ts', 'ts/web/main.ts']);
+  const nested = targetHash(dir);
+  write(dir, 'ts/web/main.ts', '// changed\n');
+  assert.notEqual(targetHash(dir), nested);
+});
+
+test('paths, comments and pipes in the code pass through the draft to the gate unchanged', () => {
+  const dir = repo();
+  write(dir, 'ts/billing/invoice_service.py', '# TODO(port) total() || 0 fallback\n');
+  write(dir, 'ts/app/[id]/(shop)/page.tsx', '{/* TODO(port) pager */}\n');
+  write(dir, 'ts/app/view.html', '<!-- TODO(port): pager\n<p>x</p>\n');
+  write(dir, 'openspec/spec-relay/plan.md', `${PLAN}- fix \`a || b\` fallback\n`);
+  finished(dir);
+  fs.rmSync(path.join(dir, F, 'leftovers.md'));
+  draft(dir, 'finish');
+  const text = fs.readFileSync(path.join(dir, F, 'leftovers.md'), 'utf8').replace(/<!-- before-release \/ after-release \/ wont-fix --> \| \|/g, 'after-release | later |');
+  const extra = '| L90 | verification | billing B1 | did not run | before-release | needs the old server |\n| L91 | flow | platform -> billing | no test | after-release | by hand |\n';
+  write(dir, `${F}/leftovers.md`, text.replace('\n\n<!-- Add', `\n${extra}\n<!-- Add`));
+  const ids = [...text.matchAll(/^\| (L\d+) \|/gm)].map((m) => m[1]);
+  assert.equal(ids.length, 7);
+  write(dir, `${F}/review.md`, `Reviewer: Uma\n\n${[...ids, 'L90', 'L91'].map((id) => `- [x] ${id} item`).join('\n')}\n- [x] H1 verdict\n`);
+  assert.deepEqual(checkReview(dir, 'finish').problems.filter((p) => !p.includes('target code changed')), []);
+  // The review page shows the path as written.
+  render({ root: dir, change: 'finish' });
+  assert.match(fs.readFileSync(path.join(dir, 'openspec/spec-relay/views/finish.html'), 'utf8'), /invoice_service\.py/);
+});
+
+test('a class changed in the review must match leftovers.md, level A always runs, and the change is named finish', () => {
+  const dir = finished(repo());
+  const review = path.join(dir, F, 'review.md');
+  fs.writeFileSync(review, fs.readFileSync(review, 'utf8').replace('L1 rounding - class: after-release', 'L1 rounding - class: before-release'));
+  has(checkReview(dir, 'finish'), 'review item L1 says class before-release, and leftovers.md says after-release');
+  finished(dir);
+  const checks = path.join(dir, F, 'checks.md');
+  fs.writeFileSync(checks, fs.readFileSync(checks, 'utf8').replace('| platform | pass |', '| platform | not-run: later |'));
+  has(checkReview(dir, 'finish'), 'level A of context platform is the new system');
+  finished(dir);
+  fs.cpSync(path.join(dir, F), path.join(dir, 'openspec/changes/wrap-up'), { recursive: true });
+  has(checkReview(dir, 'wrap-up'), 'is named finish (or finish-v<n>), not wrap-up');
+});
+
+test('the plan is read as status.mjs reads it; archived tables are found without their usual headings', () => {
+  const dir = repo();
+  write(dir, 'openspec/spec-relay/plan.md', '# Capabilities\n- [x] `billing/invoice`\n');
+  assert.deepEqual(checkFinishReady(dir), { ok: true, problems: [] });
+  write(dir, 'openspec/changes/archive/2026-11-02-target-design/verification.md', '## 検証レベル\n| コンテキスト | A | B1 | B2 | C |\n|---|---|---|---|---|\n| billing | 必須 | 実施 | 不要 | - |\n| platform | 必須 | - | - | - |\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/context-map.md', '### Context: platform\n\n### Context: billing\n\n## コンテキスト間のつながり\n| 上流 | 下流 | 型 | 経路 |\n|---|---|---|---|\n| platform | billing | open host | call |\n');
+  const facts = collect(dir);
+  assert.deepEqual(facts.levels, [{ context: 'billing', chosen: ['A', 'B1'] }, { context: 'platform', chosen: ['A'] }]);
+  assert.equal(facts.relations.length, 1);
+  write(dir, 'ts/empty/.keep', '');
+  fs.rmSync(path.join(dir, 'ts/billing'), { recursive: true });
+  fs.rmSync(path.join(dir, 'ts/empty'), { recursive: true });
+  assert.ok(collect(dir).problems.some((p) => p.includes('holds no files')));
 });
 
 test('follow-ups and levels are read from their sections only', () => {

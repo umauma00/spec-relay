@@ -24,19 +24,28 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  readIf, tableRows, plain, norm, contextIds, planCapabilities, archivedChange, baseName,
+  readIf, tableRows, plain, norm, contextIds, archivedChange, baseName,
   baselineHash, capabilitySegments, configValue, cleanValue, language, PLAN,
 } from './gate.mjs';
+// The plan is read exactly as status.mjs reads it, so "all ported" there and here agree.
+import { parsePlan } from './status.mjs';
+
+const planCapabilities = (text) => parsePlan(text ?? '').list.map((c) => c.capability);
 
 export const FINISH = 'finish';
 export const KINDS = ['todo', 'follow-up', 'risk', 'verification', 'flow'];
 export const CLASSES = ['before-release', 'after-release', 'wont-fix'];
 export const LEVELS = ['A', 'B1', 'B2', 'C'];
 export const MARKER = /TODO\(port\)/;
-// Folders that hold build output or local tools, never ported code. Used only
-// outside git; in a git repository the ignore rules decide.
-const BUILD_DIRS = new Set(['node_modules', 'bin', 'obj', 'target', 'build', 'dist', 'out', '__pycache__', '.venv', 'venv',
-  '.gradle', '.idea', '.vs', '.vscode', 'coverage', '.pytest_cache', '.mypy_cache', '.tox', '.next', '.turbo']);
+// Folders that only ever hold build output, packages or editor files: left out
+// everywhere, also when git does not ignore them (a target without a .gitignore).
+const TOOL_DIRS = new Set(['.git', 'node_modules', 'bin', 'obj', '__pycache__', '.venv', 'venv', '.gradle', '.idea', '.vs',
+  '.pytest_cache', '.mypy_cache', '.tox', '.next', '.turbo']);
+// Folder names that are usually build output but may be code; left out only
+// outside git, where no ignore rules decide.
+const BUILD_DIRS = new Set([...TOOL_DIRS, 'target', 'build', 'dist', 'out', '.vscode', 'coverage']);
+const FOLD = process.platform === 'win32' || process.platform === 'darwin';
+const fold = (s) => (FOLD ? s.toLowerCase() : s);
 const MAX_SCAN = 2 * 1024 * 1024;
 
 const stripComments = (text) => text.replace(/<!--[\s\S]*?-->/g, '');
@@ -78,39 +87,53 @@ export function targetFiles(root) {
   if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
   try { if (!fs.statSync(dir).isDirectory()) return null; } catch { return null; }
   const prefix = rel ? `${rel.split(path.sep).join('/')}/` : '';
-  const skip = (file) => /^(\.git|openspec|\.agents|\.github)(\/|$)/.test(file)
-    || (!prefix && source !== '.' && (file === source || file.startsWith(`${source}/`)));
-  const git = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', prefix || '.'], { cwd: base, encoding: 'buffer', windowsHide: true, maxBuffer: Infinity });
-  if (git.status === 0 && git.stdout) {
-    const top = spawnSync('git', ['rev-parse', '--show-cdup'], { cwd: base, encoding: 'utf8', windowsHide: true });
-    if (top.status === 0 && top.stdout.trim() === '') {
-      const listed = git.stdout.toString('utf8').split('\0').filter(Boolean);
-      return [...new Set(listed.filter((f) => !skip(f) && fs.existsSync(path.join(base, f))))].sort();
-    }
-  }
+  const skip = (file) => /^(\.git|openspec|\.agents|\.github)(\/|$)/i.test(file)
+    || file.slice(prefix.length).split('/').slice(0, -1).some((part) => TOOL_DIRS.has(part))
+    || (!prefix && source !== '.' && (fold(file) === fold(source) || fold(file).startsWith(`${fold(source)}/`)));
   const out = [];
-  const visit = (dirRel) => {
+  const visit = (dirRel, dirs) => {
     let entries = [];
     try { entries = fs.readdirSync(path.join(base, dirRel), { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
       const child = dirRel ? `${dirRel}/${e.name}` : e.name;
       if (skip(child)) continue;
-      if (e.isDirectory()) { if (!BUILD_DIRS.has(e.name)) visit(child); } else if (e.isFile()) out.push(child);
+      if (e.isDirectory()) { if (!dirs.has(e.name)) visit(child, dirs); } else if (e.isFile()) out.push(child);
     }
   };
-  visit(prefix.replace(/\/$/, ''));
-  return out.sort();
+  const git = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', prefix || '.'], { cwd: base, encoding: 'buffer', windowsHide: true, maxBuffer: Infinity });
+  if (git.status === 0 && git.stdout) {
+    const top = spawnSync('git', ['rev-parse', '--show-cdup'], { cwd: base, encoding: 'utf8', windowsHide: true });
+    if (top.status === 0 && top.stdout.trim() === '') {
+      const listed = git.stdout.toString('utf8').split('\0').filter(Boolean);
+      // A nested repository or submodule is listed as its folder: read what is on disk in it.
+      for (const f of listed.map((x) => x.replace(/\/$/, ''))) {
+        if (skip(f)) continue;
+        let stat;
+        try { stat = fs.statSync(path.join(base, f)); } catch { continue; }
+        if (stat.isDirectory()) visit(f, BUILD_DIRS); else out.push(f);
+      }
+      return [...new Set(out)].sort();
+    }
+  }
+  visit(prefix.replace(/\/$/, ''), BUILD_DIRS);
+  return [...new Set(out)].sort();
 }
 
 // sha256 over every target file's path and content, with CRLF read as LF so a
 // Windows checkout gives the same hash.
-export function targetHash(root, files = targetFiles(root)) {
+// A file that cannot be read (locked, too large) is reported in `problems`, so it
+// never hashes as a constant and lets a change through.
+export function targetHash(root, files = targetFiles(root), problems = []) {
   if (files === null) return null;
   const lines = files.map((f) => {
-    let data;
-    try { data = fs.readFileSync(path.join(root, f)); } catch { return `${f}\0?`; }
-    const text = data.includes(0) ? data : Buffer.from(data.toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
-    return `${f}\0${crypto.createHash('sha256').update(text).digest('hex')}`;
+    try {
+      const data = fs.readFileSync(path.join(root, f));
+      const text = data.includes(0) ? data : Buffer.from(data.toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
+      return `${f}\0${crypto.createHash('sha256').update(text).digest('hex')}`;
+    } catch (error) {
+      problems.push(`could not read ${f} under the target root (${error.code ?? error.message}); close the program that holds it and run again`);
+      return `${f}\0?`;
+    }
   });
   return crypto.createHash('sha256').update(lines.join('\n')).digest('hex');
 }
@@ -157,13 +180,26 @@ function portIsCurrent(root, capability) {
 }
 
 // The verification levels verification.md chose per context: { context, chosen: ['A', 'B1'] }.
-export function chosenLevels(text) {
-  const yes = /^(yes|y|true|on|required|x|✓|✔|○|◯|必須|あり|はい|する|使う)/i;
-  return tableRows(section(text, /^levels\b|^レベル|^方式/i)).filter(([context = '']) => plain(context))
+// The rows come from its Levels section, or from any table whose first cell is a
+// known context (what gate.mjs checked when the target design was reviewed).
+export function chosenLevels(text, contexts = null) {
+  const yes = /^(yes|y|true|on|required|✓|✔|○|◯|〇|必須|必要|要|あり|はい|する|使う|実施|採用)/i;
+  let rows = tableRows(section(text, /levels?\b|レベル|方式|比べ方/i));
+  if (contexts && !rows.some(([c = '']) => contexts.includes(plain(c).toLowerCase()))) rows = tableRows(text);
+  return rows.filter(([context = '']) => plain(context) && (!contexts || contexts.includes(plain(context).toLowerCase())))
     .map(([context, ...cells]) => ({
       context: plain(context).toLowerCase(),
       chosen: LEVELS.filter((level, i) => level === 'A' || yes.test(plain(cells[i] ?? ''))),
     }));
+}
+
+// The relationships of the context map: its Relationships section, or any table
+// row whose first two cells are both context ids.
+function relationsOf(map, contexts) {
+  const read = (rows) => rows.map(([upstream = '', downstream = '', pattern = '', channel = '']) => ({ upstream: plain(upstream), downstream: plain(downstream), pattern: plain(pattern), channel: plain(channel) }))
+    .filter((r) => contexts.includes(r.upstream.toLowerCase()) && contexts.includes(r.downstream.toLowerCase()));
+  const found = read(tableRows(section(map, /relationships?\b|関係/i)));
+  return found.length ? found : read(tableRows(map));
 }
 
 export function collect(root) {
@@ -175,9 +211,8 @@ export function collect(root) {
   if (!survey) problems.push('no archived survey change');
   if (!design) problems.push('no archived target-design change');
   const map = survey ? readIf(path.join(survey, 'context-map.md'), problems) ?? '' : '';
-  const relations = tableRows(section(map, /^relationships?\b|^関係/i))
-    .map(([upstream = '', downstream = '', pattern = '', channel = '']) => ({ upstream: plain(upstream), downstream: plain(downstream), pattern: plain(pattern), channel: plain(channel) }))
-    .filter((r) => r.upstream && r.downstream);
+  const contexts = contextIds(map);
+  const relations = relationsOf(map, contexts);
   const conventions = design ? readIf(path.join(design, 'conventions.md'), problems) ?? '' : '';
   const commands = tableRows(section(conventions, /^commands?\b|^コマンド/i))
     .map(([purpose = '', command = '']) => ({ purpose: plain(purpose), command: command.trim().replace(/^`(.*)`$/, '$1') }))
@@ -192,14 +227,16 @@ export function collect(root) {
     const text = readIf(path.join(port.dir, 'design.md'), problems) ?? '';
     for (const item of listItems(section(text, /^risks?\b|^リスク/i))) risks.push({ port: port.name, capability, text: item });
   }
+  if (files && files.length === 0) problems.push(`the target root "${rootValue(root, 'Target root')}" holds no files`);
+  const sha256 = files ? targetHash(root, files, problems) : null;
   return {
     ok: problems.length === 0,
-    target: { root: rootValue(root, 'Target root'), files: files?.length ?? 0, sha256: files ? targetHash(root, files) : null },
+    target: { root: rootValue(root, 'Target root'), files: files?.length ?? 0, sha256 },
     markers: files ? portMarkers(root, files) : [],
     followUps: planFollowUps(plan),
     risks,
-    contexts: contextIds(map),
-    levels: chosenLevels(verification),
+    contexts,
+    levels: chosenLevels(verification, contexts),
     relations,
     commands,
     problems,
@@ -241,16 +278,20 @@ export function checkFinishReady(root, { self } = {}) {
 // ---------------------------------------------------------------- the review gate
 
 const cell = (s) => norm(stripComments(s ?? '')).replace(/[.。]$/, '');
-const whereFile = (where) => relPath(plain(where).replace(/:\d+(?:-\d+)?$/, ''));
+const whereFile = (where) => relPath(where.replace(/:\d+(?:-\d+)?$/, ''));
+// A cell as written: comments and the table's `\|` escapes undone. Paths keep
+// every character (invoice_service.py, [id].tsx, (shop)/cart.tsx).
+const raw = (s) => stripComments(s ?? '').replace(/\\\|/g, '|').trim();
 
 export function leftoverRows(text) {
   return tableRows(text).map(([id = '', kind = '', where = '', what = '', klass = '', reason = '']) => ({
-    id: plain(id).toUpperCase(), kind: cell(kind), where: plain(stripComments(where)), what: plain(stripComments(what)), klass: cell(klass), reason: plain(stripComments(reason)),
+    id: plain(id).toUpperCase(), kind: cell(kind), where: raw(where).replace(/^`(.*)`$/, '$1').trim(), what: raw(what), klass: cell(klass), reason: raw(reason),
   })).filter((r) => r.id || r.kind || r.what);
 }
 
 // Called by gate.mjs review for a change of schema spec-relay-finish.
 export function checkFinish(root, change, dir, boxes, problems) {
+  if (baseName(change) !== FINISH) problems.push(`a change of schema spec-relay-finish is named ${FINISH} (or ${FINISH}-v<n>), not ${change}`);
   problems.push(...checkFinishReady(root, { self: change }).problems);
   const facts = collect(root);
   for (const p of facts.problems) if (!problems.includes(p)) problems.push(p);
@@ -285,6 +326,7 @@ export function checkFinish(root, change, dir, boxes, problems) {
       if (!value || value === '-' || value === '–') {
         if (wanted) problems.push(`context ${context} chose level ${level} in verification.md; record pass, fail or not-run: <reason> in checks.md`);
       } else if (/^fail/.test(value)) problems.push(`level ${level} of context ${context} failed; fix it through a port change and run the checks again`);
+      else if (/^not[- ]?run/.test(value) && level === 'A') problems.push(`level A of context ${context} is the new system's own scenario tests; they always run (record pass or fail)`);
       else if (/^not[- ]?run/.test(value)) {
         if (!hasRow('verification', (w) => new RegExp(`(^|\\W)${context}(?![\\w-])`).test(w) && new RegExp(`(^|\\W)${level.toLowerCase()}(?!\\w)`).test(w))) {
           problems.push(`level ${level} of context ${context} did not run; add a verification row "${context} ${level}" to leftovers.md`);
@@ -336,7 +378,11 @@ export function checkFinish(root, change, dir, boxes, problems) {
   }
   for (const box of boxes) {
     const id = box.plain.match(/^(L\d+)\b/i)?.[1]?.toUpperCase();
-    if (id && !ids.has(id)) problems.push(`review item ${id} has no row in leftovers.md`);
+    if (id && !ids.has(id)) { problems.push(`review item ${id} has no row in leftovers.md`); continue; }
+    // The class the person accepted is the one in leftovers.md.
+    const said = id && box.plain.match(/\bclass:\s*([\w-]+)/i)?.[1]?.toLowerCase();
+    const row = id && rows.find((r) => r.id === id);
+    if (said && row && CLASSES.includes(said) && said !== row.klass) problems.push(`review item ${id} says class ${said}, and leftovers.md says ${row.klass || 'nothing'}; make them the same`);
   }
 
   // handover.md
@@ -388,7 +434,8 @@ function draftChecks(facts) {
 function draftLeftovers(facts) {
   const lines = ['# Leftovers', '', '| ID | Kind | Where | What | Class | Reason |', '|---|---|---|---|---|---|'];
   let n = 0;
-  const esc = (s) => s.replace(/\|/g, '\\|');
+  // A marker inside an HTML or XML comment would end or open a comment in the table.
+  const esc = (s) => s.replace(/<!--|-->/g, ' ').replace(/\|/g, '\\|').trim();
   const row = (kind, where, what) => lines.push(`| L${n += 1} | ${kind} | ${where} | ${esc(what)} | <!-- before-release / after-release / wont-fix --> | |`);
   for (const m of facts.markers) row('todo', `\`${m.file}:${m.line}\``, m.text);
   for (const item of facts.followUps) row('follow-up', item.match(/^`([^`]+)`/)?.[1] ?? 'plan', item);
