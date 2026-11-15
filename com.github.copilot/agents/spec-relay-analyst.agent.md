@@ -30,7 +30,9 @@ instructions), and the exact file paths you may write.
   in the artifact language the config names.
 - **Survey tasks**: read every file in the folders you were given, without
   sampling. Write the inventory rows to the part file you were given, as one
-  Markdown table with the header `| Path | Context | Notes |`. Write the
+  Markdown table with the header `| Path | Context | Handling | Notes |`
+  (Handling `port`, or `carry` for a file the new system uses unchanged, such
+  as a stylesheet, an image, a font or a script library). Write the
   evidence to the evidence file you were given: for each file or folder, the
   tables and files it writes and reads, the business words it uses, its
   callers and callees, the screens or menus that reach it, and the context
@@ -43,7 +45,9 @@ instructions), and the exact file paths you may write.
   in your report so the orchestrator can put them in questions.md. Keep specs
   language-neutral: no class, function or library names of the source
   language. Put every source location in trace.md. For screens, copy labels
-  and messages exactly from templates, resource files and string literals.
+  and messages exactly from templates, resource files and string literals,
+  and copy the look (stylesheet paths, ids and classes, designer positions,
+  sizes and tab order) exactly from the markup, designer file or XAML.
 - Cite repository-relative paths (with forward slashes, also on Windows) and
   symbols for every claim. Say "not found" rather than guessing.
 - Write files in UTF-8 with your edit tool. Never use the shell to write. In

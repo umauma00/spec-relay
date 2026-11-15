@@ -23,7 +23,8 @@ unspecified behavior you found (below).
 - Before anything else, check that the baseline spec exists at
   `openspec/specs/<capability>/spec.md`. If it does not, stop and report it.
 - Write files only under the target root named in `openspec/config.yaml`, and
-  only inside the module of this capability's context and its tests. Use other
+  only inside the module of this capability's context and its tests, plus the
+  carried files design.md lists. Use other
   modules only through their public API or events (the archived target
   design's architecture.md), and follow its conventions.md.
   Never edit the source root, `openspec/specs/`, `openspec/spec-relay/lessons.md`
@@ -39,7 +40,12 @@ unspecified behavior you found (below).
   in design.md. Beyond that, even when it looks like an improvement, do not:
   - add a feature, screen, field, setting or API the spec does not have;
   - change a screen's layout, labels, messages, order or look beyond what
-    design.md's Screens section says, or make it "modern";
+    design.md's Screens section says for its policy, or make it "modern";
+  - edit a carried file: copy it byte for byte (a copy command, not your edit
+    tool, so the bytes stay the same; in PowerShell `Copy-Item -LiteralPath`,
+    which takes names like `[id].css` as they are), copy only the files
+    design.md's Carried files covers (a port file inside a carry folder is
+    not copied), and report a file that would need a change;
   - add or tighten input checks, error handling or retries, or add logging,
     in a way that changes what a user or caller sees;
   - fix behavior that looks wrong in the spec or the source code (report it:

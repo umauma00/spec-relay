@@ -67,7 +67,7 @@ test('the survey gate needs every kept file in a capability, and every listed pa
   for (const f of ['src/billing/invoice.php', 'src/common/db.php', 'src/vendor/lib.php']) write(dir, f, '<?php\n');
   write(dir, `${S}/.openspec.yaml`, 'schema: spec-relay-survey\n');
   write(dir, `${S}/context-map.md`, '### Context: platform\n\n### Context: billing\n');
-  write(dir, `${S}/inventory.md`, '| Path | Context | Notes |\n|---|---|---|\n| src/billing/ | billing | |\n| src/common/ | platform | |\n| src/vendor/ | excluded | |\n');
+  write(dir, `${S}/inventory.md`, '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/billing/ | billing | port | |\n| src/common/ | platform | port | |\n| src/vendor/ | excluded | | |\n');
   write(dir, `${S}/review.md`, 'Reviewer: Uma\n- [x] K1 platform\n- [x] K2 billing\n');
   write(dir, `${S}/capabilities.md`, '### platform\n1. `platform/db`\n\n### billing\n1. `billing/invoice`\n   - `src/billing`\n');
   const found = checkReview(dir, 'survey').problems;
