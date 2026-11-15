@@ -100,4 +100,6 @@ apply:
     - Write only inside this context's module and its tests; keep the module
       boundaries of architecture.md, and run the boundary check.
     - Leave a `TODO(port)` comment for anything unresolved and list it in your
-      report.
+      report. A stand-in for a capability that is not ported yet (a call into
+      the old system, a temporary fake) gets one too, so the finish step finds
+      it.

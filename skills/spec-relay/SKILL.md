@@ -17,6 +17,7 @@ The kit's own files are two directories above this skill:
 [scripts/gate.mjs](../../scripts/gate.mjs),
 [scripts/status.mjs](../../scripts/status.mjs),
 [scripts/merge.mjs](../../scripts/merge.mjs),
+[scripts/finish.mjs](../../scripts/finish.mjs),
 [scripts/doctor.mjs](../../scripts/doctor.mjs), `openspec-schemas/` and
 `docs/WORKFLOW.md`. `<kit>` below stands for the absolute path of that
 directory; resolve it from this file's own location (installed as a plugin it is
@@ -69,6 +70,13 @@ need the reasoning behind a step.
   `spec-relay-port`). Implements the baseline spec (step 5).
 - **Amend change**: `openspec/changes/amend-<capability>` (schema
   `spec-relay-amend`). Corrects a baseline spec that misread the source code.
+- **Finish change**: `openspec/changes/finish` (schema `spec-relay-finish`).
+  Once every capability is ported: the whole-system checks, the leftovers and
+  the hand-over report (step 6). Archiving it completes the migration.
+- **Follow-up**: work moved to after the migration (a suspected bug the
+  person wants fixed, an improvement). One top-level item per piece of work
+  under the plan's `## Follow-up` heading, starting with the backticked
+  capability when it belongs to one; the finish step collects them.
 - **Baseline spec**: `openspec/specs/<capability>/spec.md`, created when a
   reviewed extract change is archived.
 - **Plan**: `openspec/spec-relay/plan.md`, the capability list and order.
@@ -359,8 +367,9 @@ the domain, not the folders.
 4. After archiving, write the plan: copy capabilities.md's lists under a
    `## Capabilities` heading in `openspec/spec-relay/plan.md`, keeping the
    `### <context>` headings. `status.mjs` counts only the top-level items that
-   start with a backticked capability path; put other notes, such as follow-up
-   work, under another `##` heading.
+   start with a backticked capability path; put follow-up work under a
+   `## Follow-up` heading (see Words) and other notes under another `##`
+   heading.
 
 ## 2. Target design: decide how the new system is built
 
@@ -427,8 +436,8 @@ waves.
 
 Run the review (above) on `extract-<capability>`. Archiving makes the spec the
 baseline under `openspec/specs/`. A suspected bug the person chose to fix is
-not fixed during the migration: note it in the plan as follow-up work after the
-port.
+not fixed during the migration: add it to the plan's `## Follow-up` list (see
+Words); the finish step (step 6) lists it in the hand-over.
 
 ## 5. Implement: port the baseline spec
 
@@ -461,7 +470,9 @@ port.
 6. When every task is done and verified, run `node "<kit>/scripts/gate.mjs"
    port-done --change port-<capability>`, report the results, and archive the
    port change after the person agrees: `node "<kit>/scripts/openspec.mjs" archive port-<capability>
-   --yes`.
+   --yes`. Pass the implementers' `TODO(port)` lines on in the report; the
+   finish step collects them from the code.
+7. When this was the last capability of the plan, go on to step 6 (Finish).
 
 ## Amend: correct a baseline spec
 
@@ -482,6 +493,52 @@ fixing a bug, is never an amendment: it is follow-up work after the migration.
    implementation and records the new baseline hash (`gate.mjs port-done`
    fails until it does); an archived port gets a new port change
    (`port-<capability>-v<n>`).
+
+## 6. Finish: check the whole system and hand it over
+
+Once for the project, after the last port. Each port was checked alone; this
+step checks the new system as a whole, lists what the migration leaves open,
+and writes the report someone takes it over with. It writes no code and
+changes no behavior.
+
+1. Run `node "<kit>/scripts/finish.mjs" ready`. It passes when every
+   capability of the plan has an archived port against its current baseline
+   and no other change is open; otherwise do what `problems` says first.
+2. `node "<kit>/scripts/openspec.mjs" new change finish --schema
+   spec-relay-finish` (a second hand-over, after more ports: `finish-v2`),
+   then `node "<kit>/scripts/finish.mjs" draft --change finish`. The draft
+   writes checks.md and leftovers.md from the files: every `TODO(port)` under
+   the target root, every `## Follow-up` item of the plan, every risk of the
+   archived ports, the commands of conventions.md, the levels of
+   verification.md and the relationships of the context map. Never retype
+   these lists; run `finish.mjs collect` to see them again.
+3. **Checks.** Run every command of checks.md over the whole target root, and
+   every chosen verification level for every context, and write the results
+   as the schema says (`pass`, `fail`, `not-run: <reason>`). For each
+   cross-context flow, name the test that covers it, or `none`. A
+   failure is fixed, never accepted: show it to the person and fix it through
+   a new port change (`port-<capability>-v<n>`; `finish.mjs ready` then
+   waits for it), then run every check again. After the last run, write the
+   hash `node "<kit>/scripts/finish.mjs" hash` prints into checks.md.
+4. **Leftovers.** Add a `verification` row for each `not-run` level and a
+   `flow` row for each flow without a test. Propose a class and a reason for
+   every row: `before-release`, `after-release` or `wont-fix`. Fix nothing
+   here: a `TODO(port)` the person wants fixed now goes through a port change,
+   then the draft is made again (delete leftovers.md first).
+5. **Handover and review.** Write handover.md and review.md from their
+   instructions, validate (`node "<kit>/scripts/openspec.mjs" validate finish
+   --strict`) and run the review (above). Show the leftovers grouped by
+   class, so that the person can accept a whole class at once, and put the
+   `before-release` items first. `gate.mjs review --change finish` also fails
+   when the code changed after the checks, when a `TODO(port)` in the code has
+   no row or a row lists one that is gone, and when a plan follow-up is
+   missing.
+6. Archive after the person agrees. Archiving the finish change completes the
+   migration: report the verdict, the `before-release` items and the
+   "Before the switch" list of handover.md. Deployment, moving the data and
+   the switch from the old system to the new one are not part of the kit.
+   If code changes after that, `status.mjs` shows the finish step as open
+   again: run it again as `finish-v<n>`.
 
 ## Progress in the TODO list
 
@@ -582,7 +639,9 @@ person asks to skip a step, a review or a check:
   no archived target design - step 2. A capability's step: no extract change -
   not started; active extract change - step 3 or 4 (check review.md); archived
   extract - baseline exists; active port - step 5; archived port - ported; an
-  active amendment holds the capability in review.
+  active amendment holds the capability in review. When every capability is
+  ported: no finish change - step 6; active finish change - step 6 (check
+  review.md); archived finish change - the migration is complete.
 - `node "<kit>/scripts/status.mjs" --format markdown` shows every capability's
   phase in one table.
 - A project started on kit 0.1.0 has baselines but no survey or target design.

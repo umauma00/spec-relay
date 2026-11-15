@@ -3,7 +3,7 @@
 // OpenSpec itself does not stop `archive --yes` on unticked or missing items.
 //
 //   node gate.mjs review --change <change>                 before archiving a reviewed change
-//                                                          (survey, target-design, extract-*, amend-*)
+//                                                          (survey, target-design, extract-*, amend-*, finish)
 //   node gate.mjs port-ready --capability <capability>     before creating a port change
 //   node gate.mjs port-done --change port-<capability>     before archiving a port change
 //   node gate.mjs baseline --capability <capability>       the baseline hash a port records
@@ -26,6 +26,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkFinish } from './finish.mjs';
 
 // Same shapes OpenSpec 2.0.0 (and 1.17.0) counts as tasks and requirements, so the gate never
 // sees fewer items than `openspec instructions apply` or `openspec archive` do.
@@ -416,6 +417,7 @@ export function checkReview(root, change) {
   else if (schema === 'spec-relay-amend') { checkSurveyed(root, change, dir, 'amend', problems); checkAmend(dir, boxes, problems); }
   else if (schema === 'spec-relay-survey') checkSurvey(root, dir, boxes, problems);
   else if (schema === 'spec-relay-target') checkTarget(root, dir, boxes, problems);
+  else if (schema === 'spec-relay-finish') checkFinish(root, change, dir, boxes, problems);
   else problems.push(`schema ${schema} has no review gate`);
   return { ok: problems.length === 0, problems };
 }

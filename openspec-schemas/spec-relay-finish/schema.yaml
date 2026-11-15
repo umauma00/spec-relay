@@ -1,0 +1,137 @@
+name: spec-relay-finish
+version: 1
+description: spec-relay step 6 - once every capability is ported, check the whole new system, list what is left, and hand it over after a human review
+artifacts:
+  - id: checks
+    generates: checks.md
+    description: The whole-system checks, run once over the complete target root
+    template: checks.md
+    instruction: |
+      Prove that the new system as a whole still works after the last port.
+      Each port was checked alone; a later port can break an earlier one, and
+      no port checked the whole build.
+
+      Start from the draft `node "<kit>/scripts/finish.mjs" draft --change
+      <change>` writes (it never overwrites a file). Then:
+      - **Target**: keep the `Target: sha256:<hash>` line. It fingerprints
+        every file under the target root. After the last fix, run
+        `node "<kit>/scripts/finish.mjs" hash` and write the hash it prints:
+        `gate.mjs review` fails when the code changed after the checks.
+      - **Commands**: one row per command in the archived target design's
+        conventions.md (`## Commands`), run over the whole target root, in
+        PowerShell on Windows. Result is `pass` or `fail`; add the counts
+        (tests run, passed) and the date in Notes.
+      - **Verification levels**: one row per context. For each level the
+        archived target design's verification.md chose for it (A always), run
+        it again for every capability of that context together and write
+        `pass`, `fail` or `not-run: <reason>` (the source program could not be
+        run, for example). A level not chosen stays `-`. Every `not-run`
+        needs a `verification` row in leftovers.md.
+      - **Cross-context flows**: for each relationship in the archived
+        survey's context-map.md, the test that covers it (a test of the
+        downstream module that goes through the upstream module's public API
+        or event), or `none`. Every `none` needs a `flow` row in leftovers.md.
+      A failing check is not written down and accepted: fix it the way the
+      kit fixes any port (a new port change `port-<capability>-v<n>` when the
+      code must change), then run every check again.
+    requires: []
+
+  - id: leftovers
+    generates: leftovers.md
+    description: Everything the migration leaves open, each with a class the person decides
+    template: leftovers.md
+    instruction: |
+      List what is not finished, so that nothing is lost when the migration
+      is handed over. Start from the draft `finish.mjs draft` writes: it
+      collects, mechanically, every `TODO(port)` under the target root, every
+      item of the plan's `## Follow-up` section (suspected bugs and fixes the
+      person moved to after the migration) and every risk in the archived
+      port changes' design.md. Add a row for each `not-run` level and each
+      `none` flow of checks.md.
+
+      One table row per item, ids `L1`, `L2`, ... in order:
+      - **Kind**: `todo`, `follow-up`, `risk`, `verification` or `flow`.
+      - **Where**: `todo`: the file (`path` or `path:line`); `follow-up`: the
+        capability or `plan`; `risk`: the capability; `verification`: the
+        context and the level (`billing B1`); `flow`: `upstream -> downstream`.
+      - **What**: the item in one line. For `follow-up`, the plan's text as it
+        is, so the gate can match it.
+      - **Class**: your proposal, which the person decides in the review:
+        `before-release` (must be done before the new system replaces the old
+        one), `after-release` (a known issue to schedule later) or `wont-fix`
+        (accepted as it is). A risk the port already resolved is `wont-fix`
+        with the reason "resolved".
+      - **Reason**: why that class, in one line.
+      Do not fix anything here. Fixing a `TODO(port)` changes code: it goes
+      through a port change, and the draft is made again afterwards. A
+      behavior change (a suspected bug) is never part of the migration.
+    requires:
+      - checks
+
+  - id: handover
+    generates: handover.md
+    description: The report that hands the new system over
+    template: handover.md
+    instruction: |
+      Write the report a person reads to take over the new system. Say only
+      what checks.md proves; never claim more.
+      - **Verdict**: one or two sentences. With every chosen level passing:
+        "Migration complete: the new system passed <levels> for every
+        context." When a context has only level A, or a level did not run,
+        say so in the verdict itself, for example "Migration complete against
+        the reviewed specs; behavior was not compared with the source program
+        for <contexts>."
+      - **Migrated**: a table of context, capability and the port change(s)
+        that implemented it (`openspec/changes/archive/`).
+      - **How to build and run**: the commands from conventions.md and where
+        the configuration and environment variables are named (never a value
+        of a secret).
+      - **Verification**: per context, the levels that passed and the ones
+        that did not run, from checks.md.
+      - **Leftovers**: the count per class, and every `before-release` item
+        by id.
+      - **Not migrated**: the files the survey's inventory excluded, by
+        folder, with the reason.
+      - **Before the switch**: what the kit does not do and someone must
+        before the new system replaces the old one: moving the data,
+        configuration and secrets of each environment, deployment, a parallel
+        run, the way back. Write each as an open item; do not invent a plan.
+    requires:
+      - leftovers
+
+  - id: review
+    generates: review.md
+    description: Human review checklist of the hand-over
+    template: review.md
+    instruction: |
+      Build the checklist the HUMAN reviewer works through. Keep it short:
+      the person decides the leftovers' classes and accepts the verdict.
+      - Keep the `Reviewer:` line.
+      - Under `## 1. Checks`: `C1 The whole-system checks`.
+      - Under `## 2. Leftovers`: one checkbox per row of leftovers.md,
+        `- [ ] L<n> <what> - class: <class>`, with the same id.
+      - Under `## 3. Handover`: `H1 The verdict` and `H2 Before the switch`.
+      Do not tick any box. Only the reviewer decides.
+    requires:
+      - handover
+
+apply:
+  requires: [ review ]
+  tracks: review.md
+  instruction: |
+    Applying this change is the HUMAN REVIEW of the hand-over. It writes no
+    code.
+
+    Render the review page (`render.mjs --change <change>`) and give the
+    person its path. Walk the reviewer through review.md: the checks first,
+    then the leftovers grouped by class (the person may accept a whole class
+    at once), then the verdict.
+    - Tick a box only after the reviewer explicitly accepts that item in this
+      conversation, or when the reviewer ticked it themselves.
+    - When the reviewer changes a class, change it in leftovers.md and in the
+      review item, and render again.
+    - When the reviewer wants an item fixed before the hand-over, stop: the
+      fix goes through a port change, and the checks and the draft are made
+      again after it.
+    When every box is ticked and `gate.mjs review` passes, archive only after
+    the reviewer says so. Archiving the finish change completes the migration.

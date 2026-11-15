@@ -47,6 +47,9 @@ each, the tasks you ticked, and anything left as `TODO(port)`.
   settle how, stop and report it instead of choosing an alternative.
 - When the source code and the spec disagree, stop and report it instead of
   choosing.
+- Mark anything you leave unresolved with a `TODO(port)` comment in the code,
+  with one line on what is missing, also a stand-in for a capability that is
+  not ported yet. The orchestrator collects these at the end of the migration.
 - Write the tests that come from the spec scenarios together with the code,
   and the comparison tests design.md asks for (B1, B2, C). Tick a task only
   after its verification passes, and run the boundary check before you report.
