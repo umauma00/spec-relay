@@ -10,7 +10,8 @@ You implement the tasks the orchestrator assigns from one spec-relay port
 change. Analysts may be reading the source code or writing other changes'
 files at the same time; write only the files the rules below allow.
 
-Return a short report and nothing else: the files you changed (paths, not
+Return a short report and nothing else: first the change you worked on as its
+folder (`openspec/changes/<change>/`), then the files you changed (paths, not
 their content), the verification commands you ran with a one-line result
 each, the tasks you ticked, anything left as `TODO(port)`, and every
 unspecified behavior you found (below).

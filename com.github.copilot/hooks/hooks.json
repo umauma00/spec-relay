@@ -9,6 +9,22 @@
         "powershell": "node \"$env:PLUGIN_ROOT/scripts/hook.mjs\"; exit 0",
         "timeoutSec": 15
       }
+    ],
+    "subagentStart": [
+      {
+        "type": "command",
+        "bash": "node \"$PLUGIN_ROOT/scripts/metrics.mjs\" hook subagent-start || true",
+        "powershell": "node \"$env:PLUGIN_ROOT/scripts/metrics.mjs\" hook subagent-start; exit 0",
+        "timeoutSec": 10
+      }
+    ],
+    "subagentStop": [
+      {
+        "type": "command",
+        "bash": "node \"$PLUGIN_ROOT/scripts/metrics.mjs\" hook subagent-stop || true",
+        "powershell": "node \"$env:PLUGIN_ROOT/scripts/metrics.mjs\" hook subagent-stop; exit 0",
+        "timeoutSec": 10
+      }
     ]
   }
 }
