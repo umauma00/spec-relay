@@ -385,8 +385,9 @@ test('on Windows a tool installed by npm runs as node + its script', () => {
 });
 
 // The real machine, nothing replaced: in CI (Windows and Ubuntu) every tool the kit needs is installed.
-test('the real machine runs every check without an error', async () => {
-  const dir = setUpRepo();
+test('the real machine runs every check without an error', { timeout: 300000 }, async () => {
+  // In CI, a full setup: npm ci installs the pinned OpenSpec, so the openspec check can pass.
+  const dir = setUpRepo(process.env.CI ? SETUP.filter((a) => a !== '--skip-init') : SETUP);
   // A git repository, so the real path comparison (git's C:/... against a short 8.3 temp path) runs.
   const git = spawnSync('git', ['init', '-q'], { cwd: dir });
   const { code, json } = await doctor(['--target', dir, '--client', 'cli', '--json', '--lang', 'en']);
