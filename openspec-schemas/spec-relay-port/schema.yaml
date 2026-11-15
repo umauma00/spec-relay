@@ -51,7 +51,9 @@ artifacts:
       - **Screens**: For each screen in the extract change's screens.md
         (`openspec/changes/archive/*-extract-<capability>/screens.md`), its
         policy from ui.md, the target page or form, and how the design is
-        kept under that policy:
+        kept under that policy. If the archived target design has no ui.md
+        (made before kit 0.8.0), ask the person for each screen's policy and
+        write their answer under Decisions; never choose it yourself.
         - `same`: the markup keeps the structure and the ids and classes of
           Look details, the carried stylesheets, images and fonts are linked
           unchanged, and the page looks as it does today.
@@ -62,12 +64,14 @@ artifacts:
           transitions are still those of screens.md.
       - **Carried files**: a table `| Source | Target |` of the files this
         port copies unchanged: carry rows of the survey's inventory, placed
-        where ui.md's Carried files says. A folder row (ending in `/`) copies
-        the carry files below it; a target ending in `/` receives the file
+        exactly where ui.md's Carried files says. A folder row (ending in `/`)
+        copies the carry files below it (not the files a more specific
+        inventory row marks port); a target ending in `/` receives the file
         under its own name. `gate.mjs port-done` fails when a copy differs
-        from its source. A file that needs any edit is ported, not carried:
-        leave it out here and say why under Decisions. Write "None" when the
-        port carries nothing.
+        from its source (text may differ only in CRLF or LF line endings) or
+        goes elsewhere than ui.md says. A file that needs any edit is ported,
+        not carried: leave it out here and say why under Decisions. Keep the
+        heading and write "None" under it when the port carries nothing.
       - **Verification**: The levels verification.md sets for this context (A
         always; B1, B2, C as chosen) and what each covers here.
       - **Source references**: For each requirement, the source locations from

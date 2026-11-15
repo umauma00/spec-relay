@@ -97,7 +97,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   openspec(dir, 'new', 'change', 'survey', '--schema', 'spec-relay-survey');
   assert.deepEqual(keys(), ['survey', 'target']);
   fill(dir, 'survey', {
-    'inventory.md': '| Path | Context | Notes |\n|---|---|---|\n| src/ | calc | |\n',
+    'inventory.md': '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | calc | port | |\n',
     'context-map.md': '## Contexts\n\n### Context: platform\n- generic\n\n### Context: calc\n- core\n',
     'glossary.md': '# Glossary\n',
     'capabilities.md': '# Capabilities\n\n### calc\n1. `calc/add` 足し算\n',

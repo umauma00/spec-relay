@@ -39,7 +39,10 @@ each, the tasks you ticked, and anything left as `TODO(port)`.
   - change a screen's layout, labels, messages, order or look beyond what
     design.md's Screens section says for its policy, or make it "modern";
   - edit a carried file: copy it byte for byte (a copy command, not your edit
-    tool, so the bytes stay the same), and report it if it would need a change;
+    tool, so the bytes stay the same; in PowerShell `Copy-Item -LiteralPath`,
+    which takes names like `[id].css` as they are), copy only the files
+    design.md's Carried files covers (a port file inside a carry folder is
+    not copied), and report a file that would need a change;
   - add or tighten input checks, error handling or retries, or add logging,
     in a way that changes what a user or caller sees;
   - fix behavior that looks wrong in the spec or the source code (report it:

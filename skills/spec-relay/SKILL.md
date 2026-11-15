@@ -61,8 +61,8 @@ need the reasoning behind a step.
 - **Survey change**: `openspec/changes/survey` (schema `spec-relay-survey`).
   Maps every source file to a context and lists the capabilities (step 1).
 - **Target-design change**: `openspec/changes/target-design` (schema
-  `spec-relay-target`). Module structure, conventions and verification levels
-  of the new system (step 2).
+  `spec-relay-target`). Module structure, conventions, screens (ui.md) and
+  verification levels of the new system (step 2).
 - **Extract change**: `openspec/changes/extract-<capability>` (schema
   `spec-relay-extract`). Produces the baseline spec (steps 3-4).
 - **Port change**: `openspec/changes/port-<capability>` (schema
@@ -383,8 +383,9 @@ the domain, not the folders.
    never pick `new` yourself. Never write a password, token or connection
    string into a file; sign-in for B2 and C comes from environment variables
    the person sets. Write architecture.md first (yourself or one analyst),
-   then give conventions.md, ui.md and verification.md to three analysts in
-   one wave, with the person's answers in each task.
+   then give conventions.md and ui.md to two analysts in one wave, then
+   verification.md (it suggests level C from ui.md's policies), with the
+   person's answers in each task.
 3. Write review.md, validate, and run the review (above). While the person
    reviews the target design, start analyzing (step 3) the capabilities in
    `nextToAnalyze`: an extract change needs the archived survey, not the target
@@ -454,7 +455,10 @@ port.
    archived extract change's `trace.md` (and any later amendment's) into
    design.md. In design.md's Screens section, give each screen its policy from
    ui.md, and list under Carried files the carry files this port copies;
-   `gate.mjs port-done` compares each copy with its source.
+   `gate.mjs port-done` compares each copy with its source. If the archived
+   target design has no ui.md (it was made before kit 0.8.0), ask the person
+   for each screen's policy and record the answers under Decisions; never
+   choose one yourself.
 3. Show the person the design's structure, any additions to the conventions,
    the verification plan and open risks, and start implementing after they
    agree. Propose lessons from their corrections (see Lessons).

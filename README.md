@@ -179,9 +179,9 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 0.8.0 で、画面の見た目を引き継ぐ決まりが加わりました。調査の一覧に扱いの列（`port` か `carry`）、移行先の設計に `ui.md`、screens.md に見た目の出どころと詳細、port の design.md に画面ごとの方針と carry のファイルの欄があります。
 
 1. スキーマが変わったので、導入スクリプトは「キットの版と違う」と表示して止まります。`openspec/schemas/spec-relay-*` を削除してから、導入スクリプトをもう一度実行してください。
-2. archive 済みの調査はそのまま使えます。扱いの列がない一覧は、すべて `port` として読みます。CSS などを `carry` にしたいときは、調査をやり直します（`survey-v2`）。
+2. archive 済みの調査はそのまま使えます。扱いの列がない一覧は、すべて `port` として読みます。CSS などを `carry` にしたいときは、調査をやり直します（`survey-v2`）。進行中の調査は、inventory.md に扱いの列（`| Path | Context | Handling | Notes |`）を足さないと gate を通りません。分担して書いている途中の部分ファイルも同じ列にそろえてください。
 3. 進行中の target-design は、`ui.md` と review.md の `## 4. Screens`（コンテキストごとの `U<n>` と `U90`）を書き足さないと gate を通りません。archive 済みのときは、前の版の architecture.md・conventions.md・verification.md をそのまま写し、`ui.md` を足した `target-design-v2` を作ってレビューすると、以後の port が方針に従います。
-4. 進行中の extract の screens.md には、見た目の出どころと詳細を書き足すと、実装で見た目を再現しやすくなります（gate はこの欄を見ないので、なくても通ります）。
+4. 進行中の extract の screens.md には、見た目の出どころと詳細を書き足すと、実装で見た目を再現しやすくなります（gate はこの欄を見ないので、なくても通ります）。archive 済みの target-design に `ui.md` がないまま port を始めると、オーケストレーターは画面ごとの方針を人に聞いて design.md に記録します。
 
 ## 0.6.0 から更新するとき
 

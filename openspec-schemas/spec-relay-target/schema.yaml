@@ -104,10 +104,15 @@ artifacts:
         scaling (WinForms AutoScaleMode), supported browsers. For `layout`
         from desktop, how designer positions and sizes map to the target
         (pixels, a grid, or relative layout).
-      - **Carried files**: one row per carry row of the inventory, with the
-        same path, and the folder or file in the target root that receives it.
-        A carried file is copied unchanged; `gate.mjs port-done` compares the
-        copy with the source. Write "None" when nothing is carried.
+      - **Carried files**: a table `| Source | Target |` with one row per
+        carry row of the inventory, with the same path, and the folder or file
+        under the target root that receives it. A source folder (ending in
+        `/`) needs a target folder ending in `/`; a file sent to a folder also
+        ends the target with `/` and keeps its name. Never a target under
+        `openspec/` or on a source file. A carried file is copied unchanged
+        (text may differ only in CRLF or LF line endings); `gate.mjs
+        port-done` compares the copy with the source. Write "None" under the
+        heading when nothing is carried; keep the heading.
       - **Client-side scripts**: the script libraries carried as they are,
         the scripts that are ported, and why. What a script makes users see
         (validation, enabling items, calculations in the browser) is behavior
@@ -148,6 +153,7 @@ artifacts:
         (under the target root's tests), and how to re-record them.
     requires:
       - architecture
+      - ui
 
   - id: review
     generates: review.md
