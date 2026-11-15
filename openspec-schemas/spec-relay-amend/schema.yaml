@@ -1,6 +1,6 @@
 name: spec-relay-amend
 version: 1
-description: spec-relay amendment - correct a baseline spec that misread the source code, re-review only what changed, then update the ports that depend on it
+description: spec-relay amendment - correct a baseline spec that misread or left out what the source code does, re-review only what changed, then update the ports that depend on it
 artifacts:
   - id: reason
     generates: reason.md
@@ -55,6 +55,9 @@ artifacts:
       implements it (path:symbol:lines) and existing tests. For REMOVED
       requirements write "removed". Ports read this file together with the
       extract change's trace.md; this file wins for the requirements it lists.
+      `gate.mjs review` fails while a MODIFIED or ADDED requirement has no
+      row, a row names no `path:symbol` or `path:lines`, or a path does not
+      exist.
     requires:
       - specs
 
