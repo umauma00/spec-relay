@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { checkReview, checkPortReady, checkPortDone, baselineHash, archivedChange, sourceFiles, main, nextSteps, language } from '../scripts/gate.mjs';
+import { checkReview, checkPortReady, checkPortDone, baselineHash, archivedChange, sourceFiles, main, nextSteps, language, inventoryRows, inventoryRowFor } from '../scripts/gate.mjs';
 import { quiet } from './helpers.mjs';
 import { tempDir, write } from './helpers.mjs';
 
@@ -208,7 +208,7 @@ function survey({ inventory, review } = {}) {
   write(dir, '.agents/skills/openspec-explore/SKILL.md', '#');
   write(dir, '.agents/skills/.openspec-target', 'github-copilot\n');
   write(dir, `${SURVEY}/context-map.md`, '## Contexts\n\n### Context: platform\n- x\n\n### Context: billing\n- y\n');
-  write(dir, `${SURVEY}/inventory.md`, inventory ?? '| Path | Context | Notes |\n|---|---|---|\n| src/ | billing | |\n| src/common/db.php | platform | |\n| vendor/ | excluded | library |\n');
+  write(dir, `${SURVEY}/inventory.md`, inventory ?? '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | port | |\n| src/common/db.php | platform | port | |\n| vendor/ | excluded | | library |\n');
   write(dir, `${SURVEY}/capabilities.md`, '# Capabilities\n\n### platform\n1. `platform/db` DB\n\n### billing\n1. `billing/invoice` 請求書\n   - src/billing\n');
   write(dir, `${SURVEY}/review.md`, review ?? 'Reviewer: Uma\n\n- [x] K1 platform: 共通基盤\n- [x] K2 billing: 請求\n- [x] M1 map\n- [x] C1 coverage\n');
   return dir;
@@ -219,7 +219,7 @@ test('the survey gate checks contexts, the inventory and the capability list', (
   assert.deepEqual(sourceFiles(dir), ['src/billing/invoice.php', 'src/common/db.php', 'vendor/lib.php']);
   assert.deepEqual(checkReview(dir, 'survey'), { ok: true, problems: [] });
 
-  const missing = survey({ inventory: '| Path | Context | Notes |\n|---|---|---|\n| src/billing/ | billing | |\n| ./vendor/lib.php | excluded | |\n| src/x | shipping | |\n' });
+  const missing = survey({ inventory: '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/billing/ | billing | port | |\n| ./vendor/lib.php | excluded | | |\n| src/x | shipping | port | |\n' });
   const problems = checkReview(missing, 'survey').problems.join('\n');
   assert.match(problems, /source file not in the inventory: src\/common\/db.php/);
   assert.doesNotMatch(problems, /vendor/);
@@ -232,19 +232,24 @@ test('the survey gate checks contexts, the inventory and the capability list', (
   assert.match(caps, /"Billing" is not <context>\/<name>/);
 });
 
+const UI = '# UI\n\n## Screens\n| Context | Screens | Source kind | Target | Policy | Why |\n|---|---|---|---|---|---|\n| platform | all | PHP pages | Thymeleaf | same | |\n| billing | all | WinForms | React | layout | |\n| billing | printed reports | Crystal Reports | PDF | same | |\n\n## Carried files\nNone\n';
+const UI_BOXES = '- [x] U1 platform: screens\n- [x] U2 billing: screens\n- [x] U90 shared look\n';
+
 test('the target-design gate needs a module and verification levels for every context', () => {
   const dir = survey();
   fs.mkdirSync(path.join(dir, 'openspec/changes/archive'));
   fs.renameSync(path.join(dir, SURVEY), path.join(dir, 'openspec/changes/archive/2026-11-01-survey'));
   const T = 'openspec/changes/target-design';
   write(dir, `${T}/.openspec.yaml`, 'schema: spec-relay-target\n');
-  write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform: levels\n- [x] E2 `billing`: levels\n');
+  write(dir, `${T}/review.md`, `Reviewer: Uma\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform: levels\n- [x] E2 \`billing\`: levels\n${UI_BOXES}`);
+  write(dir, `${T}/ui.md`, UI);
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n');
   write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
   assert.deepEqual(checkReview(dir, 'target-design').problems, ['architecture.md has no module row for context billing']);
   write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A1 platform\n- [x] E1 platform\n');
   assert.match(checkReview(dir, 'target-design').problems.join(), /module of context billing has no review item/);
-  write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform: levels\n- [x] E2 `billing`: levels\n');
+  assert.match(checkReview(dir, 'target-design').problems.join(), /screen policy of context billing has no review item \(U<n> billing\)/);
+  write(dir, `${T}/review.md`, `Reviewer: Uma\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform: levels\n- [x] E2 \`billing\`: levels\n${UI_BOXES}`);
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| `billing` | ts/billing |\n');
   assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
 });
@@ -305,7 +310,7 @@ test('screens.md needs readable screen headings or only None', () => {
 });
 
 test('inventory paths keep their characters; a bad source root fails', () => {
-  const dir = survey({ inventory: '| Path | Context | Notes |\n|---|---|---|\n| `src/my_module/file_a.php` | billing | |\n| src/Copy (1).php | billing | |\n| src/[id].php | billing | |\n| src/billing/ | billing | |\n| src/common/ | platform | |\n| vendor/ | excluded | |\n' });
+  const dir = survey({ inventory: '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| `src/my_module/file_a.php` | billing | port | |\n| src/Copy (1).php | billing | port | |\n| src/[id].php | billing | port | |\n| src/billing/ | billing | port | |\n| src/common/ | platform | port | |\n| vendor/ | excluded | | |\n' });
   for (const f of ['src/my_module/file_a.php', 'src/Copy (1).php', 'src/[id].php']) write(dir, f, 'x');
   assert.deepEqual(checkReview(dir, 'survey'), { ok: true, problems: [] });
   for (const root of ['srcc', '../legacy', 'C:\\\\work\\\\legacy']) {
@@ -488,4 +493,133 @@ test('plan capabilities come from the capability list only, and no capability ma
   write(v, 'openspec/changes/extract-billing-api-v2/specs/billing/api-v2/spec.md', SPEC);
   write(v, 'openspec/changes/extract-billing-api-v2/review.md', GOOD);
   assert.match(checkReview(v, 'extract-billing-api-v2').problems.join(), /capability billing\/api-v2 ends like a rerun suffix/);
+});
+
+test('inventory handling is port or carry, never carry for excluded', () => {
+  const ok = survey({ inventory: '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | port | |\n| src/common/db.php | platform | carry | |\n| vendor/ | excluded | | library |\n' });
+  assert.deepEqual(checkReview(ok, 'survey'), { ok: true, problems: [] });
+  const bad = survey({ inventory: '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | copy | |\n| src/common/db.php | platform | port | |\n| vendor/ | excluded | carry | library |\n' });
+  const problems = checkReview(bad, 'survey').problems.join('\n');
+  assert.match(problems, /inventory row "src\/" has the handling "copy"; use port or carry/);
+  assert.match(problems, /inventory row "vendor\/" is excluded and carry at once/);
+  // A column order other than the template's is read by its header.
+  const moved = survey({ inventory: '| Context | Path | Notes | Handling |\n|---|---|---|---|\n| billing | src/ | | carry |\n| platform | src/common/db.php | | |\n| excluded | vendor/ | | |\n' });
+  assert.deepEqual(checkReview(moved, 'survey'), { ok: true, problems: [] });
+  assert.deepEqual(inventoryRowFor(inventoryRows('| Path | Context | Handling |\n|---|---|---|\n| src/ | billing | carry |\n| src/a/ | billing | port |\n| src/a/x.css | billing | carry |\n'), 'src/a/y.css').handling, 'port');
+});
+
+test('the target-design gate needs ui.md: a row and a valid policy per context, a place for each carry row', () => {
+  const dir = survey({ inventory: '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | port | |\n| src/common/db.php | platform | carry | |\n| vendor/ | excluded | | |\n' });
+  fs.mkdirSync(path.join(dir, 'openspec/changes/archive'));
+  fs.renameSync(path.join(dir, SURVEY), path.join(dir, 'openspec/changes/archive/2026-11-01-survey'));
+  const T = 'openspec/changes/target-design';
+  write(dir, `${T}/.openspec.yaml`, 'schema: spec-relay-target\n');
+  write(dir, `${T}/review.md`, `Reviewer: Uma\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform\n- [x] E2 billing\n${UI_BOXES}`);
+  write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| billing | ts/billing |\n');
+  write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
+  assert.match(checkReview(dir, 'target-design').problems.join(), /ui\.md is missing/);
+  write(dir, `${T}/ui.md`, UI.replace('| billing | all | WinForms | React | layout | |\n| billing | printed reports | Crystal Reports | PDF | same | |\n', '').replace('| same |', '| pixel |'));
+  const problems = checkReview(dir, 'target-design').problems;
+  assert.ok(problems.includes('ui.md has no screens row for context billing'), problems.join('\n'));
+  assert.ok(problems.includes('ui.md gives context platform the policy "pixel"; use same, layout, new or none'), problems.join('\n'));
+  assert.ok(problems.includes('ui.md has no "## Carried files" row for the inventory\'s carry row "src/common/db.php"'), problems.join('\n'));
+  write(dir, `${T}/ui.md`, UI.replace('## Carried files\nNone\n', '## Carried files\n| Source | Target |\n|---|---|\n| `src/common/db.php` | ts/static/ |\n'));
+  assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
+  write(dir, `${T}/ui.md`, '# UI\n\n## Screens\n| Context | Screens |\n|---|---|\n| platform | all |\n| billing | all |\n\n## Carried files\n| Source | Target |\n|---|---|\n| src/common/db.php | ts/ |\n');
+  assert.match(checkReview(dir, 'target-design').problems.join(), /no Policy column/);
+});
+
+test('port-done compares carried files with their source, placed where ui.md says', () => {
+  const dir = tempDir();
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only; only openspec/ and the target root may change): .\n  Target root (new implementation): web\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/inventory.md', '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | port | |\n| public/css/ | platform | carry | |\n| public/css/print.css | platform | port | |\n| public/logo.png | platform | carry | |\n| public/app.js | platform | port | |\n');
+  write(dir, 'openspec/changes/archive/2026-11-02-target-design/ui.md', '## Carried files\n| Source | Target |\n|---|---|\n| public/css/ | web/static/css/ |\n| public/logo.png | web/static/ |\n');
+  write(dir, 'public/css/site.css', 'body{color:red}\n');
+  write(dir, 'public/css/sub/grid.css', 'td{}\n');
+  write(dir, 'public/css/print.css', '@media print{}\n');
+  fs.writeFileSync(path.join(dir, 'public/logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 13, 10]));
+  write(dir, 'public/app.js', 'x()\n');
+  write(dir, 'openspec/specs/calc/spec.md', SPEC);
+  write(dir, 'openspec/changes/port-calc/tasks.md', '- [x] 1.1 copy\n');
+  write(dir, 'openspec/changes/port-calc/proposal.md', `## Baseline\n- \`calc\` sha256:${baselineHash(dir, 'calc')}\n`);
+  const design = (rows, heading = '## Carried files') => write(dir, 'openspec/changes/port-calc/design.md', `## Screens\nNone\n\n${heading}\n<!--\n## not a heading\n-->\n| Source | Target |\n|---|---|\n${rows}\n## Decisions\n- print.css is ported\n`);
+  design('| public/css/ | web/static/css/ |\n| `public/logo.png` | web/static/ |\n');
+  let problems = checkPortDone(dir, 'port-calc').problems.join('\n');
+  assert.match(problems, /carried file public\/css\/site.css is missing at web\/static\/css\/site.css/);
+  assert.match(problems, /carried file public\/css\/sub\/grid.css is missing at web\/static\/css\/sub\/grid.css/);
+  assert.doesNotMatch(problems, /print\.css/, 'a more specific port row wins over the carry folder');
+  assert.match(problems, /carried file public\/logo.png is missing at web\/static\/logo.png/);
+  write(dir, 'web/static/css/site.css', 'body{color:red}\r\n');
+  write(dir, 'web/static/css/sub/grid.css', 'td{}\n');
+  fs.writeFileSync(path.join(dir, 'web/static/logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 10]));
+  problems = checkPortDone(dir, 'port-calc').problems;
+  assert.deepEqual(problems, ['carried file web/static/logo.png differs from public/logo.png; a carried file is copied unchanged (port it instead if it needs an edit)'], 'CRLF counts as the same text; a binary must match byte for byte');
+  fs.writeFileSync(path.join(dir, 'web/static/logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 13, 10]));
+  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  // A heading with a closing ## and a number still counts.
+  design('| public/css/ | web/static/css/ |\n', '## 2. Carried files ##');
+  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  write(dir, 'web/static/css/site.css', 'body{color:blue}\n');
+  assert.match(checkPortDone(dir, 'port-calc').problems.join(), /web\/static\/css\/site.css differs from public\/css\/site.css/);
+  design('| public/app.js | web/static/ |\n| public/css/ | ../elsewhere/ |\n| public/logo.png | static/ |\n| public/css/site.css | web/other/ |\n| public/css | web/static/css/ |\n| public/logo.png | openspec/x/ |\n| public/logo.png | web/static |\n');
+  problems = checkPortDone(dir, 'port-calc').problems.join('\n');
+  assert.match(problems, /carried file public\/app.js is not a carry row in the inventory/);
+  assert.match(problems, /leaves the repository/);
+  assert.match(problems, /the target static\/ is outside the target root web/);
+  assert.match(problems, /public\/css\/site.css goes to web\/other\/site.css, but ui.md places it at web\/static\/css\/site.css/);
+  assert.match(problems, /"public\/css" is a folder; end it with \//);
+  assert.match(problems, /the target openspec\/x\/ is inside openspec\/ or .git/);
+  assert.match(problems, /public\/logo.png goes to web\/static, but ui.md places it at web\/static\/logo.png/);
+  design('| None | |\n');
+  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  // Only the first table is read; "## 1) " numbering counts too.
+  design('| public/logo.png | web/static/ |\n\n| Not copied | Why |\n|---|---|\n| public/css/print.css | ported |\n', '## 1) Carried files');
+  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  design('| . | web/ |\n');
+  assert.match(checkPortDone(dir, 'port-calc').problems.join(), /"\." is a folder; end it with \/|not a carry row/);
+  // A target root written in another case still keeps the copies out of the source files.
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only; only openspec/ and the target root may change): .\n  Target root (new implementation): Web\n');
+  design('| public/css/ | web/static/css/ |\n| public/logo.png | web/static/ |\n');
+  write(dir, 'web/static/css/site.css', 'body{color:red}\n');
+  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only; only openspec/ and the target root may change): .\n  Target root (new implementation): web\n');
+  // A renamed or missing section cannot skip the check while ui.md carries files.
+  design('| public/css/ | web/static/css/ |\n', '## 引き継ぐファイル');
+  assert.match(checkPortDone(dir, 'port-calc').problems.join(), /design.md has no "## Carried files" section/);
+  write(dir, 'openspec/changes/port-calc/design.md', '## Screens\nNone\n');
+  assert.match(checkPortDone(dir, 'port-calc').problems.join(), /design.md has no "## Carried files" section/);
+});
+
+test('the survey needs the Handling column; translated headers are read by name', () => {
+  const old = survey({ inventory: '| Path | Context | Notes |\n|---|---|---|\n| src/ | billing | |\n| src/common/db.php | platform | |\n| vendor/ | excluded | |\n' });
+  assert.match(checkReview(old, 'survey').problems.join(), /without the Handling column/);
+  const summary = survey({ inventory: '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | port | |\n| src/common/db.php | platform | port | |\n| vendor/ | excluded | | |\n\n| Context | Files |\n|---|---|\n| billing | 1 |\n' });
+  assert.deepEqual(checkReview(summary, 'survey'), { ok: true, problems: [] }, 'a summary table without a Path column is not an inventory table');
+  const ja = survey({ inventory: '| パス | コンテキスト | 扱い（port / carry） | メモ |\n|---|---|---|---|\n| src/ | billing | carry | |\n| src/common/db.php | platform | port | |\n| vendor/ | excluded | | |\n' });
+  assert.deepEqual(checkReview(ja, 'survey'), { ok: true, problems: [] });
+  assert.equal(inventoryRows('| パス | コンテキスト | 扱い（port / carry） |\n|---|---|---|\n| src/ | billing | carry |\n')[0].handling, 'carry');
+});
+
+test('ui.md carried files must be carry rows placed inside the target root', () => {
+  const dir = survey({ inventory: '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | port | |\n| src/common/ | platform | carry | |\n| vendor/ | excluded | | |\n' });
+  fs.mkdirSync(path.join(dir, 'openspec/changes/archive'));
+  fs.renameSync(path.join(dir, SURVEY), path.join(dir, 'openspec/changes/archive/2026-11-01-survey'));
+  const T = 'openspec/changes/target-design';
+  write(dir, `${T}/.openspec.yaml`, 'schema: spec-relay-target\n');
+  write(dir, `${T}/review.md`, `Reviewer: Uma\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform\n- [x] E2 billing\n${UI_BOXES}`);
+  write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| billing | ts/billing |\n');
+  write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
+  const ui = (carried) => write(dir, `${T}/ui.md`, UI.replace(/## Carried files\n[\s\S]*$/, `## Carried files\n| Source | Target |\n|---|---|\n${carried}`).replace('| Policy |', '| 方針 (same / layout / new / none) |'));
+  ui('| src/common/ | ts/static |\n| src/billing/ | ts/static/ |\n');
+  let problems = checkReview(dir, 'target-design').problems.join('\n');
+  assert.match(problems, /the source src\/common\/ is a folder, so the target ts\/static must end in \//);
+  assert.match(problems, /row "src\/billing\/" is not a carry row of the inventory/);
+  ui('| src/common/ | openspec/static/ |\n');
+  assert.match(checkReview(dir, 'target-design').problems.join(), /outside the target root ts|inside openspec/);
+  ui('| src/common/ | |\n');
+  assert.match(checkReview(dir, 'target-design').problems.join(), /has no target/);
+  ui('| src/common/ | TS/static/ |\n');
+  assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] }, 'the target root compares without case, as Windows does');
+  write(dir, `${T}/ui.md`, UI.replace(/## Carried files\n[\s\S]*$/, ''));
+  assert.match(checkReview(dir, 'target-design').problems.join(), /no "## Carried files" section, but the inventory marks files carry/);
 });
