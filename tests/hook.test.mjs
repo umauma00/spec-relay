@@ -14,7 +14,7 @@ const SPEC = '## ADDED Requirements\n\n### Requirement: Add two numbers\nThe sys
 function project({ hooks = 'on', source = 'src', target = 'ts' } = {}) {
   const dir = tempDir();
   write(dir, 'openspec/config.yaml', `# spec-relay: managed by scripts/setup.mjs. Edit the values; keep this line.\nschema: spec-relay-extract\n\ncontext: |\n  Source root (read-only; only openspec/ and the target root may change): ${source}\n  Target root (new implementation): ${target}\n  Artifact language: ja\n  Hook enforcement (on or off; on denies archives that fail the gate and agent writes to protected files): ${hooks}\n`);
-  write(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md', '1. `billing/invoice`\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md', '1. `billing/invoice`\n   - `src/`\n');
   const C = 'openspec/changes/extract-billing-invoice';
   write(dir, `${C}/.openspec.yaml`, 'schema: spec-relay-extract\n');
   write(dir, `${C}/specs/billing/invoice/spec.md`, SPEC);

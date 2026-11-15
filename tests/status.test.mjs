@@ -37,6 +37,7 @@ function repo({ plan = PLAN, review = '- [x] R1 a\n- [ ] R2 b\n- [ ] Q1 c decisi
   write(dir, 'openspec/changes/archive/2026-11-02-port-common-base/tasks.md', '- [x] 1.1 done\n');
   // The survey and the target design are done.
   write(dir, 'openspec/changes/archive/2026-10-30-survey/context-map.md', '### Context: billing\n');
+  write(dir, 'openspec/changes/archive/2026-10-30-survey/capabilities.md', '### billing\n1. `billing/invoice`\n   - `src/`\n');
   write(dir, 'openspec/changes/archive/2026-10-31-target-design/architecture.md', '# a\n');
   // billing/invoice: analyzed, under review.
   write(dir, `${EXTRACT}/.openspec.yaml`, 'schema: spec-relay-extract\n');

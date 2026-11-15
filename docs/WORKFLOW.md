@@ -64,7 +64,7 @@ capability ごとの元ファイルは、capabilities.md（archive 後は plan.m
 | 解析の `gate.mjs review` | source-map.md に、plan がその capability に割り当てたファイルがすべてある。source-map と trace に書いたパスが存在する。すべての要件に trace の行がある |
 | `gate.mjs coverage` | plan 全体で上の2つ。調査のあとに増えたファイル。まだ解析していない capability の一覧 |
 
-解析担当が「このファイルは別の capability のもの」と報告したら、オーケストレーターが plan.md の行を移し、`gate.mjs coverage` で確かめます。ファイルの中の動作（分岐や例外など）の抜けは、この確認では分かりません。
+解析担当が「このファイルは別の capability のもの」と報告したら、オーケストレーターが plan.md の行を移し、`gate.mjs coverage` で確かめます。移した先の capability の extract がすでに archive 済みなら、そのファイルの動作は修正（amend）で仕様に足し、その change に移したファイルを書いた source-map.md を置きます。plan に元ファイルを書いていない capability は、調査の capabilities.md の割り当てを使います。どちらにも書いていない capability は gate が止めます。ファイルの中の動作（分岐や例外など）の抜けは、この確認では分かりません。
 
 ### 工程 2：移行先の設計（target-design）の成果物
 
@@ -116,7 +116,7 @@ port は動作を変えないので、spec の差分を持ちません（`skip_s
 
 ### 修正（amend）
 
-実装中などに、ベースライン仕様が元コードの動きを読み違えていた、または書き漏らしていたと分かったときの手順です。実装担当は、元コードにあって仕様にない動作を見つけると、作らずに「仕様にない動作」として報告します。人が仕様の漏れと認めたら、ADDED の修正で仕様に足してから実装します。OpenSpec の差分（MODIFIED・ADDED・REMOVED）で直す要件だけを書き、AI の照合と人のレビューを受けて archive すると、ベースラインに反映されます。
+実装中などに、ベースライン仕様が元コードの動きを読み違えていた、または書き漏らしていたと分かったときの手順です。実装担当は、元コードにあって仕様にない動作を見つけると、作らずに「仕様にない動作」として報告します。オーケストレーターはそれを port の tasks.md に未チェックのタスク（`## Unspecified behavior` の `U<n>`）として記録するので、決着するまで `gate.mjs port-done` は通りません。人が仕様の漏れと認めたら、ADDED の修正で仕様に足してから実装します。OpenSpec の差分（MODIFIED・ADDED・REMOVED）で直す要件だけを書き、AI の照合と人のレビューを受けて archive すると、ベースラインに反映されます。
 
 | 成果物 | 中身 |
 |---|---|

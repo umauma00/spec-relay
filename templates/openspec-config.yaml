@@ -22,7 +22,8 @@ context: |
   Extract changes (schema spec-relay-extract) describe current behavior of the
   source code. Port changes (schema spec-relay-port) implement archived
   baseline specs in the target language without changing behavior. Amend
-  changes (schema spec-relay-amend) correct a baseline that misread the code.
+  changes (schema spec-relay-amend) correct a baseline that misread or left
+  out what the code does.
 
 rules:
   specs:

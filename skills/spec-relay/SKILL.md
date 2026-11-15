@@ -68,7 +68,8 @@ need the reasoning behind a step.
 - **Port change**: `openspec/changes/port-<capability>` (schema
   `spec-relay-port`). Implements the baseline spec (step 5).
 - **Amend change**: `openspec/changes/amend-<capability>` (schema
-  `spec-relay-amend`). Corrects a baseline spec that misread the source code.
+  `spec-relay-amend`). Corrects a baseline spec that misread or left out what
+  the source code does.
 - **Baseline spec**: `openspec/specs/<capability>/spec.md`, created when a
   reviewed extract change is archived.
 - **Plan**: `openspec/spec-relay/plan.md`, the capability list and order.
@@ -368,6 +369,9 @@ the domain, not the folders.
    analyst reports that a file belongs to another capability, move its path
    there (a file path under the other capability wins over a folder), tell
    the person in one line, and run `node "<kit>/scripts/gate.mjs" coverage`.
+   If that capability's extract is already archived, its behavior reaches the
+   spec through an amendment of that capability whose change also holds a
+   source-map.md with the moved file (same table as the extract's).
    It fails while a kept source file belongs to no capability, a listed path
    has no file, or an analyzed capability's source map lacks one of its files,
    and it lists the capabilities not analyzed yet. Run it also after the last
@@ -474,10 +478,16 @@ port.
    the spec misread the source code, propose an amendment (below).
    The implementer also reports unspecified behavior: something the original
    code does that the spec does not mention. Nothing ports it, so it would
-   vanish from the new system. Show each one to the person with its source
-   line, and propose an amendment that adds it (`## ADDED Requirements`) when
-   the person agrees the spec missed it. Port the tasks that do not depend on
-   it meanwhile; the port of that behavior waits for the archived amendment.
+   vanish from the new system. Record each one at once as an unticked task
+   under `## Unspecified behavior` in the port's tasks.md (`- [ ] U<n>
+   <path:line>: <what it does>`), so `gate.mjs port-done` stops until it is
+   settled. Show each one to the person with its source line, and propose an
+   amendment that adds it (`## ADDED Requirements`) when the person agrees the
+   spec missed it. Tick the task when the person decides it is not behavior to
+   keep, or when the amendment is archived and the behavior is ported. Port
+   the tasks that do not depend on it meanwhile. When the behavior is in a file
+   the plan assigns to another capability, it belongs to that capability's
+   spec instead.
 6. When every task is done and verified, run `node "<kit>/scripts/gate.mjs"
    port-done --change port-<capability>`, report the results, and archive the
    port change after the person agrees: `node "<kit>/scripts/openspec.mjs" archive port-<capability>

@@ -1,6 +1,6 @@
 name: spec-relay-amend
 version: 1
-description: spec-relay amendment - correct a baseline spec that misread the source code, re-review only what changed, then update the ports that depend on it
+description: spec-relay amendment - correct a baseline spec that misread or left out what the source code does, re-review only what changed, then update the ports that depend on it
 artifacts:
   - id: reason
     generates: reason.md

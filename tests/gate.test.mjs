@@ -18,7 +18,7 @@ const TRACE = '| Requirement | Source | Existing tests |\n|---|---|---|\n| Add t
 
 // The archived survey that lists the capability the fixtures review.
 function surveyed(dir, caps = ['calc']) {
-  write(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md', `# Capabilities\n\n${caps.map((c, i) => `${i + 1}. \`${c}\``).join('\n')}\n`);
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md', `# Capabilities\n\n${caps.map((c, i) => `${i + 1}. \`${c}\`\n   - \`src/\``).join('\n')}\n`);
   return dir;
 }
 
@@ -269,6 +269,10 @@ test('the amend gate: a reason, review items for the delta, crosscheck except fo
   assert.deepEqual(checkReview(dir, 'amend-calc'), { ok: true, problems: [] });
   write(dir, `${A}/review.md`, 'Reviewer: Uma\n- [x] R1 Add two numbers\n');
   assert.match(checkReview(dir, 'amend-calc').problems.join(), /no review item: "Reject text"/);
+  // The trace covers the delta, except REMOVED requirements.
+  write(dir, `${A}/review.md`, 'Reviewer: Uma\n- [x] R1 Add two numbers\n- [x] R2 Reject text\n');
+  write(dir, `${A}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Reject text | removed | |\n');
+  assert.deepEqual(checkReview(dir, 'amend-calc').problems, ['requirement has no trace row: "Add two numbers"']);
 });
 
 test('archived changes: the newest by date and rerun number', () => {
@@ -436,7 +440,7 @@ test('an extract or amend review needs the archived survey, a listed capability 
   const unlisted = surveyed(repo(GOOD), ['billing/invoice']);
   assert.match(checkReview(unlisted, 'extract-calc').problems.join(), /capability calc is not in the archived survey's capabilities.md or in openspec\/spec-relay\/plan.md/);
   // A capability added to the plan after the survey counts.
-  write(unlisted, 'openspec/spec-relay/plan.md', '# Plan\n\n## Capabilities\n\n1. `billing/invoice`\n2. `calc` added later\n');
+  write(unlisted, 'openspec/spec-relay/plan.md', '# Plan\n\n## Capabilities\n\n1. `billing/invoice`\n2. `calc` added later\n   - `src/calc.php`\n');
   assert.deepEqual(checkReview(unlisted, 'extract-calc'), { ok: true, problems: [] });
 
   const renamed = repo(GOOD);
