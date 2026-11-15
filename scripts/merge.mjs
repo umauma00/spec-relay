@@ -5,7 +5,10 @@
 //   node merge.mjs --into <artifact.md> --parts <file-or-folder> [--parts ...] [--clean] [--root DIR]
 //
 // Used for the survey's inventory.md (rows keyed by path) and for crosscheck.md
-// (a table whose first column is `Item`, rows keyed by R<n> / S<n>).
+// (a table whose first column is `Item`, rows keyed by R<n> / S<n>). A port
+// change's crosscheck.md also gets a stamp with the hash of the target code it
+// was merged on (`<!-- spec-relay: code checked sha256:... -->`), which
+// gate.mjs port-done compares with the code as it is.
 // - --into is an artifact of an active change: openspec/changes/<change>/<name>.md,
 //   never review.md. When it does not exist yet, it starts from the change
 //   schema's template of the same name. Its first table keeps its header and the
@@ -28,7 +31,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readIf, changeSchema, plain, norm } from './gate.mjs';
+import { readIf, changeSchema, plain, norm, targetHash, CODE_STAMP } from './gate.mjs';
 
 const SEPARATOR = /^\s*\|?\s*:?-{2,}/;
 const cellsOf = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
@@ -188,7 +191,17 @@ export function merge(root, { into, parts, clean = false }) {
     while (head.length && head.at(-1).trim() === '') head.pop();
     if (head.length) head.push('');
   }
-  const out = [...head, table.header, table.separator, ...sorted, ...lines.slice(table.end)];
+  // A port's crosscheck is about the code as it is now: stamp it with the target
+  // hash, so gate.mjs port-done fails when the code changes after the check.
+  const stamped = changeSchema(path.dirname(target)) === 'spec-relay-port' && path.basename(into).toLowerCase() === 'crosscheck.md';
+  const kept = (list) => (stamped ? list.filter((line) => !CODE_STAMP.test(line)) : list);
+  const stamp = stamped ? [`<!-- spec-relay: code checked sha256:${targetHash(root)} -->`, ''] : [];
+  const top = kept(head);
+  const at = top.findIndex((line) => /^#\s/.test(line));
+  const rest = top.slice(at + 1);
+  while (rest.length && rest[0].trim() === '') rest.shift();
+  const before = !stamped ? top : at >= 0 ? [...top.slice(0, at + 1), '', ...stamp, ...rest] : [...stamp, ...rest];
+  const out = [...before, table.header, table.separator, ...sorted, ...kept(lines.slice(table.end))];
   let text = out.join(eol);
   if (!text.endsWith(eol)) text += eol;
   try {

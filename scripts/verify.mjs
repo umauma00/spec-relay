@@ -12,11 +12,14 @@
 // - the boundary check: the Boundary check command of conventions.md;
 // - each comparison level (B1, B2, C) that the archived verification.md chose for
 //   the capability's context: the command design.md's Verification table gives it.
-// Then writes openspec/changes/<change>/verify.json:
+// They stop at the first failure. Progress goes to stderr. Then writes
+// openspec/changes/<change>/verify.json:
 //   { kit, version, change, capability, ranAt, ok,
-//     target: { files, sha256 }, runs: [{ level, command, exitCode, seconds, timedOut }] }
+//     target: { count, sha256, files: { <path>: <sha256> } },
+//     runs: [{ level, command, exitCode, seconds, timedOut }] }
 // `target.sha256` is one hash over the target root's files after the run
-// (gate.mjs targetHash); port-done fails when the code changed since. The
+// (gate.mjs targetHash); port-done fails, naming the files, when the code
+// changed since. A timeout stops the command and every process it started. The
 // commands' output is never written to the file, because it can hold secrets;
 // the last lines of each failing command are printed instead.
 //
@@ -26,33 +29,66 @@
 // `npm test` works where the execution policy blocks npm.ps1, and changes no
 // setting. Elsewhere they run in /bin/sh.
 //
+// Commands must be one command each (gate.mjs chainProblem): PowerShell would
+// report only the last part of `a; b`.
+//
 // Prints { ok, receipt, runs, problems } as JSON and exits 0 when every command
 // passed, 1 when one failed or nothing could run, 2 on bad usage.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { changeSchema, cleanValue, configValue, portCapability, targetFiles, targetHash, verifyPlan, VERIFY_RECEIPT } from './gate.mjs';
+import { changeSchema, cleanValue, configValue, portCapability, targetFiles, targetHash, targetHashes, verifyPlan, VERIFY_RECEIPT } from './gate.mjs';
 
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TAIL_LINES = 40;
+const KEEP_BYTES = 256 * 1024;
 
 const tail = (text) => (text ?? '').replace(/\s+$/, '').split(/\r?\n/).slice(-TAIL_LINES).join('\n');
 
-// Runs one command line in the target root. `exec` is replaceable for tests.
-export function runCommand(command, cwd, { timeoutMs, platform = process.platform, exec = spawnSync } = {}) {
-  const options = { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 256 * 1024 * 1024, timeout: timeoutMs, env: process.env };
-  const started = Date.now();
-  const result = platform === 'win32'
-    ? exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], options)
-    : exec(command, { ...options, shell: '/bin/sh' });
-  const timedOut = result.error?.code === 'ETIMEDOUT' || (result.signal != null && timeoutMs != null && Date.now() - started >= timeoutMs);
-  const exitCode = typeof result.status === 'number' ? result.status : -1;
-  const output = [result.stdout, result.stderr, result.error && !timedOut ? String(result.error.message) : ''].filter(Boolean).join('\n');
-  return { exitCode, timedOut, seconds: Math.round((Date.now() - started) / 100) / 10, output };
+// Stops a command and everything it started: a test runner's own children
+// (dotnet, java, node) would otherwise keep running and hold files open.
+function killTree(child, platform) {
+  if (platform === 'win32') spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+  else { try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* gone */ } } }
 }
 
-export function verify(root, change, { timeoutMs = 60 * 60 * 1000, run = runCommand } = {}) {
+// Runs one command line in the target root and resolves to
+// { exitCode, timedOut, seconds, output } (only the last part of the output).
+export function runCommand(command, cwd, { timeoutMs, platform = process.platform, exec = spawn } = {}) {
+  // UTF-8 output, so the printed tail of a failure is readable on a Japanese
+  // (CP932) console too; the command itself is the last statement, so its
+  // status is the run's.
+  const [file, args, extra] = platform === 'win32'
+    ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ${command}`], {}]
+    : ['/bin/sh', ['-c', command], { detached: true }];
+  const started = Date.now();
+  return new Promise((resolve) => {
+    let output = '';
+    let timedOut = false;
+    let settled = false;
+    const keep = (chunk) => { output = (output + chunk.toString('utf8')).slice(-KEEP_BYTES); };
+    let child;
+    const done = (exitCode, error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ exitCode, timedOut, seconds: Math.round((Date.now() - started) / 100) / 10, output: error ? `${output}\n${error.message}` : output });
+    };
+    try {
+      child = exec(file, args, { cwd, env: process.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], ...extra });
+    } catch (error) { resolve({ exitCode: -1, timedOut: false, seconds: 0, output: error.message }); return; }
+    const timer = timeoutMs ? setTimeout(() => { timedOut = true; killTree(child, platform); }, timeoutMs) : null;
+    child.stdout?.on('data', keep);
+    child.stderr?.on('data', keep);
+    child.on('error', (error) => done(-1, error));
+    child.on('close', (code) => done(timedOut || typeof code !== 'number' ? -1 : code));
+  });
+}
+
+const say = (line) => process.stderr.write(`verify: ${line}\n`);
+
+export async function verify(root, change, { timeoutMs = 60 * 60 * 1000, run = runCommand, progress = say } = {}) {
   const dir = path.join(root, 'openspec/changes', change);
   if (!fs.existsSync(dir)) return { ok: false, problems: [`change not found: ${change}`] };
   if (changeSchema(dir) !== 'spec-relay-port') return { ok: false, problems: [`${change} is not a port change (schema spec-relay-port)`] };
@@ -67,21 +103,29 @@ export function verify(root, change, { timeoutMs = 60 * 60 * 1000, run = runComm
 
   const runs = [];
   const shown = [];
-  for (const { level, command } of plan.runs) {
-    const result = run(command, cwd, { timeoutMs });
+  // The levels run in order and stop at the first failure: a comparison of code
+  // whose own tests fail tells nothing, and B2 or C can take long.
+  for (const { level, command, from } of plan.runs) {
+    progress(`${level} (${from}): ${command}`);
+    const result = await run(command, cwd, { timeoutMs });
+    progress(`${level}: ${result.exitCode === 0 ? 'passed' : result.timedOut ? 'timed out' : `failed, exit code ${result.exitCode}`} in ${result.seconds}s`);
     runs.push({ level, command, exitCode: result.exitCode, seconds: result.seconds, timedOut: result.timedOut });
-    shown.push({ level, command, exitCode: result.exitCode, seconds: result.seconds, ...(result.timedOut ? { timedOut: true } : {}), ...(result.exitCode !== 0 ? { tail: tail(result.output) } : {}) });
+    shown.push({ level, command, from, exitCode: result.exitCode, seconds: result.seconds, ...(result.timedOut ? { timedOut: true } : {}), ...(result.exitCode !== 0 ? { tail: tail(result.output) } : {}) });
+    if (result.exitCode !== 0) break;
   }
-  const ok = runs.every((r) => r.exitCode === 0);
+  const ok = runs.length === plan.runs.length && runs.every((r) => r.exitCode === 0);
   const after = targetFiles(root) ?? [];
+  const hashes = targetHashes(root, after);
   let version = 'unknown';
   try { version = JSON.parse(fs.readFileSync(path.join(KIT, 'package.json'), 'utf8')).version; } catch { /* kit without package.json */ }
   const receipt = {
     kit: 'spec-relay', version, change, capability, ranAt: new Date().toISOString(), ok,
-    target: { files: after.length, sha256: targetHash(root, after) },
+    target: { count: after.length, sha256: targetHash(root, after, hashes), files: hashes },
     runs,
   };
   const problems = shown.filter((r) => r.exitCode !== 0).map((r) => `${r.level === 'boundary' ? 'the boundary check' : `level ${r.level}`} failed (${r.timedOut ? 'timed out' : `exit code ${r.exitCode}`}): ${r.command}`);
+  const skipped = plan.runs.slice(runs.length).map((r) => r.level);
+  if (skipped.length) problems.push(`not run after that failure: ${skipped.join(', ')}`);
   try { fs.writeFileSync(path.join(dir, VERIFY_RECEIPT), `${JSON.stringify(receipt, null, 2)}\n`); } catch (error) {
     problems.push(`could not write ${VERIFY_RECEIPT}: ${error.message}`);
   }
@@ -89,6 +133,7 @@ export function verify(root, change, { timeoutMs = 60 * 60 * 1000, run = runComm
 }
 
 export function main(argv) {
+  // Returns the exit code, or a promise of it once the commands ran.
   const opts = { root: process.cwd(), timeout: 60 };
   for (let i = 0; i < argv.length; i += 2) {
     const key = { '--change': 'change', '--root': 'root', '--timeout-minutes': 'timeout' }[argv[i]];
@@ -101,9 +146,10 @@ export function main(argv) {
     console.error(`verify: no openspec/ folder in ${path.resolve(opts.root)}. Run this from the repository root or pass --root DIR.`);
     return 2;
   }
-  const result = verify(opts.root, opts.change, { timeoutMs: minutes * 60 * 1000 });
-  console.log(JSON.stringify(result, null, 2));
-  return result.ok ? 0 : 1;
+  return verify(opts.root, opts.change, { timeoutMs: minutes * 60 * 1000 }).then((result) => {
+    console.log(JSON.stringify(result, null, 2));
+    return result.ok ? 0 : 1;
+  });
 }
 
 function usage() {
@@ -116,4 +162,4 @@ function invokedDirectly() {
   try { return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url)); } catch { return false; }
 }
 
-if (invokedDirectly()) process.exitCode = main(process.argv.slice(2));
+if (invokedDirectly()) Promise.resolve(main(process.argv.slice(2))).then((code) => { process.exitCode = code; });

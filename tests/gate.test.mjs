@@ -241,8 +241,15 @@ test('the target-design gate needs a module and verification levels for every co
   write(dir, `${T}/.openspec.yaml`, 'schema: spec-relay-target\n');
   write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform: levels\n- [x] E2 `billing`: levels\n');
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n');
-  write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
-  assert.deepEqual(checkReview(dir, 'target-design').problems, ['architecture.md has no module row for context billing']);
+  write(dir, `${T}/verification.md`, '| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| platform | yes | no | no | no |\n| billing | yes | yes | 未定 | no |\n');
+  write(dir, `${T}/conventions.md`, '## Commands\n| Purpose | Command |\n|---|---|\n| Test | `npm.cmd test` |\n| Boundary check | |\n');
+  assert.deepEqual(checkReview(dir, 'target-design').problems, [
+    'architecture.md has no module row for context billing',
+    'conventions.md names no Boundary check command (## Commands, | Boundary check | <command> |)',
+    'verification.md: the B2 cell of context billing is "未定"; write yes or no',
+  ]);
+  write(dir, `${T}/verification.md`, '| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| platform | yes | no | no | no |\n| billing | yes | yes | no | no |\n');
+  write(dir, `${T}/conventions.md`, '## Commands\n| Purpose | Command |\n|---|---|\n| Test | `npm.cmd test` |\n| Boundary check | `npx.cmd depcruise src` |\n');
   write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A1 platform\n- [x] E1 platform\n');
   assert.match(checkReview(dir, 'target-design').problems.join(), /module of context billing has no review item/);
   write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform: levels\n- [x] E2 `billing`: levels\n');

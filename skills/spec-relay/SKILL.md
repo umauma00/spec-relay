@@ -469,8 +469,12 @@ port.
    scenarios), the boundary check and the command design.md gives for each
    level verification.md chose (B1, B2, C), in the target root, and records
    the result in the change's `verify.json`; never write that file yourself.
-   It may take a while; tell the person it is running. When a command fails,
-   give the printed `tail` to the implementer as one task and run it again.
+   Before it runs, tell the person which commands it runs (the host's prompt
+   to allow it shows only `node verify.mjs`) and that it may take a while. It
+   stops at the first failure: give the printed `tail` to the implementer as
+   one task and run it again. A command that chains (`a; b`, a pipe) is
+   refused; ask for a design.md command, or tell the person when the
+   conventions' command needs a new target design.
 7. **Port crosscheck.** Number the baseline spec's requirements (`R1 <name>`)
    and the archived extract change's screens (`S1 <name>`) by search, as in
    step 3, and give them to `spec-relay-checker` subagents as a **port
@@ -482,7 +486,10 @@ port.
    a checker the implementer's reports, tasks.md or the lessons. Split a large
    capability into groups in one wave, then merge with `merge.mjs --into
    openspec/changes/port-<capability>/crosscheck.md --parts
-   openspec/spec-relay/work/port-<capability> --clean`. For every `mismatch`
+   openspec/spec-relay/work/port-<capability> --clean`; the merge stamps the
+   file with the hash of the code it was checked on, and port-done fails once
+   the code changes after it. Never run an implementer and a checker of the
+   same port in one wave. For every `mismatch`
    and `unclear` row, give the row to the implementer to fix, then have a new
    checker check that row again (a part file with a higher number). When the
    row shows that the source code and the baseline spec disagree, stop and ask
@@ -495,11 +502,14 @@ port.
    root, and when a crosscheck row is missing or not `confirmed`. Give a
    `TODO(port)` to the implementer to finish. Only when it cannot be finished
    in this port, ask the person whether to leave it for later; on a yes, list
-   the file under `## Follow-up` in the proposal with their name. Never weaken
-   a test, a tag or a crosscheck row to pass.
-9. When it passes, report the results with both `next.person` sentences: the
-   second says whether the source program was compared (B1, B2, C) or the
-   equivalence is only inferred from the code. Archive the port change after
+   the file under `## Follow-up` in the proposal as `` - `<path>` - what is
+   left (agreed by <name>) ``. Never weaken a test, a tag or a crosscheck row
+   to pass.
+9. When it passes, report the results with every `next.person` sentence: whether
+   the source program was compared (B1, B2, C) or the equivalence is only
+   inferred from the code, the commands that ran and where they came from
+   (a design.md command that replaced the conventions' one is named apart),
+   and the `TODO(port)` left for later. Archive the port change after
    the person agrees: `node "<kit>/scripts/openspec.mjs" archive
    port-<capability> --yes`.
 

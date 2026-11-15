@@ -2,7 +2,7 @@
 // tests of the port's evidence (verify run, scenario tags, TODO(port), crosscheck).
 import fs from 'node:fs';
 import path from 'node:path';
-import { baselineHash, targetHash, targetFiles } from '../scripts/gate.mjs';
+import { baselineHash, targetHash, targetHashes, targetFiles } from '../scripts/gate.mjs';
 import { tempDir, write } from './helpers.mjs';
 
 export const PORT = 'openspec/changes/port-calc-add';
@@ -22,7 +22,19 @@ export function config(dir, target = 'ts') {
 // Writes the receipt verify.mjs would write after a run on the current code.
 export function receipt(dir, runs, change = 'port-calc-add') {
   const files = targetFiles(dir);
-  write(dir, `openspec/changes/${change}/verify.json`, `${JSON.stringify({ kit: 'spec-relay', change, ok: runs.every((r) => r.exitCode === 0), target: { files: files.length, sha256: targetHash(dir, files) }, runs }, null, 2)}\n`);
+  const hashes = targetHashes(dir, files);
+  write(dir, `openspec/changes/${change}/verify.json`, `${JSON.stringify({ kit: 'spec-relay', change, ok: runs.every((r) => r.exitCode === 0), target: { count: files.length, sha256: targetHash(dir, files, hashes), files: hashes }, runs }, null, 2)}\n`);
+}
+
+// Writes crosscheck.md as merge.mjs leaves it: stamped with the current code's hash.
+export function crosscheck(dir, text = PORT_CROSSCHECK, change = 'port-calc-add') {
+  write(dir, `openspec/changes/${change}/crosscheck.md`, `# Crosscheck\n\n<!-- spec-relay: code checked sha256:${targetHash(dir)} -->\n\n${text}`);
+}
+
+// Both, after a change to the code: the checkers and verify.mjs ran again.
+export function refresh(dir, runs = RUNS) {
+  crosscheck(dir);
+  receipt(dir, runs);
 }
 
 export const RUNS = [
@@ -44,12 +56,11 @@ export function portRepo({ levels = 'no', designCommand = '' } = {}) {
   write(dir, `${PORT}/proposal.md`, `## Baseline\n- \`calc/add\` sha256:${baselineHash(dir, 'calc/add')}\n`);
   write(dir, `${PORT}/design.md`, `## Verification\n| Level | Covers | Command |\n|---|---|---|\n| A scenario tests | every scenario | |\n${designCommand}`);
   write(dir, `${PORT}/tasks.md`, '# Tasks\n\n## 1. Core\n- [x] 1.1 add\n');
-  write(dir, `${PORT}/crosscheck.md`, PORT_CROSSCHECK);
   write(dir, 'ts/calc/add.ts', CODE);
   write(dir, 'ts/calc/add.test.ts', TESTS);
   write(dir, 'ts/test.js', 'process.exit(0);\n');
   write(dir, 'ts/boundary.js', 'process.exit(0);\n');
-  receipt(dir, RUNS);
+  refresh(dir);
   return dir;
 }
 

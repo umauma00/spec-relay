@@ -8,6 +8,7 @@ import { main, bypassFiles, STUB_MARKER, SCHEMAS } from '../scripts/setup.mjs';
 import { checkReview, checkPortReady, checkPortDone, baselineHash } from '../scripts/gate.mjs';
 import { status as progress } from '../scripts/status.mjs';
 import { verify } from '../scripts/verify.mjs';
+import { merge } from '../scripts/merge.mjs';
 import { runOpenspec, runCommand, findNpm, findOpenspec, OPENSPEC_VERSION } from '../scripts/openspec.mjs';
 import { tempDir, write, quiet, isolateOpenspec, crlf } from './helpers.mjs';
 
@@ -88,7 +89,7 @@ function fill(dir, change, files) {
   openspec(dir, 'validate', change, '--strict');
 }
 
-test('survey -> target design -> extract -> review gate -> archive -> port -> amend', { skip: !hasOpenspec && 'npm not found' }, () => {
+test('survey -> target design -> extract -> review gate -> archive -> port -> amend', { skip: !hasOpenspec && 'npm not found' }, async () => {
   const dir = setUp();
   write(dir, 'src/calc.py', 'def add(a, b):\n    return a + b\n');
   const steps = () => progress(dir).todoList.slice(1).map((item) => item.status);
@@ -113,7 +114,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   fill(dir, 'target-design', {
     'architecture.md': '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| calc | ts/calc |\n',
     'conventions.md': '# Conventions\n\n## Commands\n| Purpose | Command |\n|---|---|\n| Test | node test.js |\n| Boundary check | node boundary.js |\n',
-    'verification.md': '| Context | A |\n|---|---|\n| platform | yes |\n| calc | yes |\n',
+    'verification.md': '| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| platform | yes | no | no | no |\n| calc | yes | no | no | no |\n',
     'review.md': 'Reviewer: Uma\n\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 calc\n- [x] E1 platform: levels\n- [x] E2 calc: levels\n',
   });
   assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
@@ -164,9 +165,11 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   write(dir, 'ts/calc/add.test.ts', '// spec-relay: calc/add | Add two numbers | Positive numbers\n');
   write(dir, 'ts/test.js', 'process.exit(0);\n');
   write(dir, 'ts/boundary.js', 'process.exit(0);\n');
-  const ran = verify(dir, 'port-calc-add');
+  // The checkers' part file, merged (and stamped with the code) by merge.mjs.
+  write(dir, 'openspec/spec-relay/work/port-calc-add/crosscheck-01.md', '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/calc.py:2 vs ts/calc/add.ts:1 |\n');
+  assert.equal(merge(dir, { into: 'openspec/changes/port-calc-add/crosscheck.md', parts: ['openspec/spec-relay/work/port-calc-add'], clean: true }).ok, true);
+  const ran = await verify(dir, 'port-calc-add', { progress: () => {} });
   assert.equal(ran.ok, true, JSON.stringify(ran));
-  write(dir, 'openspec/changes/port-calc-add/crosscheck.md', '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/calc.py:2 vs ts/calc/add.ts:1 |\n');
   const done = checkPortDone(dir, 'port-calc-add');
   assert.deepEqual([done.ok, done.problems, done.equivalence], [true, [], 'inferred']);
   assert.deepEqual(steps(), ['completed', 'completed', 'not-started']);

@@ -20,8 +20,9 @@ artifacts:
       - **Out of scope**: Anything left for a later port.
       - **Follow-up**: Empty at first. When the port ends with a `TODO(port)`
         that cannot be finished in it, and the person agrees to leave it for
-        later, one list item per target file: `` - `<target file>` - what is
-        left (agreed by <name>) ``. `gate.mjs port-done` fails on every
+        later, one list item per target file: `` - `<path>` - what is
+        left (agreed by <name>) ``, the path from the repository root or the
+        target root. `gate.mjs port-done` fails on every
         `TODO(port)` in a file not listed here or in an archived port's
         Follow-up.
       - **Baseline**: one line per capability, `` `<capability>` sha256:<hash> ``,
@@ -133,7 +134,9 @@ artifacts:
       - `unclear`: the code does not settle it. Say what would.
 
       One table row per requirement (`R<n> <name>`, in baseline spec order) and
-      per screen (`S<n> <name>`, in screens.md order). Then resolve every row
+      per screen (`S<n> <name>`, in screens.md order). `merge.mjs` stamps the
+      file with the hash of the target code it was merged on; port-done fails
+      when the code changed since. Then resolve every row
       that is not `confirmed`: the implementer fixes the code or the test and a
       checker checks that row again; when the source code and the baseline
       spec disagree, stop and ask the person (an amendment if the spec misread

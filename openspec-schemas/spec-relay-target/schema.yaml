@@ -93,7 +93,9 @@ artifacts:
       person chooses.
 
       Sections:
-      - **Levels**: table of context, A (always yes), B1, B2, C, notes.
+      - **Levels**: table of context, A (always yes), B1, B2, C, notes. Write
+        each level cell as `yes` or `no` only: `gate.mjs review` stops on
+        anything else, so an open choice is a question, not a cell.
       - **Running the source program**: what is needed to run it for B1, B2 or
         C, or "not runnable" (then only A applies).
       - **Sign-in**: for B2 and C, the test account comes from environment

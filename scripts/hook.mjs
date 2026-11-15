@@ -12,7 +12,8 @@
 //     openspec/ and the target root), under openspec/specs/, openspec/changes/archive/,
 //     openspec/schemas/, openspec/spec-relay/tools/ (the pinned OpenSpec), of openspec/config.yaml, and inside the kit itself;
 //   - any agent edit of a change's verify.json (verify.mjs writes it);
-//   - subagent edits of review.md, questions.md, crosscheck.md, the plan and the lessons;
+//   - subagent edits of review.md, questions.md, crosscheck.md, a port's proposal.md and design.md, the plan and the lessons;
+//   - shell commands that write a verify.json;
 //   - shell commands that mention the "Hook enforcement" setting.
 // Shell commands that write files some other way are not parsed; the wave guard
 // (gate.mjs guard) still finds those changes afterwards.
@@ -106,8 +107,8 @@ export function protectedPath(root, file, { subagent = false, pluginRoot = KIT_R
     ['openspec/spec-relay/tools', 'the pinned OpenSpec is installed by setup.mjs'],
   ]) if (under(rel, dir)) return why;
   if (/^openspec\/changes\/[^/]+\/verify\.json$/i.test(rel)) return 'only verify.mjs writes verify.json, the record of the last verify run; run it again instead';
-  if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions|crosscheck)\.md$/i.test(rel) || [PLAN, LESSONS].some((p) => fold(p) === fold(rel)))) {
-    return 'only the orchestrator writes review.md, questions.md, crosscheck.md, the plan and the lessons';
+  if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions|crosscheck)\.md$/i.test(rel) || /^openspec\/changes\/port-[^/]+\/(proposal|design)\.md$/i.test(rel) || [PLAN, LESSONS].some((p) => fold(p) === fold(rel)))) {
+    return 'only the orchestrator writes review.md, questions.md, crosscheck.md, a port\'s proposal.md and design.md, the plan and the lessons';
   }
   if (source === '.') {
     if (!under(rel, 'openspec') && !(target !== '.' && under(rel, target))) return 'with the source root ".", agents change only openspec/ and the target root';
@@ -166,7 +167,11 @@ function archiveDenial(root, { name, literal, flags }, subagent) {
     return `${name} must be archived with its specs and validation: drop --skip-specs and --no-validate`;
   }
   const port = schema === 'spec-relay-port';
-  const result = port ? checkPortDone(root, name) : checkReview(root, name);
+  let result;
+  // A gate that cannot run is no pass: deny the archive rather than let it through.
+  try { result = port ? checkPortDone(root, name) : checkReview(root, name); } catch (error) {
+    return `gate.mjs ${port ? 'port-done' : 'review'} could not check ${name} (${error.message}), so it cannot be archived; run the gate and fix what it reports`;
+  }
   if (result.ok) return null;
   const next = nextSteps(port ? 'port-done' : 'review', result, language(root));
   const shown = result.problems.slice(0, 5).join('; ') + (result.problems.length > 5 ? `; and ${result.problems.length - 5} more` : '');
@@ -207,6 +212,9 @@ export function decide(payload, { pluginRoot = process.env.PLUGIN_ROOT || proces
       if (!root || !enforced(root)) continue;
       if (WRITES.test(command) && (/hook\s+enforcement/i.test(command) || /openspec[\\/]config\.yaml/i.test(command))) {
         return 'openspec/config.yaml holds the person\'s settings, the Hook enforcement line included; ask the person to change it themselves';
+      }
+      if (/verify\.json/i.test(command) && (WRITES.test(command) || /writeFile|\bnode\b[^;|]*\s-e\b/i.test(command))) {
+        return 'only verify.mjs writes verify.json, the record of the last verify run; run node "<kit>/scripts/verify.mjs" --change <port change> instead';
       }
       for (const call of archiveCalls(command)) {
         const why = archiveDenial(root, call, subagent);
