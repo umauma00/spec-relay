@@ -127,9 +127,9 @@ stop halfway on something the machine or the host lacks.
    person agrees. On a conflict, show it and ask how to resolve it; never
    overwrite, move or delete the person's files to get past it.
    Setup replaces OpenSpec's generic apply, archive and sync workflows with
-   stubs that point here, because they skip the review gate. `openspec update`
-   may restore them (the check reports `workflows` then); run setup again
-   after it.
+   stubs that point here, because they skip the review gate. Every
+   `openspec update` restores them (the check reports `workflows` then); run
+   setup again after each update.
 5. Run the environment check again: now it also compares the schemas, the
    source root and the target language's toolchain.
 6. **Subagent trial** (once; again when the check reports `trial` as `warn`).

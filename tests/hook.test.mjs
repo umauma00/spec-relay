@@ -69,7 +69,7 @@ test('an archive waits for a passing gate, a change name and the orchestrator', 
   assert.equal(shell(dir, 'Select-String -Path openspec/config.yaml -Pattern "Hook enforcement"'), null);
   // Other ways to write the call.
   write(dir, 'openspec/changes/extract-billing-invoice/review.md', 'Reviewer: Uma\n- [ ] R1 Add two numbers\n');
-  for (const command of ['npx @fission-ai/openspec@1.17.0 archive extract-billing-invoice --yes', 'openspec.ps1 archive extract-billing-invoice', 'openspec --no-color archive extract-billing-invoice', '(openspec archive extract-billing-invoice --yes)', 'powershell -Command "openspec archive extract-billing-invoice --yes"']) {
+  for (const command of ['npx @fission-ai/openspec@2.0.0 archive extract-billing-invoice --yes', 'openspec.ps1 archive extract-billing-invoice', 'openspec --no-color archive extract-billing-invoice', '(openspec archive extract-billing-invoice --yes)', 'powershell -Command "openspec archive extract-billing-invoice --yes"']) {
     assert.match(shell(dir, command), /gate.mjs review fails/, command);
   }
   assert.match(shell(dir, '$c = "extract-billing-invoice"; openspec archive $c --yes'), /write the change name itself/);

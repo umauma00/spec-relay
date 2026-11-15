@@ -125,8 +125,8 @@ export function parseArgs(argv) {
   }
   const source = segments(opts.sourceRoot);
   const target = segments(opts.targetRoot);
-  if (target.length === 0 || fold(target[0]) === 'openspec' || fold(target[0]) === '.github') {
-    throw new UsageError('--target-root must be a new directory, not the repository root, openspec/ or .github/');
+  if (target.length === 0 || ['openspec', '.github', '.agents'].includes(fold(target[0]))) {
+    throw new UsageError('--target-root must be a new directory, not the repository root, openspec/, .github/ or .agents/');
   }
   if (source.length > 0 && (isPrefix(source, target) || isPrefix(target, source))) {
     throw new UsageError('--target-root and --source-root must not contain each other (only --source-root . may contain the target)');
@@ -175,19 +175,52 @@ function isDirWithEntries(dir) {
   try { return fs.statSync(dir).isDirectory() ? fs.readdirSync(dir).length > 0 : true; } catch { return false; }
 }
 
+// OpenSpec files that tools' own folders (.github/, .claude/, .cursor/ ...) may
+// hold from OpenSpec 1.x: skills, commands, prompts and workflows named
+// openspec-* or opsx*. OpenSpec 2.x init deletes the unedited ones and links
+// the shared skills into some of these folders.
+const TOOL_SUBDIRS = ['skills', 'commands', 'prompts', 'workflows'];
+const OPENSPEC_NAME = /^(openspec-|opsx)/;
+function toolFiles(target, only) {
+  const found = [];
+  let tools = [];
+  try { tools = fs.readdirSync(target, { withFileTypes: true }); } catch { /* absent */ }
+  for (const tool of tools) {
+    if (!tool.isDirectory() || !tool.name.startsWith('.') || ['.git', '.agents'].includes(tool.name)) continue;
+    if (only && tool.name !== only) continue;
+    for (const sub of TOOL_SUBDIRS) {
+      let names = [];
+      try { names = fs.readdirSync(path.join(target, tool.name, sub)); } catch { /* absent */ }
+      for (const name of names) if (OPENSPEC_NAME.test(name)) found.push(path.join(target, tool.name, sub, name));
+    }
+  }
+  return found;
+}
+
+// What OpenSpec 1.x (and spec-relay 0.6.0, which stubbed them) left under
+// .github/. This kit no longer disables anything there, so in a set-up
+// repository they are leftovers for the person to remove (README, "0.6.0").
+// Skills count when OpenSpec generated them or this kit stubbed them, so a
+// skill of the person's own that happens to start with openspec- is left alone.
+export function legacyFiles(target) {
+  return toolFiles(target, '.github').filter((file) => {
+    if (/[\\/]prompts[\\/]opsx-/.test(file)) return true;
+    if (!/[\\/]skills[\\/]openspec-/.test(file)) return false;
+    const text = readText(path.join(file, 'SKILL.md'));
+    return /generatedBy:/.test(text) || text.includes(STUB_MARKER);
+  });
+}
+
 // Files `openspec init` would replace, delete or edit in a repository that is
 // not yet set up. Any of them existing is a conflict for the person to resolve.
 function initConflicts(target) {
   const found = [];
-  // OpenSpec 2.x init also deletes the skills and command files OpenSpec 1.x
-  // wrote under .github/ when nobody edited them, so those are conflicts too.
-  for (const [dir, pattern] of [[SKILLS_DIR, /^(openspec-|\.openspec-target$)/], ['.github/skills', /^openspec-/], ['.github/prompts', /^opsx-/]]) {
-    let names = [];
-    try { names = fs.readdirSync(path.join(target, dir)); } catch { /* absent */ }
-    for (const name of names) {
-      if (pattern.test(name)) found.push(path.join(target, dir, name));
-    }
+  let names = [];
+  try { names = fs.readdirSync(path.join(target, SKILLS_DIR)); } catch { /* absent */ }
+  for (const name of names) {
+    if (/^(openspec-|\.openspec-target$)/.test(name)) found.push(path.join(target, SKILLS_DIR, name));
   }
+  found.push(...toolFiles(target));
   for (const rel of ['openspec/AGENTS.md', 'openspec/project.md']) {
     if (exists(path.join(target, rel))) found.push(path.join(target, rel));
   }
@@ -246,6 +279,11 @@ export function plan(opts) {
   if (!managed && isDirWithEntries(path.join(opts.target, opts.targetRoot))) {
     steps.push({ action: 'conflict', path: path.join(opts.target, opts.targetRoot), reason: 'the target root already exists and is not empty' });
   }
+  if (managed) {
+    for (const file of legacyFiles(opts.target)) {
+      steps.push({ action: 'conflict', path: file, reason: 'left by OpenSpec 1.x or spec-relay 0.6.0; see "0.6.0 から更新するとき" in the README' });
+    }
+  }
   const runInit = !managed && !opts.skipInit;
   if (runInit) {
     for (const file of initConflicts(opts.target)) {
@@ -285,14 +323,15 @@ export function main(argv) {
     console.error('\nStopped: resolve the conflicts above, then run setup again. Nothing was changed.');
     return 2;
   }
-  if (willInit) {
-    const probe = probeOpenspec();
-    if (!probe.ok) {
-      console.error(`\nStopped: ${probe.reason}\nThen run setup again. Nothing was changed.`);
-      return 3;
-    }
-    // OpenSpec 1.x writes its skills under .github/, where this script no longer
-    // looks, so its apply/archive/sync would stay live.
+  // OpenSpec 1.x writes its skills under .github/, where this script no longer
+  // looks, so its apply/archive/sync would stay live. Init needs the CLI; a
+  // re-run checks the version only when the CLI is there.
+  const probe = opts.skipInit ? null : probeOpenspec();
+  if (willInit && !probe.ok) {
+    console.error(`\nStopped: ${probe.reason}\nThen run setup again. Nothing was changed.`);
+    return 3;
+  }
+  if (probe && probe.ok) {
     const major = Number(/(\d+)\.\d+/.exec(probe.version)?.[1]);
     if (!(major >= 2)) {
       console.error(`\nStopped: OpenSpec ${probe.version} is too old; spec-relay needs 2.0.0 or later, which keeps skills in .agents/skills/. Install it with "${INSTALL_HINT}".\nThen run setup again. Nothing was changed.`);

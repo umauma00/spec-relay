@@ -36,6 +36,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 export const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const NODE_MIN = '22.12.0';
 export const OPENSPEC_TESTED = '2.0.0';
+// The first OpenSpec that keeps skills in .agents/skills/, the only folder setup looks in.
+export const OPENSPEC_SHARED_SKILLS = '2.0.0';
 // Recommended client versions: fixes for parallel subagents and their permission
 // prompts (Copilot CLI 1.0.106-1.0.109); the Copilot harness is the VS Code default from 1.143.
 export const CLIENT_MIN = { cli: '1.0.109', vscode: '1.143.0' };
@@ -170,10 +172,21 @@ export function checkOpenspec(ctx) {
   const cmp = compareVersions(v, OPENSPEC_TESTED);
   if (cmp === 0) return { id: 'openspec', level: 'ok', message: `OpenSpec ${showVersion(v)}` };
   if (cmp < 0) {
+    if (compareVersions(v, OPENSPEC_SHARED_SKILLS) >= 0) {
+      return {
+        id: 'openspec', level: 'fail',
+        message: ctx.t(`OpenSpec ${showVersion(v)} は古く、キットのスキーマを扱えない場合があります（確認済みは ${OPENSPEC_TESTED}）。`, `OpenSpec ${showVersion(v)} is older than ${OPENSPEC_TESTED}, the version the kit is tested with, and may not handle its schemas.`),
+        fix: ctx.t(`\`${install}\` で入れ直してください。`, `Install the tested version: \`${install}\`.`),
+      };
+    }
+    const config = ctx.readFile ? ctx.readFile(path.join(ctx.target, 'openspec/config.yaml')) : null;
+    const managed = !!(config && ctx.configMarker && ctx.normalizeText && ctx.normalizeText(config).includes(ctx.configMarker));
     return {
       id: 'openspec', level: 'fail',
-      message: ctx.t(`OpenSpec ${showVersion(v)} は古い版です（確認済みは ${OPENSPEC_TESTED}）。キットは OpenSpec 2.0.0 からのスキルの置き場所（.agents/skills/）を前提にしているので、このままでは標準の apply・archive・sync を止められず、レビューを飛ばせてしまいます。`, `OpenSpec ${showVersion(v)} is older than ${OPENSPEC_TESTED}, the version the kit is tested with. The kit expects the skill folder OpenSpec uses since 2.0.0 (.agents/skills/), so it cannot disable the generic apply, archive and sync workflows, which skip the review.`),
-      fix: ctx.t(`\`${install}\` で入れ直し、移行対象のリポジトリで \`openspec update\` を実行してから、導入スクリプトをもう一度実行してください。`, `Install the tested version with \`${install}\`, run \`openspec update\` in the repository being migrated, then run setup again.`),
+      message: ctx.t(`OpenSpec ${showVersion(v)} は古い版です（確認済みは ${OPENSPEC_TESTED}）。キットは OpenSpec ${OPENSPEC_SHARED_SKILLS} からのスキルの置き場所（.agents/skills/）を前提にしているので、このままでは標準の apply・archive・sync を止められず、レビューを飛ばせてしまいます。`, `OpenSpec ${showVersion(v)} is older than ${OPENSPEC_TESTED}, the version the kit is tested with. The kit expects the skill folder OpenSpec uses since ${OPENSPEC_SHARED_SKILLS} (.agents/skills/), so it cannot disable the generic apply, archive and sync workflows, which skip the review.`),
+      fix: managed
+        ? ctx.t(`README の「0.6.0 から更新するとき」の手順に従ってください（\`${install}\`、このリポジトリで \`openspec update\`、.github/ に残ったファイルの削除、導入スクリプトの再実行）。`, `Follow "0.6.0 から更新するとき" in the README: \`${install}\`, \`openspec update\` in this repository, delete the files left under .github/, and run setup again.`)
+        : ctx.t(`\`${install}\` で入れ直してください。`, `Install the tested version: \`${install}\`.`),
     };
   }
   return {
@@ -369,6 +382,17 @@ export function checkSetup(ctx) {
     });
   } else {
     results.push({ id: 'schemas', level: 'ok', message: ctx.t(`スキーマはこのキットの版と同じです（${ctx.schemas.length} 個）。`, `the schemas match this kit (${ctx.schemas.length}).`) });
+  }
+  const legacy = ctx.legacyFiles ? ctx.legacyFiles(ctx.target) : [];
+  if (legacy.length) {
+    const list = legacy.map((f) => path.relative(ctx.target, f).replace(/\\/g, '/'));
+    results.push({
+      id: 'legacy', level: 'fail',
+      message: ctx.t(`OpenSpec 1.x（または spec-relay 0.6.0）のファイルが .github/ に残っています: ${list.join(', ')}`,
+        `files from OpenSpec 1.x (or spec-relay 0.6.0) are still under .github/: ${list.join(', ')}`),
+      fix: ctx.t('README の「0.6.0 から更新するとき」の手順に従ってください。キットはこの場所のスキルを無効にしないので、OpenSpec 標準の apply・archive・sync が残っているとレビューを飛ばせます。元フォルダーが `.` のときは、調査の gate がこれらを元コードとして数えます。',
+        'Follow "0.6.0 から更新するとき" in the README. The kit no longer disables skills there, so generic apply, archive or sync left there skip the review; with the source root ".", the survey gate also counts these files as source code.'),
+    });
   }
   const bypass = ctx.bypassFiles(ctx.target);
   if (bypass.length) {
@@ -668,7 +692,7 @@ async function machineContext(opts, overrides = {}) {
     kitRoot: KIT_ROOT,
     kitVersion: (readJson(readFileOrNull(path.join(KIT_ROOT, 'package.json'))) || {}).version || '?',
     schemas: setup.SCHEMAS, configMarker: setup.CONFIG_MARKER, normalizeText: setup.normalizeText,
-    bypassFiles: setup.bypassFiles, configValue: gate.configValue, cleanValue: gate.cleanValue,
+    bypassFiles: setup.bypassFiles, legacyFiles: setup.legacyFiles, configValue: gate.configValue, cleanValue: gate.cleanValue,
     machine: machineId(),
     exists: (file) => fs.existsSync(file),
     isDir: (dir) => { try { return fs.statSync(dir).isDirectory(); } catch { return false; } },

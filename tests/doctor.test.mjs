@@ -116,7 +116,10 @@ test('OpenSpec: missing or older blocks, newer warns', () => {
   const old = checkOpenspec(ctx({ ok: true, version: '1.17.0' }));
   assert.equal(old.level, 'fail');
   assert.match(old.message, /\.agents\/skills/);
-  assert.match(old.fix, /openspec update/);
+  // Before setup there is nothing to update; in a set-up repository the README steps apply.
+  assert.doesNotMatch(old.fix, /openspec update/);
+  const managed = { readFile: () => '# spec-relay: managed\n', configMarker: '# spec-relay: managed', normalizeText: (t) => t };
+  assert.match(checkOpenspec({ ...ctx({ ok: true, version: '1.17.0' }), ...managed }).fix, /0\.6\.0[\s\S]*openspec update/);
   assert.equal(checkOpenspec(ctx({ ok: true, version: '2.1.0' })).level, 'warn');
   assert.equal(checkOpenspec(ctx({ ok: true, version: '2.0.0' })).level, 'ok');
 });
@@ -219,6 +222,10 @@ test('after setup: schemas, restored workflows, source root, toolchain and the t
 
   write(dir, '.agents/skills/openspec-archive-change/SKILL.md', '---\nname: openspec-archive-change\nmetadata:\n  generatedBy: "2.0.0"\n---\nRun openspec archive.\n');
   assert.equal(byId(await run(), 'workflows').level, 'fail');
+  assert.equal(byId(await run(), 'legacy'), undefined);
+  write(dir, '.github/prompts/opsx-apply.prompt.md', 'Run openspec instructions apply\n');
+  assert.equal(byId(await run(), 'legacy').level, 'fail');
+  fs.rmSync(path.join(dir, '.github/prompts'), { recursive: true });
 
   fs.rmSync(path.join(dir, 'src'), { recursive: true });
   assert.equal(byId(await run(), 'source-root').level, 'fail');

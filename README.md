@@ -115,8 +115,8 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 | `openspec/config.yaml` | 移行元・移行先の言語とフォルダー（全成果物の生成に使われる） |
 | `.agents/skills/openspec-*` | `openspec init --tools github-copilot` が置く OpenSpec 標準のスキル（propose・explore・update）。OpenSpec 2.0.0 からはコマンドファイルはなく、`/openspec-propose` のようにスキル名で呼びます。Copilot はこのフォルダーを直接読むので、リンクは作られません |
 
-- 内容の違う既存ファイルがあると、上書きせずに衝突を表示して止まります。`openspec init` が置き換え・削除・編集するファイル（`.agents/skills/` の既存の `openspec-*` と `.openspec-target`、OpenSpec 1.x が置いた `.github/skills/openspec-*`・`.github/prompts/opsx-*`、`openspec/AGENTS.md` など）が既にある場合も、同じく止まります。
-- OpenSpec 標準の apply・archive（bulk-archive を含む）・sync のスキルは、レビューの確認を通らずにチェックや archive ができてしまうため、導入スクリプトが中身を「`spec-relay-orchestrator` を使ってください」という案内に置き換えて無効にします。ファイル自体を消さないのは、消すと後の `openspec update` が利用者の OpenSpec 全体の設定（Windows では `%APPDATA%\openspec`）から、ほかのプロジェクトも含めてこれらのワークフローを外してしまうためです。`openspec update` で元の中身に戻ったときは、もう一度導入スクリプトを実行してください。
+- 内容の違う既存ファイルがあると、上書きせずに衝突を表示して止まります。`openspec init` が置き換え・削除・編集するファイル（`.agents/skills/` の既存の `openspec-*` と `.openspec-target`、OpenSpec 1.x が `.github/`・`.claude/`・`.cursor/` などのツールのフォルダーに置いた `openspec-*`・`opsx*`、`openspec/AGENTS.md` など）が既にある場合も、同じく止まります。導入スクリプトは OpenSpec 1.x では動きません（版を確かめて止まります）。
+- OpenSpec 標準の apply・archive（bulk-archive を含む）・sync のスキルは、レビューの確認を通らずにチェックや archive ができてしまうため、導入スクリプトが中身を「`spec-relay-orchestrator` を使ってください」という案内に置き換えて無効にします。ファイル自体を消さないのは、消すと後の `openspec update` が利用者の OpenSpec 全体の設定（Windows では `%APPDATA%\openspec`）から、ほかのプロジェクトも含めてこれらのワークフローを外してしまうためです。OpenSpec 2.0.0 の `openspec update` は毎回これらを元の中身に戻すので、update のあとは毎回、導入スクリプトをもう一度実行してください（doctor が `workflows` で知らせます）。
 
 ## 守っていること
 
@@ -178,7 +178,7 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 
 1. `npm install -g @fission-ai/openspec@2.0.0`
 2. 移行対象のリポジトリで `openspec update`。OpenSpec が置いた古いファイルは消え、`.agents/skills/` に新しいスキルが入ります。
-3. 0.6.0 が無効にした `.github/skills/openspec-apply-change`・`openspec-archive-change`・`openspec-sync-specs` と `.github/prompts/opsx-apply.prompt.md`・`opsx-archive.prompt.md`・`opsx-sync.prompt.md` は、編集済みとして残ります。中身はキットの案内だけなので、手で消してください（元フォルダーが `.` のとき、残すと調査の gate が元コードとして数えます）。
+3. 0.6.0 が無効にしたファイル（`.github/skills/openspec-*` と `.github/prompts/opsx-*` のうち、`<!-- spec-relay: disabled -->` を含むもの。apply・archive・sync、広いプロファイルでは bulk-archive も）は、編集済みとして残ります。中身はキットの案内だけなので、手で消してください。残っていると導入スクリプトは止まり、doctor は `legacy` で FAIL を出します（元フォルダーが `.` のときは、調査の gate も元コードとして数えます）。
 4. 導入スクリプトをもう一度実行し、`.agents/skills/` の apply・archive・sync を無効にします。最後に doctor で FAIL がないことを確かめます。
 
 ## 0.5.0 から更新するとき

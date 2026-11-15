@@ -104,13 +104,21 @@ test('files openspec init would replace or clean up are conflicts before init', 
   write(dir, '.agents/skills/.openspec-target', 'claude\n');
   write(dir, '.agents/skills/my-own-skill/SKILL.md', 'mine\n');
   write(dir, '.github/prompts/opsx-propose.prompt.md', 'mine\n');
+  write(dir, '.github/prompts/openspec-review.prompt.md', 'mine\n');
+  write(dir, '.github/prompts/my-own.prompt.md', 'mine\n');
   write(dir, '.github/skills/openspec-archive-change/SKILL.md', 'mine\n');
+  // Other tools' 1.x files: init deletes them and links the shared skills there.
+  write(dir, '.claude/skills/openspec-propose/SKILL.md', 'mine\n');
+  write(dir, '.claude/commands/opsx/apply.md', 'mine\n');
+  write(dir, '.cursor/commands/opsx-apply.md', 'mine\n');
   write(dir, 'openspec/AGENTS.md', 'my notes\n');
   write(dir, 'AGENTS.md', '<!-- OPENSPEC:START -->\n<!-- OPENSPEC:END -->\n');
   write(dir, 'CLAUDE.md', 'unrelated\n');
   assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])).sort(), [
     '.agents/skills/.openspec-target', '.agents/skills/openspec-explore',
-    '.github/prompts/opsx-propose.prompt.md', '.github/skills/openspec-archive-change', 'AGENTS.md', 'openspec/AGENTS.md',
+    '.claude/commands/opsx', '.claude/skills/openspec-propose', '.cursor/commands/opsx-apply.md',
+    '.github/prompts/openspec-review.prompt.md', '.github/prompts/opsx-propose.prompt.md', '.github/skills/openspec-archive-change',
+    'AGENTS.md', 'openspec/AGENTS.md',
   ]);
   assert.equal(quiet(() => main(['--target', dir, ...BASE, '--apply'])), 2);
   assert.equal(fs.readFileSync(path.join(dir, 'openspec/AGENTS.md'), 'utf8'), 'my notes\n');
@@ -168,6 +176,30 @@ test('a failed openspec init removes the files the run created, so a re-run star
   assert.match(result.stderr, /were removed/);
   assert.ok(!fs.existsSync(path.join(dir, 'openspec/config.yaml')));
   assert.equal(plan(parseArgs(['--target', dir, ...BASE])).runInit, true);
+});
+
+test('files 0.6.0 and OpenSpec 1.x left under .github/ stop a re-run', () => {
+  const dir = tempDir();
+  quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply']));
+  write(dir, '.github/skills/openspec-archive-change/SKILL.md', `---\nname: openspec-archive-change\n---\n${STUB_MARKER}\n`);
+  write(dir, '.github/skills/openspec-propose/SKILL.md', 'metadata:\n  generatedBy: "1.17.0"\n');
+  write(dir, '.github/prompts/opsx-apply.prompt.md', 'Run openspec instructions apply\n');
+  write(dir, '.github/skills/openspec-my-notes/SKILL.md', 'mine\n');
+  assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE, '--skip-init'])).sort(), [
+    '.github/prompts/opsx-apply.prompt.md', '.github/skills/openspec-archive-change', '.github/skills/openspec-propose',
+  ]);
+});
+
+test('--target-root may not be .agents, where OpenSpec keeps its skills', () => {
+  assert.throws(() => parseArgs(['--target', tempDir(), '--source-language', 'PHP', '--target-language', 'Java', '--target-root', '.agents/new']), /\.agents/);
+});
+
+test('OpenSpec 1.x stops a re-run too', () => {
+  const dir = tempDir();
+  quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply']));
+  const result = run('setup.mjs', ['--target', dir, ...BASE, '--apply'], { env: envWithPath(fakeOpenspec('1.17.0')) });
+  assert.equal(result.status, 3, result.stderr + result.stdout);
+  assert.match(result.stderr, /1\.17\.0 is too old/);
 });
 
 test('OpenSpec 1.x stops setup before anything is written', () => {

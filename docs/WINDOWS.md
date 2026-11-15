@@ -52,6 +52,6 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "C#"
 - **capability の名前**：英小文字・数字・ハイフンだけにします（例：`billing/invoice`）。日本語や大文字、`_` は OpenSpec が受け付けません。日本語の名前は計画（`openspec/spec-relay/plan.md`）に併記します。
 - **長いパス**：capability のパスは archive の中で繰り返されるため、深い場所では 260 文字の制限に当たることがあります。リポジトリは `C:\work\proj` のような短い場所に置くか、長いパスを有効にしてください（`git config --global core.longpaths true`）。
 - **ネットワーク上のフォルダー**：`\\server\share\...` や `\\wsl.localhost\...` では、npm 版か単体版の OpenSpec を使ってください。ほかの方法で入れた `openspec.cmd` は、こうした場所では起動できないため、その旨を表示して止まります。
-- **シンボリックリンク**：OpenSpec 2.0.0 は Claude Code など一部のツール向けに、`.agents/skills/` のスキルへのリンクを作ります。キットは `--tools github-copilot` だけで導入し、Copilot は `.agents/skills/` を直接読むので、リンクは作られません。開発者モードや `git config core.symlinks true` は要りません（OpenSpec 2.0.0 のコードで確認。Windows の実機ではまだ試していません）。
+- **シンボリックリンク**：OpenSpec 2.0.0 は Claude Code など一部のツール向けに、`.agents/skills/` のスキルへのリンクを作ります。キットは `--tools github-copilot` だけで導入し、Copilot は `.agents/skills/` を直接読むので、リンクは作られません（ほかのツール向けの OpenSpec のファイルがあると、導入スクリプトはその前に止まります）。開発者モードや `git config core.symlinks true` は要りません（OpenSpec 2.0.0 のコードで確認。Windows の実機ではまだ試していません）。
 - **WSL**：WSL の中で使う場合は Linux として動きます。Windows 側のツールと WSL 側のファイルを混ぜないでください。
 - **OpenSpec 全体の設定**：OpenSpec は利用者ごとの設定を `%APPDATA%\openspec\` に持ちます。spec-relay はここを書き換えません。
