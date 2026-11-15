@@ -78,7 +78,10 @@ test('versions compare numerically', () => {
 
 test('an old Node.js gets one clear failure, before any other module loads', async () => {
   assert.equal(checkNode({ ...en, nodeVersion: 'v22.11.0' }).level, 'fail');
-  assert.equal(checkNode({ ...en, nodeVersion: 'v22.12.0' }).level, 'ok');
+  // From 22.12 OpenSpec runs; some of its packages ask for newer Node.js lines.
+  for (const [version, level] of [['v22.12.0', 'warn'], ['v22.22.2', 'ok'], ['v23.11.0', 'warn'], ['v24.14.0', 'warn'], ['v24.15.0', 'ok'], ['v25.1.0', 'warn'], ['v26.0.0', 'ok']]) {
+    assert.equal(checkNode({ ...en, nodeVersion: version }).level, level, version);
+  }
   const { code, json } = await doctor(['--target', tempDir(), '--json', '--lang', 'en'], { nodeVersion: 'v18.19.0' });
   assert.equal(code, 1);
   assert.deepEqual(json.checks.map((c) => c.id), ['node']);

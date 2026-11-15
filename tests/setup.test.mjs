@@ -203,14 +203,28 @@ test('the kit pins OpenSpec with its own package.json and lock, compared like th
   assert.equal(pinned.packages['node_modules/@fission-ai/openspec'].version, OPENSPEC_VERSION);
   assert.equal(JSON.parse(fs.readFileSync(path.join(tools, 'package.json'), 'utf8')).dependencies['@fission-ai/openspec'], OPENSPEC_VERSION);
   assert.equal(fs.readFileSync(path.join(tools, '.gitignore'), 'utf8'), 'node_modules/\n');
-  // Not installed yet: a run without --skip-init installs it; once installed it does not.
-  assert.equal(plan(parseArgs(['--target', dir, ...BASE])).install, true);
-  write(tools, 'node_modules/@fission-ai/openspec/package.json', JSON.stringify({ version: OPENSPEC_VERSION }));
-  assert.equal(plan(parseArgs(['--target', dir, ...BASE])).install, false);
-  write(tools, 'node_modules/@fission-ai/openspec/package.json', JSON.stringify({ version: '1.17.0' }));
-  assert.equal(plan(parseArgs(['--target', dir, ...BASE])).install, true);
-  // Someone raised the version by hand: a conflict, as with a changed schema.
+  // Not installed yet: a run without --skip-init installs it; once installed and running it does not.
+  const install = () => plan(parseArgs(['--target', dir, ...BASE])).install;
+  assert.equal(install(), true);
+  const fake = (version) => {
+    write(tools, 'node_modules/@fission-ai/openspec/package.json', JSON.stringify({ version }));
+    write(tools, 'node_modules/@fission-ai/openspec/bin/openspec.js', `console.log(${JSON.stringify(version)})\n`);
+  };
+  fake(OPENSPEC_VERSION);
+  // npm writes node_modules/.package-lock.json last: without it the install did not finish.
+  assert.equal(install(), true);
+  write(tools, 'node_modules/.package-lock.json', '{}');
+  assert.equal(install(), false);
+  fake('1.17.0');
+  assert.equal(install(), true);
+  // A damaged tree (a file quarantined, an interrupted npm ci) that no longer runs is reinstalled.
+  fake(OPENSPEC_VERSION);
+  write(tools, 'node_modules/@fission-ai/openspec/bin/openspec.js', "import 'missing-module';\n");
+  assert.equal(install(), true);
+  // A reformatted package.json is still the kit's; a raised version is a conflict, as with a changed schema.
   const pkg = path.join(tools, 'package.json');
+  fs.writeFileSync(pkg, JSON.stringify(JSON.parse(fs.readFileSync(pkg, 'utf8')), null, 4));
+  assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])), []);
   fs.writeFileSync(pkg, fs.readFileSync(pkg, 'utf8').replace(OPENSPEC_VERSION, '2.1.0'));
   assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])), ['openspec/spec-relay/tools/package.json']);
 });
@@ -295,19 +309,20 @@ test('schema files checked out with CRLF or a BOM are the kit version, not a con
   assert.deepEqual(again.steps.filter((step) => step.action !== 'keep'), []);
 });
 
-test('a re-run disables only OpenSpec-generated apply/archive/sync skills', () => {
+test('a re-run disables every OpenSpec-generated skill and leaves the person\'s own', () => {
   const dir = tempDir();
   quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply']));
   write(dir, '.agents/skills/openspec-apply-change/SKILL.md', 'metadata:\n  generatedBy: "2.0.0"\n');
   write(dir, '.agents/skills/openspec-archive-change/SKILL.md', 'metadata:\n  generatedBy: "2.0.0"\n');
   write(dir, '.agents/skills/openspec-sync-specs/SKILL.md', 'my own notes\n');
   write(dir, '.agents/skills/openspec-propose/SKILL.md', 'metadata:\n  generatedBy: "2.0.0"\n');
-  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--apply'])), 0);
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
   const read = (rel) => fs.readFileSync(path.join(dir, rel), 'utf8');
   assert.ok(read('.agents/skills/openspec-apply-change/SKILL.md').includes(STUB_MARKER));
   assert.match(read('.agents/skills/openspec-archive-change/SKILL.md'), /name: openspec-archive-change[\s\S]*spec-relay-orchestrator/);
   assert.equal(read('.agents/skills/openspec-sync-specs/SKILL.md'), 'my own notes\n');
-  assert.match(read('.agents/skills/openspec-propose/SKILL.md'), /generatedBy/);
+  // Propose, explore and the rest call a bare `openspec`, not the pinned one.
+  assert.ok(read('.agents/skills/openspec-propose/SKILL.md').includes(STUB_MARKER));
   assert.equal(plan(parseArgs(['--target', dir, ...BASE])).steps.filter((st) => st.action === 'disable').length, 0);
 });
 
@@ -323,4 +338,47 @@ test('--hooks writes the Hook enforcement line the hook reads, off by default', 
   assert.equal(keep.action, 'keep');
   assert.match(keep.reason, /--hooks on is not applied: change the "Hook enforcement" line in it yourself \(it says off\)/);
   assert.doesNotMatch(plan(parseArgs([...base, '--target', dir])).steps.find((s) => s.path.endsWith('config.yaml')).reason, /--hooks/);
+});
+
+test('a set-up repository re-runs with --target alone: the values come from its config', () => {
+  const dir = tempDir();
+  quiet(() => main(['--target', dir, ...LANGS, '--source-root', 'src', '--target-root', 'ts', '--skip-init', '--apply']));
+  const opts = parseArgs(['--target', dir, '--skip-init']);
+  assert.deepEqual([opts.sourceLanguage, opts.targetLanguage, opts.sourceRoot, opts.targetRoot], ['C#', 'TypeScript', 'src', 'ts']);
+  assert.equal(quiet(() => main(['--target', dir, '--skip-init', '--apply'])), 0);
+  // Before setup the options stay required.
+  assert.throws(() => parseArgs(['--target', tempDir()]), /--source-language is required/);
+});
+
+test('a setup that stopped before init finished starts over on the next run', () => {
+  const dir = tempDir();
+  quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply']));
+  const config = path.join(dir, 'openspec/config.yaml');
+  fs.writeFileSync(config, fs.readFileSync(config, 'utf8').replace(/^.*\n/, '# spec-relay: setup did not finish; run setup again.\n'));
+  const again = plan(parseArgs(['--target', dir, ...BASE]));
+  assert.equal(again.managed, false);
+  assert.equal(again.runInit, true);
+  assert.deepEqual(again.steps.filter((s) => s.path === config).map((s) => s.action), ['create']);
+  assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])), []);
+  // The finished run marks it as managed again.
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
+  assert.ok(fs.readFileSync(config, 'utf8').startsWith(CONFIG_MARKER));
+});
+
+test('a node_modules that git tracks in the tools folder is a conflict, never run', () => {
+  const dir = tempDir();
+  assert.equal(spawnSync('git', ['init', '-q'], { cwd: dir }).status, 0);
+  write(dir, 'openspec/spec-relay/tools/node_modules/@fission-ai/openspec/bin/openspec.js', 'require("fs").writeFileSync("ran", "")\n');
+  assert.equal(spawnSync('git', ['add', '-f', '.'], { cwd: dir }).status, 0);
+  assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])), ['openspec/spec-relay/tools/node_modules/@fission-ai/openspec/bin/openspec.js']);
+});
+
+test('the pinned version is the same in the template, the launcher and doctor', async () => {
+  const { OPENSPEC_TESTED } = await import('../scripts/doctor.mjs');
+  const pkg = JSON.parse(fs.readFileSync(path.join(KIT_ROOT, 'templates/openspec-tools/package.json'), 'utf8'));
+  const lock = JSON.parse(fs.readFileSync(path.join(KIT_ROOT, 'templates/openspec-tools/package-lock.json'), 'utf8'));
+  assert.equal(pkg.dependencies['@fission-ai/openspec'], OPENSPEC_VERSION);
+  assert.equal(lock.packages['node_modules/@fission-ai/openspec'].version, OPENSPEC_VERSION);
+  assert.equal(lock.packages[''].dependencies['@fission-ai/openspec'], OPENSPEC_VERSION);
+  assert.equal(OPENSPEC_TESTED, OPENSPEC_VERSION);
 });

@@ -154,7 +154,7 @@ export function archiveCalls(command) {
 function archiveDenial(root, { name, literal, flags }, subagent) {
   if (flags.some((f) => f === '--help' || f === '-h')) return null;
   if (subagent) return 'only the orchestrator archives a change, after the person agrees in the chat';
-  if (!name) return 'name the change: openspec archive <change> --yes, after its gate passes and the person agrees';
+  if (!name) return 'name the change: node "<kit>/scripts/openspec.mjs" archive <change> --yes, after its gate passes and the person agrees';
   if (!literal) return `write the change name itself in the command (not ${name}), so the kit can check its gate`;
   const dir = path.join(root, 'openspec/changes', name);
   if (!fs.existsSync(dir)) return null;

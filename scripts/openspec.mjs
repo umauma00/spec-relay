@@ -23,7 +23,8 @@ export const OPENSPEC_VERSION = '2.0.0';
 // Where setup installs OpenSpec, relative to the repository being migrated.
 export const TOOLS_DIR = 'openspec/spec-relay/tools';
 const BIN = 'node_modules/@fission-ai/openspec/bin/openspec.js';
-const SETUP_HINT = 'run the kit\'s setup.mjs again (the orchestrator does it with the values in openspec/config.yaml); it installs OpenSpec into openspec/spec-relay/tools with npm ci';
+const SETUP = path.join(path.dirname(fileURLToPath(import.meta.url)), 'setup.mjs');
+const SETUP_HINT = `run setup again (node "${SETUP}" --target . --apply in the repository); it installs OpenSpec into ${TOOLS_DIR} with npm ci`;
 
 // Windows environment names are case-insensitive.
 function envValue(env, name) {
@@ -105,7 +106,11 @@ export function runCommand(launch, args, options = {}, hint = '') {
 export function runOpenspec(args, options = {}, root = options.cwd ?? process.cwd()) {
   const found = findOpenspec(root);
   if (!found.launch) return { notInstalled: true, pinned: found.pinned, reason: found.reason, status: null, stdout: '', stderr: '' };
-  return runCommand(found.launch, args, options);
+  // OpenSpec does not see this folder as a project install, so its update
+  // notice would tell people to `npm install -g` a newer version. The kit pins
+  // the version; a newer one comes with a kit update.
+  const env = { ...(options.env ?? process.env), OPENSPEC_NO_UPDATE_CHECK: '1' };
+  return runCommand(found.launch, args, { ...options, env });
 }
 
 // { ok, version } or { ok: false, notInstalled, pinned, reason } with a message a person can act on.
@@ -114,7 +119,7 @@ export function probeOpenspec(options = {}) {
   if (result.notInstalled) return { ok: false, notInstalled: true, pinned: result.pinned, reason: result.reason };
   if (result.error || result.status !== 0) {
     const detail = (result.error?.message || result.stderr || result.stdout || '').trim().split(/\r?\n/).slice(0, 3).join(' ');
-    return { ok: false, reason: `OpenSpec in ${TOOLS_DIR} does not run (Node.js 22.12 or later is required; this is ${process.version}). ${detail}`.trim() };
+    return { ok: false, reason: `"openspec --version" failed (Node.js ${process.version}): ${detail || 'no output'}` };
   }
   return { ok: true, version: result.stdout.trim() };
 }
@@ -122,7 +127,17 @@ export function probeOpenspec(options = {}) {
 // npm, which setup uses to install OpenSpec. On Windows npm.cmd runs as
 // `node <dir>/node_modules/npm/bin/npm-cli.js`.
 export function findNpm(options = {}) {
-  return findCommand('npm', { npmScript: 'npm/bin/npm-cli.js', ...options });
+  // Node's own folder holds npm.cmd and node_modules/npm, also when PATH lacks it.
+  return findCommand('npm', { npmScript: 'npm/bin/npm-cli.js', extraDirs: [path.dirname(process.execPath)], ...options });
+}
+
+// Files under the tools folder's node_modules that git tracks. setup and
+// doctor run the pinned OpenSpec from there, so in a repository that ships its
+// own node_modules they refuse instead of running someone else's code.
+export function trackedModules(root) {
+  const result = spawnSync('git', ['ls-files', '-z', '--', `${TOOLS_DIR}/node_modules`], { cwd: root, encoding: 'utf8', windowsHide: true });
+  if (result.status !== 0 || !result.stdout) return [];
+  return result.stdout.split('\0').filter(Boolean);
 }
 
 function invokedDirectly() {

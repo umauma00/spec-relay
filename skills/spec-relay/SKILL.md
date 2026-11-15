@@ -113,7 +113,12 @@ stop halfway on something the machine or the host lacks.
      settings to the person.
 2. If `openspec/config.yaml` already contains `# spec-relay: managed`, setup is
    done: read its context, run the trial (step 6) if the check reported `trial`
-   as `warn`, and go to the first unfinished step.
+   as `warn`, and go to the first unfinished step. When the check reports
+   `openspec` or `workflows` as `fail` with "run setup again" (common right
+   after a clone, or after an OpenSpec update), run
+   `node "<kit>/scripts/setup.mjs" --target .` (the values come from the
+   config), show the plan, run it again with `--apply` after the person agrees,
+   then run the check again.
 3. Otherwise ask, one question at a time: the source language (propose what you
    detect from the files), the target language, the source root, the target root,
    the language for artifacts (default: the person's language), how many
@@ -129,8 +134,9 @@ stop halfway on something the machine or the host lacks.
    without `--apply`, show the plan, and run it again with `--apply` after the
    person agrees. On a conflict, show it and ask how to resolve it; never
    overwrite, move or delete the person's files to get past it.
-   Setup replaces OpenSpec's generic apply, archive and sync workflows with
-   stubs that point here, because they skip the review gate. Every
+   Setup replaces every generic OpenSpec skill with a stub that points here:
+   apply, archive and sync skip the review gate, and the others call a bare
+   `openspec` instead of the pinned one. Every
    `node "<kit>/scripts/openspec.mjs" update` restores them (the check reports `workflows` then); run
    setup again after each update.
 5. Run the environment check again: now it also compares the schemas, the

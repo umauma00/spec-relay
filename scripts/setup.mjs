@@ -21,15 +21,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runOpenspec, findNpm, runCommand, TOOLS_DIR } from './openspec.mjs';
+import { runOpenspec, probeOpenspec, findNpm, runCommand, trackedModules, TOOLS_DIR } from './openspec.mjs';
 
 export const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SCHEMAS = ['spec-relay-survey', 'spec-relay-target', 'spec-relay-extract', 'spec-relay-amend', 'spec-relay-port'];
 export const CONFIG_MARKER = '# spec-relay: managed';
-// Generic OpenSpec workflows that bypass the spec-relay review gate: anything
-// that applies (ticks the tracked file), archives (including bulk-archive) or
-// syncs specs. Matched by name so opt-in profile workflows are covered too.
-const BYPASS_NAME = /apply|archive|sync/;
+// The first line of a config this script wrote before init finished. A run
+// that stops on the way leaves it, and the next run starts over.
+const PENDING_MARKER = '# spec-relay: setup did not finish; run setup again.';
+// The files that pin OpenSpec in the repository, from templates/openspec-tools/.
+const TOOL_FILES = ['package.json', 'package-lock.json', '.gitignore'];
+// Generic OpenSpec skills. Apply (ticks the tracked file), archive (also
+// bulk-archive) and sync bypass the review gate; the others (propose, explore,
+// update ...) are not part of the spec-relay flow and call a bare `openspec`,
+// which is whatever version is on PATH, not the one pinned here. So every
+// OpenSpec-generated skill is replaced, opt-in profile workflows included.
+const BYPASS_NAME = /^openspec-/;
 // OpenSpec 2.x writes every skill once, here, and no command files. Copilot
 // reads this folder itself, so OpenSpec makes no link for it.
 export const SKILLS_DIR = '.agents/skills';
@@ -37,9 +44,9 @@ export const STUB_MARKER = '<!-- spec-relay: disabled -->';
 
 export function stubFor(file) {
   const base = path.basename(path.dirname(file));
-  const description = 'Disabled by spec-relay in this repository. Select the spec-relay-orchestrator agent to apply, review, archive or sync OpenSpec changes.';
+  const description = 'Disabled by spec-relay in this repository. Select the spec-relay-orchestrator agent to propose, apply, review, archive or sync OpenSpec changes.';
   const front = `---\nname: ${base}\ndescription: ${description}\n---\n`;
-  return `${front}\n${STUB_MARKER}\n\nThis repository is migrated with spec-relay. Applying, archiving or syncing an OpenSpec change here\nmust go through the \`spec-relay-orchestrator\` agent, which runs the human review gate.\nDo not perform this workflow. Tell the person to select \`spec-relay-orchestrator\` (Copilot CLI: \`/agent\`) and stop.\n`;
+  return `${front}\n${STUB_MARKER}\n\nThis repository is migrated with spec-relay. Every OpenSpec workflow here (proposing, applying,\narchiving or syncing a change) goes through the \`spec-relay-orchestrator\` agent, which runs the\nhuman review gate and the OpenSpec version pinned in this repository.\nDo not perform this workflow. Tell the person to select \`spec-relay-orchestrator\` (Copilot CLI: \`/agent\`) and stop.\n`;
 }
 const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
 
@@ -91,6 +98,16 @@ export function parseArgs(argv) {
     } else throw new UsageError(`unknown option: ${arg}`);
   }
   if (opts.help) return opts;
+  // A repository set up already keeps these in its config (they are not
+  // applied again), so `setup.mjs --target . --apply` is enough to re-run.
+  const managedConfig = readText(path.join(path.resolve(opts.target), 'openspec/config.yaml'));
+  if (managedConfig.includes(CONFIG_MARKER)) {
+    const value = (label) => managedConfig.match(new RegExp(`^\\s*${label}[^:\\n]*:[ \\t]*(.+?)\\s*$`, 'm'))?.[1];
+    opts.sourceLanguage ??= value('Source language');
+    opts.targetLanguage ??= value('Target language');
+    opts.targetRoot ??= value('Target root');
+    if (!argv.includes('--source-root')) opts.sourceRoot = value('Source root') ?? opts.sourceRoot;
+  }
   for (const [flag, key] of [['--source-language', 'sourceLanguage'], ['--target-language', 'targetLanguage'], ['--target-root', 'targetRoot']]) {
     if (!opts[key]) throw new UsageError(`${flag} is required`);
   }
@@ -257,6 +274,7 @@ export function plan(opts) {
   const steps = [];
   const configYaml = path.join(opts.target, 'openspec/config.yaml');
   const managed = exists(configYaml) && readText(configYaml).includes(CONFIG_MARKER);
+  const pending = exists(configYaml) && readText(configYaml).startsWith(PENDING_MARKER);
   for (const schema of SCHEMAS) {
     const from = path.join(KIT_ROOT, 'openspec-schemas', schema);
     for (const rel of listFiles(from)) {
@@ -268,13 +286,16 @@ export function plan(opts) {
     }
   }
   // The pinned OpenSpec: the kit's package.json and lock, compared like the schemas.
-  const toolsFrom = path.join(KIT_ROOT, 'templates/openspec-tools');
-  for (const rel of listFiles(toolsFrom)) {
+  // JSON is compared parsed, so a reformatted file is still the kit's.
+  for (const rel of TOOL_FILES) {
     const dest = path.join(opts.target, TOOLS_DIR, rel);
-    const content = fs.readFileSync(path.join(toolsFrom, rel), 'utf8');
-    if (!fs.existsSync(dest)) steps.push({ action: 'create', path: dest, content });
-    else if (readText(dest) === normalizeText(content)) steps.push({ action: 'keep', path: dest });
-    else steps.push({ action: 'conflict', path: dest, reason: 'differs from the kit version; the kit pins the OpenSpec it is tested with' });
+    const content = fs.readFileSync(path.join(KIT_ROOT, 'templates/openspec-tools', rel), 'utf8');
+    if (!fs.existsSync(dest)) steps.push({ action: 'create', path: dest, content, tool: true });
+    else if (sameFile(readText(dest), normalizeText(content), rel)) steps.push({ action: 'keep', path: dest });
+    else steps.push({ action: 'conflict', path: dest, reason: 'differs from the kit version, which pins the OpenSpec the kit is tested with; if it is the previous kit version, delete it and run setup again (README)' });
+  }
+  for (const file of trackedModules(opts.target).slice(0, 3)) {
+    steps.push({ action: 'conflict', path: path.join(opts.target, file), reason: 'git tracks files under the pinned OpenSpec\'s node_modules; setup runs OpenSpec from there, so remove them from the repository (git rm -r --cached) first' });
   }
   const configYml = path.join(opts.target, 'openspec/config.yml');
   if (exists(configYml)) {
@@ -285,10 +306,10 @@ export function plan(opts) {
     const note = opts.hooksGiven && hooks !== opts.hooks
       ? `; --hooks ${opts.hooks} is not applied: change the "Hook enforcement" line in it yourself (it says ${hooks})` : '';
     steps.push({ action: 'keep', path: configYaml, reason: `already managed by spec-relay; edit it to change values${note}` });
-  } else if (exists(configYaml)) {
+  } else if (exists(configYaml) && !pending) {
     steps.push({ action: 'conflict', path: configYaml, reason: 'an existing OpenSpec config; merge templates/openspec-config.yaml into it by hand' });
   } else {
-    steps.push({ action: 'create', path: configYaml, content: renderConfig(opts) });
+    steps.push({ action: 'create', path: configYaml, content: renderConfig(opts), config: true, reason: pending ? 'replaces the config of a setup that did not finish' : undefined });
   }
   if (!managed && isDirWithEntries(path.join(opts.target, opts.targetRoot))) {
     steps.push({ action: 'conflict', path: path.join(opts.target, opts.targetRoot), reason: 'the target root already exists and is not empty' });
@@ -300,7 +321,7 @@ export function plan(opts) {
       steps.push({ action: 'leftover', path: file, reason: 'left by OpenSpec 1.x or spec-relay 0.6.0; see "0.6.0 から更新するとき" in the README' });
     }
   }
-  const install = !opts.skipInit && installedVersion(opts.target) !== PINNED_VERSION;
+  const install = !opts.skipInit && !installedOk(opts.target);
   const runInit = !managed && !opts.skipInit;
   if (runInit) {
     for (const file of initConflicts(opts.target)) {
@@ -317,14 +338,27 @@ export function plan(opts) {
 
 const PINNED_VERSION = JSON.parse(fs.readFileSync(path.join(KIT_ROOT, 'templates/openspec-tools/package.json'), 'utf8')).dependencies['@fission-ai/openspec'];
 
-// The OpenSpec version installed in the repository, or null.
-export function installedVersion(target) {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(target, TOOLS_DIR, 'node_modules/@fission-ai/openspec/package.json'), 'utf8')).version || null;
-  } catch { return null; }
+// Whether the pinned OpenSpec is installed and runs: a damaged tree (an
+// interrupted npm ci, a quarantined file) is reinstalled, not kept.
+function installedOk(target) {
+  if (!exists(path.join(target, TOOLS_DIR, 'node_modules/.package-lock.json'))) return false;
+  const probe = probeOpenspec({ cwd: target, timeout: 60000 });
+  return probe.ok && probe.version === PINNED_VERSION;
 }
 
-const NPM_CI = ['ci', '--ignore-scripts', '--no-audit', '--no-fund'];
+function sameFile(theirs, ours, rel) {
+  if (!rel.endsWith('.json')) return theirs === ours;
+  try { return JSON.stringify(sortKeys(JSON.parse(theirs))) === JSON.stringify(sortKeys(JSON.parse(ours))); } catch { return false; }
+}
+function sortKeys(value) {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((k) => [k, sortKeys(value[k])]));
+}
+
+// --workspaces=false: a workspaces glob in a package.json above must not make
+// npm install the repository's own project instead.
+const NPM_CI = ['ci', '--ignore-scripts', '--no-audit', '--no-fund', '--no-update-notifier', '--workspaces=false'];
 
 function npmProblem() {
   const result = runCommand(findNpm(), ['--version'], { timeout: 60000 });
@@ -336,7 +370,7 @@ function npmProblem() {
 function runInstall(opts) {
   const result = runCommand(findNpm(), NPM_CI, { cwd: path.join(opts.target, TOOLS_DIR), stdio: 'inherit' });
   if (result.error || result.status !== 0) {
-    throw new Error(`npm ci in ${TOOLS_DIR} failed${result.error ? `: ${result.error.message}` : ` with exit code ${result.status}`} (it downloads OpenSpec ${PINNED_VERSION} from the npm registry; check the network or proxy settings)`);
+    throw new Error(`npm ci in ${TOOLS_DIR} failed${result.error ? `: ${result.error.message}` : ` with exit code ${result.status}`} (see npm's message above; it downloads OpenSpec ${PINNED_VERSION} from the npm registry, so a network or proxy problem is a common cause)`);
   }
 }
 
@@ -378,20 +412,33 @@ export function main(argv) {
   const created = steps.filter((s) => s.action === 'create');
   const modules = path.join(opts.target, TOOLS_DIR, 'node_modules');
   const hadModules = exists(modules);
-  // Undo this run so the next run is a first run again (the config marker
-  // would otherwise make it skip init).
-  const undo = (error) => {
-    for (const step of created) fs.rmSync(step.path, { force: true });
-    if (!hadModules) fs.rmSync(modules, { recursive: true, force: true });
-    return new Error(`${error.message}. The files this run created were removed; fix the problem and run setup again.`);
-  };
-  for (const step of created) {
+  const write = (step, content = step.content) => {
     fs.mkdirSync(path.dirname(step.path), { recursive: true });
-    fs.writeFileSync(step.path, step.content);
-  }
+    fs.writeFileSync(step.path, content);
+  };
+  // Undo this run so the next run is a first run again. The config goes
+  // first; files a virus scanner still holds get retries, and what cannot be
+  // removed is named instead of hiding the real error.
+  const undo = (error) => {
+    const left = [];
+    for (const step of [...created.filter((s) => s.config), ...created.filter((s) => !s.config)]) {
+      try { fs.rmSync(step.path, { force: true, maxRetries: 5, retryDelay: 200 }); } catch { left.push(path.relative(opts.target, step.path)); }
+    }
+    if (!hadModules) {
+      try { fs.rmSync(modules, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { left.push(path.relative(opts.target, modules)); }
+    }
+    return new Error(`${error.message}. The files this run created were removed${left.length ? `, except ${left.join(', ')}` : ''}; fix the problem and run setup again.`);
+  };
+  // The pinned OpenSpec first, then the rest. A new config is written with a
+  // pending first line and marked as managed only after init, so a run that
+  // stops on the way (a lost network, a closed terminal) is a first run again.
+  const config = created.find((s) => s.config);
   try {
+    for (const step of created.filter((s) => s.tool)) write(step);
     if (install) runInstall(opts);
+    for (const step of created.filter((s) => !s.tool)) write(step, step.config ? step.content.replace(/^.*\n/, `${PENDING_MARKER}\n`) : step.content);
     if (willInit) runInit(opts);
+    if (config) write(config);
   } catch (error) {
     throw undo(error);
   }

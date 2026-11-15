@@ -122,9 +122,21 @@ export function toolchainFor(language) {
 // Each returns { id, level: 'ok' | 'info' | 'warn' | 'fail', message, fix? }.
 // `ctx.t(ja, en)` picks the person's language.
 
+// Some packages the pinned OpenSpec depends on (@inquirer/*, mute-stream)
+// declare node ^22.22.2 || ^24.15.0 || >=26; npm ci warns (EBADENGINE) below.
+const NODE_DEPS = [['22.22.2', 22], ['24.15.0', 24], ['26.0.0', Infinity]];
+
 export function checkNode(ctx) {
   const v = parseVersion(ctx.nodeVersion);
-  if (v && compareVersions(v, NODE_MIN) >= 0) return { id: 'node', level: 'ok', message: `Node.js ${showVersion(v)}` };
+  if (v && compareVersions(v, NODE_MIN) >= 0) {
+    const fits = NODE_DEPS.some(([min, major]) => compareVersions(v, min) >= 0 && (major === Infinity || v[0] === major));
+    if (fits) return { id: 'node', level: 'ok', message: `Node.js ${showVersion(v)}` };
+    return {
+      id: 'node', level: 'warn',
+      message: ctx.t(`Node.js ${showVersion(v)} では、OpenSpec が使うパッケージの一部が対象外です（22.22.2 以上の 22 系、24.15.0 以上の 24 系、または 26 以上）。導入の npm ci が警告を出し、npm の engine-strict が有効だと止まります。`, `with Node.js ${showVersion(v)}, some packages the pinned OpenSpec uses are out of range (22.x from 22.22.2, 24.x from 24.15.0, or 26 and later); npm ci warns, and stops when npm's engine-strict is on.`),
+      fix: ctx.t('`winget install OpenJS.NodeJS.LTS` で新しい LTS を入れることをおすすめします。', 'Updating to a current LTS is recommended (Windows: `winget install OpenJS.NodeJS.LTS`).'),
+    };
+  }
   return {
     id: 'node', level: 'fail',
     message: ctx.t(`Node.js ${ctx.nodeVersion} は古すぎます。${NODE_MIN} 以上が必要です（OpenSpec の要件）。`, `Node.js ${ctx.nodeVersion} is too old: ${NODE_MIN} or later is required (OpenSpec needs it).`),
@@ -141,6 +153,7 @@ export function checkKit(ctx) {
     'com.github.copilot/hooks/hooks.json',
     ...['orchestrator', 'analyst', 'checker', 'implementer'].map((a) => `com.github.copilot/agents/spec-relay-${a}.agent.md`),
     'skills/spec-relay/SKILL.md', 'skills/spec-relay-view/SKILL.md',
+    ...['package.json', 'package-lock.json', '.gitignore'].map((f) => `templates/openspec-tools/${f}`),
   ];
   const missing = needed.filter((rel) => !ctx.exists(path.join(ctx.kitRoot, rel)));
   if (!missing.length) return { id: 'kit', level: 'ok', message: `spec-relay ${ctx.kitVersion} (${ctx.kitRoot})` };
@@ -157,8 +170,8 @@ export function checkKit(ctx) {
 // setup with npm ci). Before setup, only npm is needed; after it, the pinned
 // CLI must be installed there and run.
 export function checkOpenspec(ctx) {
-  const rerun = ctx.t('導入スクリプトをもう一度実行してください（オーケストレーターが openspec/config.yaml の値で実行し、`npm ci` で入れ直します）。',
-    'Run setup again (the orchestrator runs it with the values in openspec/config.yaml; it reinstalls OpenSpec with `npm ci`).');
+  const rerun = ctx.t('導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`。`npm ci` で入れ直します）。',
+    'Run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`; it reinstalls OpenSpec with `npm ci`).');
   if (!ctx.setUp) {
     const npm = ctx.exec('npm', ['--version'], { cwd: ctx.target, npmScript: 'npm/bin/npm-cli.js' });
     if (!npm.found || npm.status !== 0) {
@@ -170,6 +183,15 @@ export function checkOpenspec(ctx) {
       };
     }
     return { id: 'openspec', level: 'ok', message: ctx.t(`OpenSpec ${OPENSPEC_TESTED} は、導入のときにこのリポジトリ（openspec/spec-relay/tools）へ入れます（npm ${(npm.stdout || '').trim()}）。`, `setup installs OpenSpec ${OPENSPEC_TESTED} into this repository (openspec/spec-relay/tools) with npm ${(npm.stdout || '').trim()}.`) };
+  }
+  // Never run a node_modules that came with the repository.
+  const tracked = ctx.trackedModules ? ctx.trackedModules(ctx.target) : [];
+  if (tracked.length) {
+    return {
+      id: 'openspec', level: 'fail',
+      message: ctx.t(`git が openspec/spec-relay/tools/node_modules の中のファイルを管理しています（${tracked.length} 件）。キットはここから OpenSpec を起動するので、リポジトリに含まれたコードは実行しません。`, `git tracks ${tracked.length} file(s) under openspec/spec-relay/tools/node_modules; the kit runs OpenSpec from there, so it does not run code that came with the repository.`),
+      fix: ctx.t('`git rm -r --cached openspec/spec-relay/tools/node_modules` でリポジトリから外し、導入スクリプトをもう一度実行してください。', 'Remove them from the repository (`git rm -r --cached openspec/spec-relay/tools/node_modules`), then run setup again.'),
+    };
   }
   const probe = ctx.probeOpenspec(ctx.target);
   if (!probe.ok) {
@@ -388,9 +410,9 @@ export function checkSetup(ctx) {
   if (bypass.length) {
     results.push({
       id: 'workflows', level: 'fail',
-      message: ctx.t(`OpenSpec 標準の apply・archive・sync が元に戻っています（\`openspec update\` のあとによく起きます）: ${bypass.map((f) => path.relative(ctx.target, f).replace(/\\/g, '/')).join(', ')}`,
-        `OpenSpec's generic apply, archive or sync workflows are back (usually after \`openspec update\`): ${bypass.map((f) => path.relative(ctx.target, f).replace(/\\/g, '/')).join(', ')}`),
-      fix: ctx.t('これらはレビューの確認を通らずに archive できてしまいます。導入スクリプトをもう一度実行してください（オーケストレーターが openspec/config.yaml の値で実行します）。', 'They archive without the review gate. Run setup again (the orchestrator runs it with the values in openspec/config.yaml).'),
+      message: ctx.t(`OpenSpec 標準のスキル（apply・archive・sync など）が元に戻っています（\`openspec update\` のあとによく起きます）: ${bypass.map((f) => path.relative(ctx.target, f).replace(/\\/g, '/')).join(', ')}`,
+        `OpenSpec's generic skills (apply, archive, sync ...) are back (usually after \`openspec update\`): ${bypass.map((f) => path.relative(ctx.target, f).replace(/\\/g, '/')).join(', ')}`),
+      fix: ctx.t('これらはレビューの確認を通らずに archive でき、PATH にある別の版の `openspec` を呼びます。導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。', 'They archive without the review gate and call whatever `openspec` is on PATH. Run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`).'),
     });
   }
   const sourceRoot = ctx.cleanValue(ctx.configValue(ctx.target, 'Source root', '.'));
@@ -726,7 +748,8 @@ async function machineContext(opts, overrides = {}) {
       // A timeout or a full buffer is "could not tell", never a result.
       return { found, status: r.error ? null : r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
     },
-    probeOpenspec: (cwd) => launcher.probeOpenspec({ cwd }),
+    probeOpenspec: (cwd) => launcher.probeOpenspec({ cwd, timeout: 60000 }),
+    trackedModules: (root) => launcher.trackedModules(root),
   };
   Object.assign(ctx, overrides);
   ctx.lang = ctx.lang || pickLanguage(opts, ctx.readFile);
