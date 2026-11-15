@@ -40,7 +40,7 @@ spec-relay は OpenSpec の仕組みをそのまま使い、独自のスキー�
 | archive | port では完了、それ以外では **承認**。extract と amend は仕様をベースラインに反映する |
 | `openspec/config.yaml` の context | 移行元・移行先の言語とフォルダー。全成果物の生成に注入される |
 
-同じ名前の change は同じ日に2回 archive できない（OpenSpec 1.17.0 で確認）ため、2回目の survey・port・amend には `-v2` のような接尾辞を付けます。スクリプトはこれを同じ change として扱います。
+同じ名前の change は同じ日に2回 archive できない（OpenSpec 1.17.0 で確認。2.0.0 でも archive の処理は変わっていない）ため、2回目の survey・port・amend には `-v2` のような接尾辞を付けます。スクリプトはこれを同じ change として扱います。
 
 ### 工程 1：調査（survey）の成果物
 
@@ -116,7 +116,7 @@ port は動作を変えないので、spec の差分を持ちません（`skip_s
 | `review.md` | 直した要件と影響の確認 |
 
 - 直してよいのは読み違いだけです。動きそのものを変えたい（バグを直すなど）ときは、移行後の別作業にします。
-- MODIFIED は要件を丸ごと置き換えます。OpenSpec は、ベースラインにあるシナリオが抜けた MODIFIED を archive しない（1.17.0 で確認）ので、既存のシナリオ名は残して中身を直します。
+- MODIFIED は要件を丸ごと置き換えます。OpenSpec は、ベースラインにあるシナリオが抜けた MODIFIED を archive しない（1.17.0 で確認。2.0.0 でも同じ処理）ので、既存のシナリオ名は残して中身を直します。
 - port は着手時のベースラインのハッシュを proposal.md に記録します（`gate.mjs baseline`）。修正が archive されてハッシュが変わると `gate.mjs port-done` が止まるので、古い仕様のまま実装を終えることはありません。
 
 ## 並列での進め方
@@ -193,11 +193,12 @@ flowchart LR
 2. **先に AI が照合する**：解析と修正では、別の AI が要件と画面を元コードと突き合わせ、誤りを人のレビューの前に落とします。
 3. **レビューの場所を選べる**：チャットで1項目ずつでも、ファイルや GitHub の PR で人がまとめて見て、終わったら AI に伝える形でもかまいません。
 4. **手順**：スキルとエージェントの指示で、AI は人が認めた項目だけをチェックし、明示的な承認なしに archive しない。直した項目はチェックを外して確認し直す。
-5. **機械的な確認**：`openspec archive --yes` は未チェックの項目や、チェックリストに載っていない要件があっても止まらない（1.17.0 で確認）。そこで archive の前に `scripts/gate.mjs review` を実行し、すべての要件・画面・質問・コンテキストに項目があること、すべてチェック済みであること、質問ごとの判断とレビュー担当の名前が書かれていること、照合が解決していること、元ファイルがすべて inventory にあることを確かめる。extract と amend では、調査が archive 済みで、capability が調査の一覧（または計画）にあり、change 名がその capability のものであることも確かめる（amend は直す対象のベースライン仕様も）。止まったときは、人にしかできないこと（`next.person`、利用者の言語）と AI が直すこと（`next.agent`）を分けて出す。
-6. **抜け道を外す**：OpenSpec 標準の apply・archive・sync のスキルとコマンドは、チェックを付けて archive まで進めてしまうため、導入スクリプトが中身をオーケストレーターへの案内に置き換える（ファイルを消すと、`openspec update` が利用者の OpenSpec 全体のプロファイルを狭めてしまうため、消さない）。
+5. **機械的な確認**：`openspec archive --yes` は未チェックの項目や、チェックリストに載っていない要件があっても止まらない（1.17.0 で確認。2.0.0 でも同じ処理）。そこで archive の前に `scripts/gate.mjs review` を実行し、すべての要件・画面・質問・コンテキストに項目があること、すべてチェック済みであること、質問ごとの判断とレビュー担当の名前が書かれていること、照合が解決していること、元ファイルがすべて inventory にあることを確かめる。extract と amend では、調査が archive 済みで、capability が調査の一覧（または計画）にあり、change 名がその capability のものであることも確かめる（amend は直す対象のベースライン仕様も）。止まったときは、人にしかできないこと（`next.person`、利用者の言語）と AI が直すこと（`next.agent`）を分けて出す。
+6. **抜け道を外す**：OpenSpec 標準の apply・archive・sync のスキル（`.agents/skills/`）は、チェックを付けて archive まで進めてしまうため、導入スクリプトが中身をオーケストレーターへの案内に置き換える（ファイルを消すと、`openspec update` が利用者の OpenSpec 全体のプロファイルを狭めてしまうため、消さない）。OpenSpec 2.0.0 の `openspec update` は毎回これらを元の中身に戻すので、update のたびに導入スクリプトを実行し直す（doctor が `workflows` で知らせる）。
+   OpenSpec の版は移行対象のリポジトリごとに固定する。導入スクリプトがキットの `templates/openspec-tools/`（package.json と package-lock.json）を `openspec/spec-relay/tools/` に置いて `npm ci` で入れ、キットのスクリプトとオーケストレーターは `node <キット>/scripts/openspec.mjs` でそれだけを起動する。グローバルの `openspec` は使わないので、利用者が別の版を入れても、2.0.0 のときのように置き場所が変わって抜け道が戻ることはない。版を上げるのは、キットが lock ファイルを更新したときだけ（doctor は違う版を FAIL にする）。移行中のリポジトリでは、古い package.json と package-lock.json を消してから導入スクリプトを実行し直す。
 7. **記録**：review.md の各項目と質問への判断が change と一緒に archive に残る。
 
-8. **実行前に拒否する（フック、試験中・既定は無効）**：`com.github.copilot/hooks/hooks.json` の preToolUse フック（`scripts/hook.mjs`）が、`openspec/config.yaml` で `Hook enforcement` を `on` にしたリポジトリでだけ、gate を通らない archive、元コード・ベースライン仕様・archive 済みの change・スキーマ・設定・キットへの書き込み、サブエージェントによる review.md・questions.md・計画・学びの記録の書き込みを拒否する。サブエージェントの呼び出しにもフックは働く（呼び出しに `agentId`・`agentType` が付く。オーケストレーター自身が既定のエージェントのサブエージェントとして動くときは、オーケストレーターとして扱う）。コマンドの中の文字列（コミットメッセージや検索語）に書かれた `openspec archive` は呼び出しとして扱わない。拒否の理由は ASCII に変換して返すので、Windows のコンソールの文字コードで壊れない。フック自体が動かないとき（node がないなど）は、拒否せずに通常の許可確認へ進む。Copilot は command フックが 0 以外で終わるとそのツールを拒否するため、壊れたフックですべての操作が止まらないよう、ラッパーで必ず 0 を返す。
+8. **実行前に拒否する（フック、試験中・既定は無効）**：`com.github.copilot/hooks/hooks.json` の preToolUse フック（`scripts/hook.mjs`）が、`openspec/config.yaml` で `Hook enforcement` を `on` にしたリポジトリでだけ、gate を通らない archive、元コード・ベースライン仕様・archive 済みの change・スキーマ・固定した OpenSpec（`openspec/spec-relay/tools/`）・設定・キットへの書き込み、サブエージェントによる review.md・questions.md・計画・学びの記録の書き込みを拒否する。サブエージェントの呼び出しにもフックは働く（呼び出しに `agentId`・`agentType` が付く。オーケストレーター自身が既定のエージェントのサブエージェントとして動くときは、オーケストレーターとして扱う）。コマンドの中の文字列（コミットメッセージや検索語）に書かれた `openspec archive` は呼び出しとして扱わない。拒否の理由は ASCII に変換して返すので、Windows のコンソールの文字コードで壊れない。フック自体が動かないとき（node がないなど）は、拒否せずに通常の許可確認へ進む。Copilot は command フックが 0 以外で終わるとそのツールを拒否するため、壊れたフックですべての操作が止まらないよう、ラッパーで必ず 0 を返す。
 
 フックでも区別できないことが2つ残ります。チャットで承認された項目は AI が review.md に書くので、AI が承認なしにチェックを付けることは止められません。シェルコマンドでの書き込みも読み取らないので、波の前後の `gate.mjs guard` が後から見つけます。チェック後に内容が変わったことを検出する（レビュー時点のハッシュ）ことも、次の段階の課題です（下の「今後の課題」）。
 

@@ -27,7 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Same shapes OpenSpec 1.17.0 counts as tasks and requirements, so the gate never
+// Same shapes OpenSpec 2.0.0 (and 1.17.0) counts as tasks and requirements, so the gate never
 // sees fewer items than `openspec instructions apply` or `openspec archive` do.
 const CHECKBOX = /^\s*(?:[-*+]|\d+[.)])\s+\[(.?)\]\s*(.*)$/;
 const REQUIREMENT = /^###\s*Requirement:\s*(.+?)\s*$/i;
@@ -274,7 +274,7 @@ export function sourceFiles(root) {
   const prefix = rel ? `${rel.split(path.sep).join('/')}/` : '';
   const skip = (file) => file === '.git' || file.startsWith('.git/') || file === 'openspec' || file.startsWith('openspec/')
     || (target && (file === target || file.startsWith(`${target}/`)))
-    || /^\.github\/(skills\/openspec-|prompts\/opsx-)/.test(file);
+    || /^\.agents\/skills\/(openspec-|\.openspec-target$)/.test(file);
 
   const git = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', prefix || '.'], { cwd: base, encoding: 'buffer', windowsHide: true, maxBuffer: Infinity });
   if (git.status === 0 && git.stdout) {

@@ -35,7 +35,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const NODE_MIN = '22.12.0';
-export const OPENSPEC_TESTED = '1.17.0';
+export const OPENSPEC_TESTED = '2.0.0';
 // Recommended client versions: fixes for parallel subagents and their permission
 // prompts (Copilot CLI 1.0.106-1.0.109); the Copilot harness is the VS Code default from 1.143.
 export const CLIENT_MIN = { cli: '1.0.109', vscode: '1.143.0' };
@@ -78,7 +78,7 @@ function setTo(env, name) {
   return key === undefined || env[key] === undefined ? undefined : String(env[key]).trim().toLowerCase();
 }
 
-// The same rules as OpenSpec 1.17.0 (src/telemetry): an opt-out in the
+// The same rules as OpenSpec 2.0.0 (src/telemetry, unchanged since 1.17.0): an opt-out in the
 // environment, CI, or `telemetry.enabled: false` in the global config.
 export function telemetryOff(env, platform, readFile) {
   const telemetry = setTo(env, 'OPENSPEC_TELEMETRY');
@@ -122,9 +122,21 @@ export function toolchainFor(language) {
 // Each returns { id, level: 'ok' | 'info' | 'warn' | 'fail', message, fix? }.
 // `ctx.t(ja, en)` picks the person's language.
 
+// Some packages the pinned OpenSpec depends on (@inquirer/*, mute-stream)
+// declare node ^22.22.2 || ^24.15.0 || >=26; npm ci warns (EBADENGINE) below.
+const NODE_DEPS = [['22.22.2', 22], ['24.15.0', 24], ['26.0.0', Infinity]];
+
 export function checkNode(ctx) {
   const v = parseVersion(ctx.nodeVersion);
-  if (v && compareVersions(v, NODE_MIN) >= 0) return { id: 'node', level: 'ok', message: `Node.js ${showVersion(v)}` };
+  if (v && compareVersions(v, NODE_MIN) >= 0) {
+    const fits = NODE_DEPS.some(([min, major]) => compareVersions(v, min) >= 0 && (major === Infinity || v[0] === major));
+    if (fits) return { id: 'node', level: 'ok', message: `Node.js ${showVersion(v)}` };
+    return {
+      id: 'node', level: 'warn',
+      message: ctx.t(`Node.js ${showVersion(v)} では、OpenSpec が使うパッケージの一部が対象外です（22.22.2 以上の 22 系、24.15.0 以上の 24 系、または 26 以上）。導入の npm ci が警告を出し、npm の engine-strict が有効だと止まります。`, `with Node.js ${showVersion(v)}, some packages the pinned OpenSpec uses are out of range (22.x from 22.22.2, 24.x from 24.15.0, or 26 and later); npm ci warns, and stops when npm's engine-strict is on.`),
+      fix: ctx.t('`winget install OpenJS.NodeJS.LTS` で新しい LTS を入れることをおすすめします。', 'Updating to a current LTS is recommended (Windows: `winget install OpenJS.NodeJS.LTS`).'),
+    };
+  }
   return {
     id: 'node', level: 'fail',
     message: ctx.t(`Node.js ${ctx.nodeVersion} は古すぎます。${NODE_MIN} 以上が必要です（OpenSpec の要件）。`, `Node.js ${ctx.nodeVersion} is too old: ${NODE_MIN} or later is required (OpenSpec needs it).`),
@@ -141,6 +153,7 @@ export function checkKit(ctx) {
     'com.github.copilot/hooks/hooks.json',
     ...['orchestrator', 'analyst', 'checker', 'implementer'].map((a) => `com.github.copilot/agents/spec-relay-${a}.agent.md`),
     'skills/spec-relay/SKILL.md', 'skills/spec-relay-view/SKILL.md',
+    ...['package.json', 'package-lock.json', '.gitignore'].map((f) => `templates/openspec-tools/${f}`),
   ];
   const missing = needed.filter((rel) => !ctx.exists(path.join(ctx.kitRoot, rel)));
   if (!missing.length) return { id: 'kit', level: 'ok', message: `spec-relay ${ctx.kitVersion} (${ctx.kitRoot})` };
@@ -153,45 +166,57 @@ export function checkKit(ctx) {
   };
 }
 
+// OpenSpec is pinned per repository (openspec/spec-relay/tools, installed by
+// setup with npm ci). Before setup, only npm is needed; after it, the pinned
+// CLI must be installed there and run.
 export function checkOpenspec(ctx) {
-  const install = `npm install -g @fission-ai/openspec@${OPENSPEC_TESTED}`;
-  const probe = ctx.probeOpenspec(ctx.target);
-  if (!probe.ok) {
-    const missing = /not found/.test(probe.reason);
+  const rerun = ctx.t('導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`。`npm ci` で入れ直します）。',
+    'Run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`; it reinstalls OpenSpec with `npm ci`).');
+  if (!ctx.setUp) {
+    const npm = ctx.exec('npm', ['--version'], { cwd: ctx.target, npmScript: 'npm/bin/npm-cli.js' });
+    if (!npm.found || npm.status !== 0) {
+      return {
+        id: 'openspec', level: 'fail',
+        message: npm.found ? ctx.t('npm が動きません（`npm --version` が失敗します）。導入スクリプトは npm で OpenSpec をこのリポジトリに入れます。', 'npm does not run (`npm --version` fails); setup installs OpenSpec into this repository with npm.')
+          : ctx.t('npm が見つかりません。導入スクリプトは npm で OpenSpec をこのリポジトリに入れます。', 'npm was not found; setup installs OpenSpec into this repository with npm.'),
+        fix: ctx.t('npm は Node.js に含まれています。`winget install OpenJS.NodeJS.LTS` で入れ、新しいターミナルを開いてください。', 'npm comes with Node.js: install it (`winget install OpenJS.NodeJS.LTS`) and open a new terminal.'),
+      };
+    }
+    return { id: 'openspec', level: 'ok', message: ctx.t(`OpenSpec ${OPENSPEC_TESTED} は、導入のときにこのリポジトリ（openspec/spec-relay/tools）へ入れます（npm ${(npm.stdout || '').trim()}）。`, `setup installs OpenSpec ${OPENSPEC_TESTED} into this repository (openspec/spec-relay/tools) with npm ${(npm.stdout || '').trim()}.`) };
+  }
+  // Never run a node_modules that came with the repository.
+  const tracked = ctx.trackedModules ? ctx.trackedModules(ctx.target) : [];
+  if (tracked.length) {
     return {
       id: 'openspec', level: 'fail',
-      message: missing ? ctx.t('OpenSpec CLI が見つかりません。', 'the OpenSpec CLI was not found.') : ctx.t(`OpenSpec CLI が動きません: ${probe.reason}`, `the OpenSpec CLI does not run: ${probe.reason}`),
-      fix: ctx.t(`\`${install}\` で入れ、新しいターミナルを開いてください。PowerShell で「スクリプトの実行が無効」と出たら \`npm.cmd\` と打ちます。`,
-        `Install it with \`${install}\` and open a new terminal. If PowerShell says running scripts is disabled, type \`npm.cmd\` instead of \`npm\`.`),
+      message: ctx.t(`git が openspec/spec-relay/tools/node_modules の中のファイルを管理しています（${tracked.length} 件）。キットはここから OpenSpec を起動するので、リポジトリに含まれたコードは実行しません。`, `git tracks ${tracked.length} file(s) under openspec/spec-relay/tools/node_modules; the kit runs OpenSpec from there, so it does not run code that came with the repository.`),
+      fix: ctx.t('`git rm -r --cached openspec/spec-relay/tools/node_modules` でリポジトリから外し、導入スクリプトをもう一度実行してください。', 'Remove them from the repository (`git rm -r --cached openspec/spec-relay/tools/node_modules`), then run setup again.'),
+    };
+  }
+  const probe = ctx.probeOpenspec(ctx.target);
+  if (!probe.ok) {
+    if (probe.notInstalled && !probe.pinned) {
+      return {
+        id: 'openspec', level: 'fail',
+        message: ctx.t('このリポジトリには、キットが固定する OpenSpec（openspec/spec-relay/tools）がありません。0.6.0 以前のキットで導入したリポジトリです。', 'this repository has no pinned OpenSpec (openspec/spec-relay/tools); it was set up with kit 0.6.0 or older.'),
+        fix: ctx.t('README の「0.6.0 から更新するとき」の手順に従ってください。', 'Follow "0.6.0 から更新するとき" in the README.'),
+      };
+    }
+    return {
+      id: 'openspec', level: 'fail',
+      message: probe.notInstalled ? ctx.t('OpenSpec は openspec/spec-relay/tools に固定されていますが、まだ入っていません（clone した直後によく起きます）。', 'OpenSpec is pinned in openspec/spec-relay/tools but not installed there (common right after a clone).')
+        : ctx.t(`openspec/spec-relay/tools の OpenSpec が動きません: ${probe.reason}`, `the OpenSpec in openspec/spec-relay/tools does not run: ${probe.reason}`),
+      fix: rerun,
     };
   }
   const v = parseVersion(probe.version);
-  if (!v) return { id: 'openspec', level: 'warn', message: ctx.t(`OpenSpec の版を読めません: ${probe.version}`, `cannot read the OpenSpec version: ${probe.version}`), fix: ctx.t(`\`${install}\` で入れ直してください。`, `Reinstall it with \`${install}\`.`) };
+  if (!v) return { id: 'openspec', level: 'warn', message: ctx.t(`OpenSpec の版を読めません: ${probe.version}`, `cannot read the OpenSpec version: ${probe.version}`), fix: rerun };
   const cmp = compareVersions(v, OPENSPEC_TESTED);
-  if (cmp === 0) return { id: 'openspec', level: 'ok', message: `OpenSpec ${showVersion(v)}` };
-  if (cmp < 0) {
-    return {
-      id: 'openspec', level: 'fail',
-      message: ctx.t(`OpenSpec ${showVersion(v)} は古く、キットのスキーマを扱えない場合があります（確認済みは ${OPENSPEC_TESTED}）。`, `OpenSpec ${showVersion(v)} is older than ${OPENSPEC_TESTED}, the version the kit is tested with, and may not handle its schemas.`),
-      fix: ctx.t(`\`${install}\` で入れ直してください。`, `Install the tested version: \`${install}\`.`),
-    };
-  }
+  if (cmp === 0) return { id: 'openspec', level: 'ok', message: ctx.t(`OpenSpec ${showVersion(v)}（このリポジトリに固定）`, `OpenSpec ${showVersion(v)} (pinned in this repository)`) };
   return {
-    id: 'openspec', level: 'warn',
-    message: ctx.t(`OpenSpec ${showVersion(v)} は、キットが確認した ${OPENSPEC_TESTED} より新しい版です。archive などの動きが変わっている可能性があります。`, `OpenSpec ${showVersion(v)} is newer than ${OPENSPEC_TESTED}, the version the kit is tested with; archive and validation may behave differently.`),
-    fix: ctx.t(`このまま進めてもかまいません。途中で OpenSpec のエラーが出たら \`${install}\` で確認済みの版に戻してください。`, `You may continue. If OpenSpec reports errors later, go back to the tested version: \`${install}\`.`),
-  };
-}
-
-// The kit's scripts also look in npm's global folder; a terminal opened before
-// the install (or an app started before it) does not have it on PATH, so the
-// agent's own `openspec` commands would fail there.
-export function checkOpenspecPath(ctx) {
-  if (ctx.platform !== 'win32' || ctx.openspecOnPath()) return null;
-  return {
-    id: 'openspec-path', level: 'warn',
-    message: ctx.t('OpenSpec は入っていますが、このターミナルの PATH にありません（入れる前に開いたターミナルやアプリでよく起きます）。オーケストレーターが打つ `openspec` コマンドが「認識されません」で止まります。', 'OpenSpec is installed but not on this terminal\'s PATH (common in a terminal or app opened before the install); the orchestrator\'s own `openspec` commands fail with "not recognized".'),
-    fix: ctx.t('新しいターミナルを開くか、Copilot のアプリ（VS Code・Copilot app）を再起動してから続けてください。', 'Open a new terminal, or restart the Copilot client (VS Code, the Copilot app), then continue.'),
+    id: 'openspec', level: 'fail',
+    message: ctx.t(`openspec/spec-relay/tools の OpenSpec は ${showVersion(v)} で、キットが確認した ${OPENSPEC_TESTED} と違います。`, `the OpenSpec in openspec/spec-relay/tools is ${showVersion(v)}, not ${OPENSPEC_TESTED}, the version the kit is tested with.`),
+    fix: rerun,
   };
 }
 
@@ -201,16 +226,16 @@ export function checkTelemetry(ctx) {
   return {
     id: 'telemetry', level: 'info',
     message: ctx.t('OpenSpec は初期設定で匿名の利用統計（コマンド名と版）を送ります。コードや仕様の中身は送りません。', 'OpenSpec sends anonymous usage statistics (command name and version) by default; no code or spec content.'),
-    fix: ctx.t('止めるときは `openspec config set telemetry.enabled false` を実行します（この PC のすべてのプロジェクトに効きます）。環境変数 `OPENSPEC_TELEMETRY=0` でも止まります。キットはこの設定を変えません。',
-      'To turn it off, run `openspec config set telemetry.enabled false` (all projects on this machine), or set `OPENSPEC_TELEMETRY=0`. The kit never changes this setting.'),
+    fix: ctx.t('止めるときは、移行対象のリポジトリで `node "<キットのフォルダー>/scripts/openspec.mjs" config set telemetry.enabled false` を実行します（この PC のすべてのプロジェクトに効きます）。環境変数 `OPENSPEC_TELEMETRY=0` でも止まります。キットはこの設定を変えません。',
+      'To turn it off, run `node "<kit>/scripts/openspec.mjs" config set telemetry.enabled false` in the repository being migrated (all projects on this machine), or set `OPENSPEC_TELEMETRY=0`. The kit never changes this setting.'),
   };
 }
 
-// Windows PowerShell refuses npm's openspec.ps1 shim under the default policy.
-// The kit's scripts never go through it; the person and the agent must type openspec.cmd.
+// Windows PowerShell refuses Node's npm.ps1 shim under the default policy. The
+// kit runs OpenSpec and npm with node directly; a person typing npm needs npm.cmd.
 export function checkPowershell(ctx) {
   if (ctx.platform !== 'win32') return null;
-  const shim = ctx.findInPath('openspec.ps1');
+  const shim = ctx.findInPath('npm.ps1');
   if (!shim) return null;
   // Windows PowerShell 5.1 and PowerShell 7 keep separate policies; the agent's shell may be either.
   const blocked = (ctx.executionPolicy() || []).filter((p) => /^(restricted|allsigned|undefined)$/i.test(p.policy));
@@ -218,9 +243,9 @@ export function checkPowershell(ctx) {
   const which = blocked.map((p) => `${p.shell} ${p.policy}`).join(', ');
   return {
     id: 'powershell', level: 'info',
-    message: ctx.t(`PowerShell の実行ポリシー（${which}）のため、そこで \`openspec\` と打つと「スクリプトの実行が無効」で止まります。`, `the PowerShell execution policy (${which}) stops a typed \`openspec\` there with "running scripts is disabled".`),
-    fix: ctx.t('`openspec.cmd` と打てば動きます（オーケストレーターもそうします）。ポリシーを変えるかはご自身で判断してください（`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`）。',
-      'Type `openspec.cmd` instead (the orchestrator does). Whether to change the policy is your decision (`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`).'),
+    message: ctx.t(`PowerShell の実行ポリシー（${which}）のため、そこで \`npm\` と打つと「スクリプトの実行が無効」で止まります。`, `the PowerShell execution policy (${which}) stops a typed \`npm\` there with "running scripts is disabled".`),
+    fix: ctx.t('`npm.cmd` と打てば動きます（キットのスクリプトは影響を受けません）。ポリシーを変えるかはご自身で判断してください（`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`）。',
+      'Type `npm.cmd` instead (the kit\'s scripts are not affected). Whether to change the policy is your decision (`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`).'),
   };
 }
 
@@ -306,7 +331,7 @@ export function checkTarget(ctx) {
   if (ctx.platform === 'win32' && /^\\\\/.test(ctx.target)) {
     results.push({
       id: 'network-folder', level: 'warn',
-      message: ctx.t('ネットワーク上のフォルダー（\\\\ で始まるパス）です。cmd.exe はここを作業フォルダーにできないため、`openspec.cmd` や `npm.cmd` を使うコマンドが止まります。ファイルの移動も遅く、ロックで失敗しやすくなります。', 'this is a network folder (a \\\\ path). cmd.exe cannot work in it, so commands through `openspec.cmd` or `npm.cmd` stop, and folder moves are slow and fail on locks more often.'),
+      message: ctx.t('ネットワーク上のフォルダー（\\\\ で始まるパス）です。cmd.exe はここを作業フォルダーにできないため、`npm.cmd` などを使うコマンドが止まります。ファイルの移動も遅く、ロックで失敗しやすくなります。', 'this is a network folder (a \\\\ path). cmd.exe cannot work in it, so commands through `npm.cmd` and similar shims stop, and folder moves are slow and fail on locks more often.'),
       fix: ctx.t('リポジトリを手元のドライブ（`C:\\work\\proj` など）に置いて使ってください。', 'Work on a local copy of the repository (for example `C:\\work\\proj`).'),
     });
   }
@@ -370,13 +395,24 @@ export function checkSetup(ctx) {
   } else {
     results.push({ id: 'schemas', level: 'ok', message: ctx.t(`スキーマはこのキットの版と同じです（${ctx.schemas.length} 個）。`, `the schemas match this kit (${ctx.schemas.length}).`) });
   }
+  const legacy = ctx.legacyFiles ? ctx.legacyFiles(ctx.target) : [];
+  if (legacy.length) {
+    const list = legacy.map((f) => path.relative(ctx.target, f).replace(/\\/g, '/'));
+    results.push({
+      id: 'legacy', level: 'fail',
+      message: ctx.t(`OpenSpec 1.x（または spec-relay 0.6.0）のファイルが .github/ に残っています: ${list.join(', ')}`,
+        `files from OpenSpec 1.x (or spec-relay 0.6.0) are still under .github/: ${list.join(', ')}`),
+      fix: ctx.t('README の「0.6.0 から更新するとき」の手順に従ってください。キットはこの場所のスキルを無効にしないので、OpenSpec 標準の apply・archive・sync が残っているとレビューを飛ばせます。元フォルダーが `.` のときは、調査の gate がこれらを元コードとして数えます。',
+        'Follow "0.6.0 から更新するとき" in the README. The kit no longer disables skills there, so generic apply, archive or sync left there skip the review; with the source root ".", the survey gate also counts these files as source code.'),
+    });
+  }
   const bypass = ctx.bypassFiles(ctx.target);
   if (bypass.length) {
     results.push({
       id: 'workflows', level: 'fail',
-      message: ctx.t(`OpenSpec 標準の apply・archive・sync が元に戻っています（\`openspec update\` のあとによく起きます）: ${bypass.map((f) => path.relative(ctx.target, f).replace(/\\/g, '/')).join(', ')}`,
-        `OpenSpec's generic apply, archive or sync workflows are back (usually after \`openspec update\`): ${bypass.map((f) => path.relative(ctx.target, f).replace(/\\/g, '/')).join(', ')}`),
-      fix: ctx.t('これらはレビューの確認を通らずに archive できてしまいます。導入スクリプトをもう一度実行してください（オーケストレーターが openspec/config.yaml の値で実行します）。', 'They archive without the review gate. Run setup again (the orchestrator runs it with the values in openspec/config.yaml).'),
+      message: ctx.t(`OpenSpec 標準のスキル（apply・archive・sync など）が元に戻っています（\`openspec update\` のあとによく起きます）: ${bypass.map((f) => path.relative(ctx.target, f).replace(/\\/g, '/')).join(', ')}`,
+        `OpenSpec's generic skills (apply, archive, sync ...) are back (usually after \`openspec update\`): ${bypass.map((f) => path.relative(ctx.target, f).replace(/\\/g, '/')).join(', ')}`),
+      fix: ctx.t('これらはレビューの確認を通らずに archive でき、PATH にある別の版の `openspec` を呼びます。導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。', 'They archive without the review gate and call whatever `openspec` is on PATH. Run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`).'),
     });
   }
   const sourceRoot = ctx.cleanValue(ctx.configValue(ctx.target, 'Source root', '.'));
@@ -499,7 +535,7 @@ export function runChecks(ctx) {
   // Without the folder, the checks that run commands in it would only add confusing errors.
   if (!ctx.isDir(ctx.target)) return [checkNode(ctx), checkKit(ctx), ...target];
   const openspec = checkOpenspec(ctx);
-  return [checkNode(ctx), checkKit(ctx), openspec, openspec.level === 'fail' ? null : checkOpenspecPath(ctx), checkTelemetry(ctx), checkPowershell(ctx), checkClient(ctx)]
+  return [checkNode(ctx), checkKit(ctx), openspec, checkTelemetry(ctx), checkPowershell(ctx), checkClient(ctx)]
     .concat(checkGit(ctx), target, checkSetup(ctx))
     .filter(Boolean);
 }
@@ -668,7 +704,7 @@ async function machineContext(opts, overrides = {}) {
     kitRoot: KIT_ROOT,
     kitVersion: (readJson(readFileOrNull(path.join(KIT_ROOT, 'package.json'))) || {}).version || '?',
     schemas: setup.SCHEMAS, configMarker: setup.CONFIG_MARKER, normalizeText: setup.normalizeText,
-    bypassFiles: setup.bypassFiles, configValue: gate.configValue, cleanValue: gate.cleanValue,
+    bypassFiles: setup.bypassFiles, legacyFiles: setup.legacyFiles, configValue: gate.configValue, cleanValue: gate.cleanValue,
     machine: machineId(),
     exists: (file) => fs.existsSync(file),
     isDir: (dir) => { try { return fs.statSync(dir).isDirectory(); } catch { return false; } },
@@ -687,7 +723,6 @@ async function machineContext(opts, overrides = {}) {
       return null;
     },
     home: os.homedir(),
-    openspecOnPath: () => platform !== 'win32' || Boolean(launcher.findCommand('openspec', { npmScript: '@fission-ai/openspec/bin/openspec.js' })),
     findInPath: (name) => pathDirs().map((d) => path.join(d, name)).find((f) => fs.existsSync(f)) || null,
     executionPolicy: () => {
       // A child of PowerShell 7 inherits its PSModulePath, on which Windows PowerShell 5.1 cannot load its modules.
@@ -713,7 +748,8 @@ async function machineContext(opts, overrides = {}) {
       // A timeout or a full buffer is "could not tell", never a result.
       return { found, status: r.error ? null : r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
     },
-    probeOpenspec: (cwd) => launcher.probeOpenspec({ cwd }),
+    probeOpenspec: (cwd) => launcher.probeOpenspec({ cwd, timeout: 60000 }),
+    trackedModules: (root) => launcher.trackedModules(root),
   };
   Object.assign(ctx, overrides);
   ctx.lang = ctx.lang || pickLanguage(opts, ctx.readFile);

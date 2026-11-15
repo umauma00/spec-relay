@@ -1,0 +1,8 @@
+{
+  "name": "spec-relay-openspec",
+  "private": true,
+  "description": "The OpenSpec CLI that spec-relay uses in this repository, at the version the kit is tested with. Installed by the kit's setup.mjs with npm ci; run it as node <kit>/scripts/openspec.mjs.",
+  "dependencies": {
+    "@fission-ai/openspec": "2.0.0"
+  }
+}

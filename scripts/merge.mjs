@@ -107,7 +107,7 @@ function checkPaths(root, into, parts) {
   if (segs.length !== 2 || segs[0] === 'archive' || !segs[1].toLowerCase().endsWith('.md') || segs[1].toLowerCase() === 'review.md') {
     problems.push(`--into must be an artifact of an active change, openspec/changes/<change>/<name>.md (not review.md): ${into}`);
   } else if (!fs.existsSync(path.join(root, 'openspec/changes', segs[0]))) {
-    problems.push(`no active change ${segs[0]}: create it with "openspec new change" first`);
+    problems.push(`no active change ${segs[0]}: create it with "node <kit>/scripts/openspec.mjs new change" first`);
   } else if (fs.existsSync(path.resolve(root, into)) && !fs.statSync(path.resolve(root, into)).isFile()) {
     problems.push(`--into is a folder: ${into}`);
   }

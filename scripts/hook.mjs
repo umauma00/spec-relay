@@ -10,7 +10,7 @@
 //     extract or amend change, or from a subagent;
 //   - file edits under the source root (with source root ".", everything outside
 //     openspec/ and the target root), under openspec/specs/, openspec/changes/archive/,
-//     openspec/schemas/, of openspec/config.yaml, and inside the kit itself;
+//     openspec/schemas/, openspec/spec-relay/tools/ (the pinned OpenSpec), of openspec/config.yaml, and inside the kit itself;
 //   - subagent edits of review.md, questions.md, the plan and the lessons;
 //   - shell commands that mention the "Hook enforcement" setting.
 // Shell commands that write files some other way are not parsed; the wave guard
@@ -102,6 +102,7 @@ export function protectedPath(root, file, { subagent = false, pluginRoot = KIT_R
     ['openspec/specs', 'baseline specs change only when a reviewed change is archived'],
     ['openspec/changes/archive', 'archived changes are the record of what was reviewed'],
     ['openspec/schemas', 'the kit\'s schemas are installed by setup.mjs'],
+    ['openspec/spec-relay/tools', 'the pinned OpenSpec is installed by setup.mjs'],
   ]) if (under(rel, dir)) return why;
   if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions)\.md$/i.test(rel) || [PLAN, LESSONS].some((p) => fold(p) === fold(rel)))) {
     return 'only the orchestrator writes review.md, questions.md, the plan and the lessons';
@@ -153,7 +154,7 @@ export function archiveCalls(command) {
 function archiveDenial(root, { name, literal, flags }, subagent) {
   if (flags.some((f) => f === '--help' || f === '-h')) return null;
   if (subagent) return 'only the orchestrator archives a change, after the person agrees in the chat';
-  if (!name) return 'name the change: openspec archive <change> --yes, after its gate passes and the person agrees';
+  if (!name) return 'name the change: node "<kit>/scripts/openspec.mjs" archive <change> --yes, after its gate passes and the person agrees';
   if (!literal) return `write the change name itself in the command (not ${name}), so the kit can check its gate`;
   const dir = path.join(root, 'openspec/changes', name);
   if (!fs.existsSync(dir)) return null;

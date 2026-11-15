@@ -32,13 +32,12 @@ const tools = (answers = {}) => (name, args) => {
 
 function machine(dir, extra = {}) {
   return {
-    probeOpenspec: () => ({ ok: true, version: '1.17.0' }),
+    probeOpenspec: () => ({ ok: true, version: '2.0.0' }),
     exec: tools(),
     samePath: () => true,
     machine: 'test-machine',
     // No PowerShell processes per test on Windows CI.
     executionPolicy: () => [],
-    openspecOnPath: () => true,
     ...extra,
   };
 }
@@ -79,7 +78,10 @@ test('versions compare numerically', () => {
 
 test('an old Node.js gets one clear failure, before any other module loads', async () => {
   assert.equal(checkNode({ ...en, nodeVersion: 'v22.11.0' }).level, 'fail');
-  assert.equal(checkNode({ ...en, nodeVersion: 'v22.12.0' }).level, 'ok');
+  // From 22.12 OpenSpec runs; some of its packages ask for newer Node.js lines.
+  for (const [version, level] of [['v22.12.0', 'warn'], ['v22.22.2', 'ok'], ['v23.11.0', 'warn'], ['v24.14.0', 'warn'], ['v24.15.0', 'ok'], ['v25.1.0', 'warn'], ['v26.0.0', 'ok']]) {
+    assert.equal(checkNode({ ...en, nodeVersion: version }).level, level, version);
+  }
   const { code, json } = await doctor(['--target', tempDir(), '--json', '--lang', 'en'], { nodeVersion: 'v18.19.0' });
   assert.equal(code, 1);
   assert.deepEqual(json.checks.map((c) => c.id), ['node']);
@@ -107,14 +109,33 @@ test('a fresh machine and folder: ready, with what is still to do', async () => 
   assert.ok(json.checks.every((c) => c.level === 'ok' || c.fix), 'every problem says what to do');
 });
 
-test('OpenSpec: missing or older blocks, newer warns', () => {
-  const ctx = (probe) => ({ ...en, target: '.', probeOpenspec: () => probe });
-  assert.equal(checkOpenspec(ctx({ ok: false, reason: 'the openspec CLI was not found. Install it' })).level, 'fail');
-  assert.match(checkOpenspec(ctx({ ok: false, reason: 'the openspec CLI was not found.' })).fix, /npm install -g @fission-ai\/openspec@1\.17\.0/);
-  assert.equal(checkOpenspec(ctx({ ok: false, reason: '"openspec --version" failed' })).level, 'fail');
-  assert.equal(checkOpenspec(ctx({ ok: true, version: '1.16.2' })).level, 'fail');
-  assert.equal(checkOpenspec(ctx({ ok: true, version: '1.18.0' })).level, 'warn');
-  assert.equal(checkOpenspec(ctx({ ok: true, version: '1.17.0' })).level, 'ok');
+test('OpenSpec: npm before setup, the pinned version after it', () => {
+  // Before setup only npm is needed; setup installs OpenSpec into the repository.
+  const before = (answers) => checkOpenspec({ ...en, target: '.', setUp: false, exec: tools(answers), probeOpenspec: () => { throw new Error('not probed before setup'); } });
+  assert.equal(before({}).level, 'ok');
+  assert.match(before({}).message, /installs OpenSpec 2\.0\.0 into this repository/);
+  const noNpm = before({ 'npm --version': { found: false } });
+  assert.equal(noNpm.level, 'fail');
+  assert.match(noNpm.fix, /winget install OpenJS\.NodeJS\.LTS/);
+  assert.equal(before({ 'npm --version': { found: true, status: 1, stdout: '' } }).level, 'fail');
+
+  const after = (probe) => checkOpenspec({ ...en, target: '.', setUp: true, probeOpenspec: () => probe });
+  assert.equal(after({ ok: true, version: '2.0.0' }).level, 'ok');
+  // Any other version is not what the kit pins: someone changed the package files.
+  for (const version of ['1.17.0', '2.0.1', '3.0.0']) {
+    const other = after({ ok: true, version });
+    assert.equal(other.level, 'fail', version);
+    assert.match(other.fix, /setup again/);
+  }
+  // Right after a clone: pinned, not installed.
+  const clone = after({ ok: false, notInstalled: true, pinned: true, reason: 'x' });
+  assert.equal(clone.level, 'fail');
+  assert.match(clone.message, /right after a clone/);
+  assert.match(clone.fix, /npm ci/);
+  // A repository set up with 0.6.0 has no pinned OpenSpec.
+  assert.match(after({ ok: false, notInstalled: true, pinned: false, reason: 'x' }).fix, /0\.6\.0/);
+  assert.equal(after({ ok: false, reason: 'does not run' }).level, 'fail');
+  assert.equal(after({ ok: true, version: 'garbage' }).level, 'warn');
 });
 
 test('telemetry follows the same opt-outs as OpenSpec', () => {
@@ -175,10 +196,10 @@ test('clients: Copilot CLI and VS Code versions, nothing to read for the app', (
   assert.equal(checkClient(ctx(undefined)).level, 'info');
 });
 
-test('PowerShell: a policy that blocks openspec.ps1 is mentioned, never changed', () => {
-  const ctx = (policies, platform = 'win32') => ({ ...ja, platform, findInPath: () => 'C:\\npm\\openspec.ps1', executionPolicy: () => policies });
+test('PowerShell: a policy that blocks npm.ps1 is mentioned, never changed', () => {
+  const ctx = (policies, platform = 'win32') => ({ ...ja, platform, findInPath: () => 'C:\\Program Files\\nodejs\\npm.ps1', executionPolicy: () => policies });
   const both = checkPowershell(ctx([{ shell: 'PowerShell 7', policy: 'RemoteSigned' }, { shell: 'Windows PowerShell', policy: 'Restricted' }]));
-  assert.match(both.fix, /openspec\.cmd/);
+  assert.match(both.fix, /npm\.cmd/);
   assert.match(both.message, /Windows PowerShell Restricted/);
   assert.doesNotMatch(both.message, /PowerShell 7/);
   assert.equal(checkPowershell(ctx([{ shell: 'PowerShell 7', policy: 'RemoteSigned' }])), null);
@@ -213,8 +234,12 @@ test('after setup: schemas, restored workflows, source root, toolchain and the t
   assert.equal(byId(json, 'schemas').level, 'fail');
   assert.equal(json.ok, false);
 
-  write(dir, '.github/skills/openspec-archive-change/SKILL.md', '---\nname: openspec-archive-change\nmetadata:\n  generatedBy: "1.17.0"\n---\nRun openspec archive.\n');
+  write(dir, '.agents/skills/openspec-archive-change/SKILL.md', '---\nname: openspec-archive-change\nmetadata:\n  generatedBy: "2.0.0"\n---\nRun openspec archive.\n');
   assert.equal(byId(await run(), 'workflows').level, 'fail');
+  assert.equal(byId(await run(), 'legacy'), undefined);
+  write(dir, '.github/prompts/opsx-apply.prompt.md', 'Run openspec instructions apply\n');
+  assert.equal(byId(await run(), 'legacy').level, 'fail');
+  fs.rmSync(path.join(dir, '.github/prompts'), { recursive: true });
 
   fs.rmSync(path.join(dir, 'src'), { recursive: true });
   assert.equal(byId(await run(), 'source-root').level, 'fail');
@@ -314,14 +339,8 @@ test('the trial removes only the folders it created', async () => {
   assert.match(byId(json, 'toolchain').message, /javac 21/);
 });
 
-test('review findings: PATH, git status, safe.directory, Box, network folders', async () => {
+test('review findings: git status, safe.directory, Box, network folders', async () => {
   const dir = tempDir();
-  // OpenSpec found only in npm's folder: the agent's own commands would fail.
-  const notOnPath = (await doctor(['--target', dir, '--json', '--lang', 'en'], machine(dir, { platform: 'win32', openspecOnPath: () => false }))).json;
-  assert.equal(byId(notOnPath, 'openspec-path').level, 'warn');
-  const missing = (await doctor(['--target', dir, '--json', '--lang', 'en'], machine(dir, { platform: 'win32', openspecOnPath: () => false, probeOpenspec: () => ({ ok: false, reason: 'the openspec CLI was not found.' }) }))).json;
-  assert.equal(byId(missing, 'openspec-path'), undefined);
-
   const ctx = (answers) => ({ ...en, target: '/work/proj', platform: 'linux', exec: tools(answers), samePath: () => true });
   assert.equal(checkGit(ctx({ 'git --version': { found: true, status: 1, stdout: '' } })).length, 1);
   // A timeout or a full buffer says nothing about the changes.
@@ -339,10 +358,10 @@ test('review findings: PATH, git status, safe.directory, Box, network folders', 
 
 test('the text report: one line per check and the fix under each problem', async () => {
   const dir = tempDir();
-  const { code, text } = await doctor(['--target', dir, '--lang', 'ja'], machine(dir, { probeOpenspec: () => ({ ok: false, reason: 'the openspec CLI was not found.' }) }));
+  const { code, text } = await doctor(['--target', dir, '--lang', 'ja'], machine(dir, { exec: tools({ 'npm --version': { found: false } }) }));
   assert.equal(code, 1);
-  assert.match(text, /^FAIL  OpenSpec CLI が見つかりません。$/m);
-  assert.match(text, /^ {6}-> `npm install -g @fission-ai\/openspec@1\.17\.0`/m);
+  assert.match(text, /^FAIL  npm が見つかりません。/m);
+  assert.match(text, /^ {6}-> npm は Node\.js に含まれています。/m);
   assert.match(text, /止まります: FAIL の 1 件/);
 });
 
@@ -366,8 +385,9 @@ test('on Windows a tool installed by npm runs as node + its script', () => {
 });
 
 // The real machine, nothing replaced: in CI (Windows and Ubuntu) every tool the kit needs is installed.
-test('the real machine runs every check without an error', async () => {
-  const dir = setUpRepo();
+test('the real machine runs every check without an error', { timeout: 300000 }, async () => {
+  // In CI, a full setup: npm ci installs the pinned OpenSpec, so the openspec check can pass.
+  const dir = setUpRepo(process.env.CI ? SETUP.filter((a) => a !== '--skip-init') : SETUP);
   // A git repository, so the real path comparison (git's C:/... against a short 8.3 temp path) runs.
   const git = spawnSync('git', ['init', '-q'], { cwd: dir });
   const { code, json } = await doctor(['--target', dir, '--client', 'cli', '--json', '--lang', 'en']);

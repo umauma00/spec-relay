@@ -69,7 +69,7 @@ test('an archive waits for a passing gate, a change name and the orchestrator', 
   assert.equal(shell(dir, 'Select-String -Path openspec/config.yaml -Pattern "Hook enforcement"'), null);
   // Other ways to write the call.
   write(dir, 'openspec/changes/extract-billing-invoice/review.md', 'Reviewer: Uma\n- [ ] R1 Add two numbers\n');
-  for (const command of ['npx @fission-ai/openspec@1.17.0 archive extract-billing-invoice --yes', 'openspec.ps1 archive extract-billing-invoice', 'openspec --no-color archive extract-billing-invoice', '(openspec archive extract-billing-invoice --yes)', 'powershell -Command "openspec archive extract-billing-invoice --yes"']) {
+  for (const command of ['npx @fission-ai/openspec@2.0.0 archive extract-billing-invoice --yes', 'openspec.ps1 archive extract-billing-invoice', 'openspec --no-color archive extract-billing-invoice', '(openspec archive extract-billing-invoice --yes)', 'powershell -Command "openspec archive extract-billing-invoice --yes"']) {
     assert.match(shell(dir, command), /gate.mjs review fails/, command);
   }
   assert.match(shell(dir, '$c = "extract-billing-invoice"; openspec archive $c --yes'), /write the change name itself/);
@@ -89,6 +89,7 @@ test('agents may not write the source, baselines, archives, schemas, settings or
   assert.match(edit(dir, path.join(dir, 'openspec/specs/billing/invoice/spec.md')), /baseline specs change only/);
   assert.match(edit(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md'), /record of what was reviewed/);
   assert.match(edit(dir, 'openspec/schemas/spec-relay-extract/schema.yaml'), /installed by setup.mjs/);
+  assert.match(edit(dir, 'openspec/spec-relay/tools/package.json'), /pinned OpenSpec/);
   assert.match(edit(dir, 'openspec/config.yaml'), /person's settings/);
   assert.match(edit(dir, path.join(KIT, 'scripts/gate.mjs')), /part of the spec-relay kit/);
   assert.equal(edit(dir, 'ts/billing/invoice.ts'), null);
