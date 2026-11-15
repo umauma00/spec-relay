@@ -238,7 +238,9 @@ export function sourceMapPaths(text, root = null) {
       if (root && whole && fs.existsSync(path.join(root, whole))) return whole;
       if (!/[`[*_]/.test(p) && !/\s\(|\s[-–—]\s/.test(p)) return whole;
       return itemPath(p) || whole;
-    }).filter((p) => p && !/^path$/i.test(p));
+    }).filter((p) => p && !/^path$/i.test(p))
+    // A folder written without its trailing / is still the folder.
+    .map((p) => { try { return root && !p.endsWith('/') && fs.statSync(path.join(root, p)).isDirectory() ? `${p}/` : p; } catch { return p; } });
 }
 
 // Extract review: the source map exists, every path in it exists, and it holds

@@ -63,9 +63,10 @@ export function rowKey(line, byId) {
   // Paths keep every character (my_module.php, [id].tsx, (shop)/page.tsx), as gate.mjs reads them,
   // but not their letter case (Windows): the path part of a site id (path:symbol) is compared
   // without case, its symbol with case.
-  const site = cell.replace(/^`(.*)`$/, '$1').trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '');
+  const site = cell.replace(/^`(.*)`$/, '$1').trim();
   const colon = site.indexOf(':');
-  return { key: colon < 0 ? site.toLowerCase() : `${site.slice(0, colon).toLowerCase()}${site.slice(colon)}`, name: null };
+  const where = (colon < 0 ? site : site.slice(0, colon)).replace(/\\/g, '/').replace(/^(\.\/)+/, '').toLowerCase();
+  return { key: colon < 0 ? where : `${where}${site.slice(colon)}`, name: null };
 }
 
 const isPlaceholder = (line) => cellsOf(line).every((c) => visible(c) === '');

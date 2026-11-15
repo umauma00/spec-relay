@@ -113,7 +113,7 @@ test('JavaScript: functions, object and class methods, arrows, and the code outs
   assert.equal(marks(sites, 'go'), 'redirect 4');
 });
 
-test('SQL: procedures and functions up to GO; other files are one site; minified code is one site without markers', () => {
+test('SQL: procedures and functions up to GO; other files are one site; lines over 2000 characters are marked long', () => {
   const sql = 'CREATE PROCEDURE dbo.usp_Save @id int AS\nBEGIN\n  UPDATE inv SET total = 1 WHERE id = @id;\nEND\nGO\nCREATE FUNCTION dbo.fn_Tax(@x money) RETURNS money AS BEGIN RETURN ROUND(@x * 1.08, 0) END\nGO\n';
   const sites = scanText(sql, 'db/procs.sql');
   assert.deepEqual(ids(sites), ['dbo.usp_Save 1-4', 'dbo.fn_Tax 6-6']);
@@ -122,7 +122,13 @@ test('SQL: procedures and functions up to GO; other files are one site; minified
   assert.deepEqual(scanText('\n\n', 'empty.config'), []);
   const minified = scanText(`function a(){${'x();'.repeat(6000)}}`, 'lib.min.js');
   assert.deepEqual(ids(minified), ['(file) 1-1']);
-  assert.deepEqual(minified[0].markers, []);
+  assert.deepEqual(minified[0].markers, [{ kind: 'long', line: 1 }]);
+  // One long line (embedded data) does not stop the rest of the file from being read.
+  const mixed = scanText(`<?php\n$logo = '${'A'.repeat(16000)}';\n${Array.from({ length: 50 }, (_, k) => `function f${k}() { mysql_query("DELETE FROM t${k}"); }`).join('\n')}\n`, 'page.php');
+  assert.equal(mixed.length, 51);
+  assert.deepEqual(mixed[0].lines, [2]);
+  assert.equal(markerText(mixed[0].markers), 'long 2');
+  assert.equal(markerText(mixed[1].markers), 'db-write 3');
 });
 
 test('Shift_JIS source is decoded first, so 「ソ」 does not escape a closing quote', () => {
@@ -198,9 +204,9 @@ test('the extract gate needs one valid ledger row per site', () => {
   ]);
   ledger('| `src/invoice.php:total` | confirmed | 2 |\n| `src/invoice.php:save` | other capability billing/tax | x |\n| `src/invoice.php:label` | | x |\n');
   assert.deepEqual(problems(), [
-    'coverage of src/invoice.php:total is "confirmed"; write covered R<n>/S<n>, no behavior, other capability <path>, question Q<n> or gap',
+    'coverage of src/invoice.php:total is "confirmed"; write only covered R<n>/S<n>, no behavior, other capability <path>, question Q<n> or gap, and put reasons in the Evidence cell',
     'coverage of src/invoice.php:save names billing/tax, but the plan does not give src/invoice.php to that capability (list the file itself under it too, or judge the site here)',
-    'coverage of src/invoice.php:label is "blank"; write covered R<n>/S<n>, no behavior, other capability <path>, question Q<n> or gap',
+    'coverage of src/invoice.php:label is "blank"; write only covered R<n>/S<n>, no behavior, other capability <path>, question Q<n> or gap, and put reasons in the Evidence cell',
   ]);
   // The review page shows the counts first, the questions and the "no behavior" sites that hold markers.
   ledger('| `src/invoice.php:total` | covered R1 | 2 |\n| `src/invoice.php:save` | no behavior | never called |\n| `src/invoice.php:label` | question Q1 | x |\n');
@@ -276,7 +282,7 @@ var app = BEHAVIOR();
   const sites = assertNothingLost(cs, 'Repo.cs');
   assert.deepEqual(sites.map((s) => s.symbol), ['(file)', 'Repo.Get', 'Repo.Add', 'Repo.Remove', 'Repo.Find', 'Repo.operator int', 'Repo.twice', 'Repo.log', 'Repo.Trace', 'Repo.Json', 'Repo.Count']);
   // (file): the attributes, the field values and the top-level statement. The #else branch is in Trace's lines.
-  assert.deepEqual(sites[0].lines, [2, 4, 7, 9, 20, 33]);
+  assert.deepEqual(sites[0].lines, [2, 4, 7, 9, 15, 20, 33]);
   assert.deepEqual(ids(sites).find((s) => s.startsWith('Repo.Trace')), 'Repo.Trace 22-27');
   // A branch of #if outside every member is in (file).
   const branch = assertNothingLost('class A {\n#if X\n  void F() { }\n#else\n  void G() { BEHAVIOR(); }\n#endif\n}\n', 'A.cs');
@@ -379,20 +385,15 @@ test('UTF-16 without a byte order mark is read; other binary content is one (fil
   assert.equal(binary[0].id, 'Report.frx:(file)');
 });
 
-test('verdicts with notes and ranges', () => {
+test('verdicts: the cell holds the verdict only, with ranges and colons read', () => {
   assert.deepEqual(parseVerdict('covered R1-R3, S2'), { kind: 'covered', refs: ['R1', 'R2', 'R3', 'S2'] });
-  assert.equal(parseVerdict('covered R2 (main path)').kind, 'invalid');
-  // A note may explain a verdict, never take it back.
-  assert.equal(parseVerdict('no behavior - but it deletes the order').kind, 'invalid');
-  assert.equal(parseVerdict('no behavior (gap)').kind, 'invalid');
-  assert.equal(parseVerdict('gap - the error branch').kind, 'gap');
+  assert.deepEqual(parseVerdict('covered: R4'), { kind: 'covered', refs: ['R4'] });
   assert.equal(parseVerdict('covered R3-S4').kind, 'invalid');
   assert.deepEqual(parseVerdict('question: Q01'), { kind: 'question', question: 'Q1' });
-  assert.deepEqual(parseVerdict('question Q2 (dead code?)'), { kind: 'question', question: 'Q2' });
-  assert.equal(parseVerdict('no behavior (a getter)').kind, 'no-behavior');
-  assert.equal(parseVerdict('no behavior: logging only').kind, 'no-behavior');
-  assert.equal(parseVerdict('gap - writes a row').kind, 'gap');
-  assert.equal(parseVerdict('no behaviorx').kind, 'invalid');
+  // Notes go to the Evidence cell, so none can take a verdict back.
+  for (const cell of ['covered R2 (main path)', 'no behavior - but it deletes the order', 'no behavior (a getter)', 'gap - writes a row', 'question Q2 (dead code?)', 'no behaviorx']) {
+    assert.equal(parseVerdict(cell).kind, 'invalid', cell);
+  }
 });
 
 test('the ledger: symbols keep their letter case, other capability must own the file, a source map without files fails', () => {
@@ -499,4 +500,70 @@ test('other capability needs the capability that owns the file most specifically
   // billing/tax covers src/ as a folder, but billing/invoice lists the file itself, so the site is invoice's to judge.
   // (The folder row "src" without a trailing / still names the folder.)
   assert.ok(checkReview(dir, 'extract-billing-invoice').problems.includes('coverage of src/Invoice.cs:Invoice.Total names billing/tax, but the plan does not give src/Invoice.cs to that capability (list the file itself under it too, or judge the site here)'));
+});
+
+test('what is never claimed (third review): string lines, dynamic and conditional includes, interface attributes, defaults', () => {
+  // The last line of a concatenation is only a string; it is still behavior.
+  assert.deepEqual(assertNothingLost('<?php\n$sql = "DELETE FROM orders " .\n       "WHERE created < 1"; // BEHAVIOR\n', 'purge.php')[0].lines, [2, 3]);
+  assert.deepEqual(assertNothingLost("const sql =\n  'UPDATE t SET a = 1'; // BEHAVIOR\n", 'job.js')[0].lines, [1, 2]);
+  // A dynamic include, an include under a brace-less if, and one under the alternative syntax.
+  assert.deepEqual(assertNothingLost('<?php\ninclude "pages/$page.php"; // BEHAVIOR\n', 'd.php')[0].lines, [2]);
+  assert.deepEqual(assertNothingLost("<?php\nif (!$user)\n    include 'login.php'; // BEHAVIOR\n", 'p.php')[0].lines, [2, 3]);
+  assert.deepEqual(assertNothingLost("<?php if ($admin): ?>\n<?php include 'admin.php'; /* BEHAVIOR */ ?>\n<?php endif; ?>\n", 'a.php')[0].lines, [1, 2, 3]);
+  // VB: an interface member with an attribute does not swallow the class after it.
+  const vb = assertNothingLost('<ComVisible(True)> Public Interface ICalc\n    <DispId(1)> Function Tax(a As Decimal) As Decimal\nEnd Interface\nPublic Class Calc\n    Public Sub Purge()\n        Db.Execute("DELETE FROM orders") \' BEHAVIOR\n    End Sub\n    Public Property Conn As New SqlConnection(Cs()) \' BEHAVIOR\nEnd Class\n', 'Calc.vb');
+  assert.deepEqual(ids(vb), ['(file) 1-8', 'Calc.Purge 5-7']);
+  // C#: a top-level statement with delegate, record parameters with attributes, an interface default value.
+  assert.deepEqual(assertNothingLost('using System;\napp.Use(delegate (HttpContext c) { return Next(); }); // BEHAVIOR\n', 'Program.cs')[0].lines, [2]);
+  assert.deepEqual(assertNothingLost('public record Order(\n  [Required] string Name, // BEHAVIOR\n  int Qty);\npublic interface IApi {\n  Task Add(int qty = 1); // BEHAVIOR\n  Task Get(int id);\n}\n', 'M.cs')[0].lines, [1, 2, 3, 5]);
+  // TypeScript without semicolons: a generic alias claims its own line only.
+  assert.deepEqual(assertNothingLost("type Id<T> = T | null\nlocalStorage.removeItem('token') // BEHAVIOR\n", 'a.ts')[0].lines, [2]);
+  // A /* in a misread string does not blank the rest of the file.
+  assertNothingLost('function bare(s) { return /^"/.test(s) ? s.slice(1) : s; }\napp.use("/api/*", auth); // BEHAVIOR\napp.post("/o", () => { db.query("DELETE FROM cart"); }); // BEHAVIOR\n', 'app.js');
+  assertNothingLost("INSERT INTO msg VALUES (1, 'it\\'s ok'); -- BEHAVIOR\nINSERT INTO route VALUES (2, '/files/*'); -- BEHAVIOR\nDELETE FROM orders; -- BEHAVIOR\n", 'seed.sql');
+  // Names: nested annotation arguments, anonymous classes, bracketed SQL names.
+  assert.deepEqual(ids(scanText('public class C {\n  @Operation(responses = { @ApiResponse(code = "200"), @ApiResponse(code = "404") })\n  public String get() { return "x"; }\n  void save() { }\n}\n', 'C.java')), ['C.get 2-3', 'C.save 4-4']);
+  assert.deepEqual(ids(scanText('public class T {\n  [TestCase(new[] { 1, 2 }, ExpectedResult = 3)]\n  public int Sum(int[] a) { return 0; }\n}\n', 'T.cs')), ['T.Sum 2-3']);
+  assert.deepEqual(scanText('export default class extends React.Component {\n  render() { return 1; }\n}\n', 'App.jsx').map((s) => s.symbol), ['(anonymous).render']);
+  assert.deepEqual(scanText('CREATE PROCEDURE dbo.[Save Order] AS\nSELECT 1\n', 'p.sql').map((s) => s.symbol), ['dbo.Save Order']);
+});
+
+test('the ledger: evidence for no behavior, two capabilities may not defer a site to each other, backslashes in symbols', () => {
+  const dir = tempDir();
+  const C = 'openspec/changes/extract-billing-invoice';
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only): src\n');
+  write(dir, 'src/God.cs', 'class God {\n  int Total() { return 1; }\n  void Purge() { Db.DeleteAll(); }\n}\n');
+  write(dir, 'src/Ops.vb', 'Module Ops\n  Public Shared Operator /(a As X, b As X) As X\n    Return a\n  End Operator\n  Public Shared Operator \\(a As X, b As X) As X\n    Return b\n  End Operator\nEnd Module\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/inventory.md', '| Path | Context |\n|---|---|\n| src/ | billing |\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md', '1. `billing/invoice`\n   - `src/`\n2. `billing/tax`\n   - `src/God.cs`\n');
+  write(dir, `${C}/.openspec.yaml`, 'schema: spec-relay-extract\n');
+  write(dir, `${C}/specs/billing/invoice/spec.md`, '## Purpose\n\nInvoices.\n\n## ADDED Requirements\n\n### Requirement: Total\nThe system SHALL add.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n');
+  write(dir, `${C}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/ | all | full |\n');
+  write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Total | src/God.cs:God.Total:2 | none |\n');
+  write(dir, `${C}/screens.md`, 'None\n');
+  write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Total | confirmed | x |\n');
+  write(dir, `${C}/questions.md`, 'None\n');
+  write(dir, `${C}/review.md`, 'Reviewer: Uma\n- [x] R1 Total\n');
+  write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/God.cs:God.Total` | covered R1 | 2 |\n| `src/God.cs:God.Purge` | other capability billing/tax | tax owns it |\n| `src/Ops.vb:Ops./` | no behavior | |\n| `src/Ops.vb:Ops.\\` | no behavior | returns b |\n');
+  write(dir, 'openspec/changes/extract-billing-tax/coverage.md', '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/God.cs:God.Purge` | other capability billing/invoice | invoice owns it |\n');
+  assert.deepEqual(checkReview(dir, 'extract-billing-invoice').problems, [
+    'coverage of src/God.cs:God.Purge names billing/tax, whose own coverage.md names billing/invoice for it: one of the two must judge the site',
+    'coverage of src/Ops.vb:Ops./ is "no behavior" with no evidence; say why in the Evidence cell',
+  ]);
+});
+
+test('lists and deep nesting: an unclosed list is not a list, nested classes keep their names, big inputs stay fast', () => {
+  const ids = (text, file) => scanText(text, file).map((s) => s.symbol);
+  // An unclosed export list does not swallow the function after it.
+  assert.deepEqual(ids('export { a, b\nfunction run() { go(); }\n', 'a.js').filter((s) => s !== '(file)'), ['run']);
+  // A closed list is claimed; its braces are not a block.
+  assert.deepEqual(ids("import { a } from 'x';\nexport { a };\nfunction run() { go(); }\n", 'a.js'), ['run']);
+  assert.deepEqual(ids('<?php\nuse A\\{B, C};\nfunction run() { go(); }\n', 'a.php'), ['run']);
+  // Nested classes are named from the outside in.
+  assert.deepEqual(ids('<?php\nclass A { function f() { $x = new class { function g() { h(); } }; } }\n', 'a.php'), ['A.f']);
+  const t = Date.now();
+  scanText('export { a\n'.repeat(60000), 'a.js');
+  scanText('if (a) {\n'.repeat(60000), 'a.js');
+  scanText('<?php\n' + 'if ($a) {\n'.repeat(60000), 'a.php');
+  assert.ok(Date.now() - t < 5000, `took ${Date.now() - t} ms`);
 });

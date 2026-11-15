@@ -62,8 +62,10 @@ each marker line, but do not stop at them.
   Lines cell lists those lines (`2, 4-5`): judge every one of them, reading
   the lines around them as far as you need. `binary` means a file that is not text (an Office or
   database file): judge it from what the file is, or write `gap` when it
-  may hold logic (macros, queries). `minified: not scanned` means one-line
-  generated code: say whether it is the project's own code.
+  may hold logic (macros, queries). `unreadable` means the file could not be
+  read: write `gap` and say so. A `long` marker is a line over 2000
+  characters (minified code, embedded data) that the scanner did not read:
+  read it yourself.
 - `covered R<n>, S<n>`: every effect of the site is in these requirements'
   scenarios or these screens (R and S numbered as the task gives them).
 - `no behavior`: nothing to notice. Say why in the evidence.
@@ -79,7 +81,9 @@ scenario is a `gap`, even when its main path is covered.
 
 Write your verdict file as one Markdown table, `| Site | Verdict | Evidence |`,
 one row per site of the sites file in its order, with the site id copied
-exactly (backticks included). When the task names only some site ids (a
+exactly (backticks included). The Verdict cell holds the verdict alone
+(`no behavior`, not `no behavior (a getter)`); every reason goes in the
+Evidence cell, which a `no behavior` row must not leave empty. When the task names only some site ids (a
 check again after a requirement was added), judge those, with their lines
 from the sites file, and write rows for them only. Return the file's path, the number of rows per
 verdict, every `gap` row, and how many source files you read.
