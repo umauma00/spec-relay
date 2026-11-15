@@ -100,6 +100,15 @@ test('a tag in a string ends at its closing quote, and documentation does not co
   passes(dir);
 });
 
+test('who agreed is read from a Follow-up item, and placeholders or a refusal are not agreement', async () => {
+  const { agreedBy } = await import('../scripts/gate.mjs');
+  for (const [line, name] of [
+    ['- `a` - x (agreed by Uma)', 'Uma'], ['- `a` （了承: うま）', 'うま'], ['- `a` （田中さん了承）', '田中'],
+    ['- `a` (agreed by <name>)', null], ['- `a` agreed by TBD', null], ['- `a` not agreed by anyone yet', null],
+    ['- `a` （了承待ち）', null], ['- `a` （了承を得ていない）', null], ['- `a` - overflow', null],
+  ]) assert.equal(agreedBy(line), name, line);
+});
+
 test('a TODO(port) blocks the port until the person agrees to leave it as follow-up', () => {
   const dir = portRepo();
   write(dir, 'ts/calc/add.ts', 'export function add(a, b) {\n  // TODO(port): overflow\n  return a + b;\n}\n');
@@ -110,7 +119,7 @@ test('a TODO(port) blocks the port until the person agrees to leave it as follow
     write(dir, `${PORT}/proposal.md`, `${proposal}\n## Follow-up\n${notAgreed}\n`);
     has(dir, /TODO\(port\) left/);
   }
-  write(dir, `${PORT}/proposal.md`, `${proposal}\n## Follow-up\n- \`calc/add.ts\` - overflow (agreed by Uma)\n`);
+  write(dir, `${PORT}/proposal.md`, `${proposal}\n## 5. Follow up\n- \`calc/add.ts\` - overflow (agreed by Uma)\n`);
   const result = checkPortDone(dir, 'port-calc-add');
   assert.equal(result.ok, true, result.problems.join());
   assert.deepEqual(result.followUp, ['ts/calc/add.ts']);
@@ -166,6 +175,21 @@ test('merge.mjs stamps a port crosscheck with the code it was merged on, and onl
   assert.doesNotMatch(fs.readFileSync(path.join(dir, 'openspec/changes/extract-calc-add/crosscheck.md'), 'utf8'), CODE_STAMP);
 });
 
+test('what verify runs write in the target root does not void a crosscheck merged before them', async () => {
+  const dir = portRepo();
+  write(dir, 'ts/test.js', 'require("fs").mkdirSync("reports", { recursive: true }); require("fs").writeFileSync("reports/TEST-add.xml", String(Date.now()));\n');
+  crosscheck(dir);
+  assert.equal((await verify(dir, 'port-calc-add', quietly)).ok, true);
+  passes(dir);
+  // Again, with nothing else changed: the report changes once more.
+  assert.equal((await verify(dir, 'port-calc-add', quietly)).ok, true);
+  passes(dir);
+  // A change to the code itself does void it, even after another verify run.
+  write(dir, 'ts/calc/add.ts', 'export const add = (a, b) => b + a;\n');
+  assert.equal((await verify(dir, 'port-calc-add', quietly)).ok, true);
+  has(dir, /target code changed after the last crosscheck merge/);
+});
+
 test('a chosen comparison level needs a command in design.md and a passing run', () => {
   const dir = portRepo({ levels: 'yes' });
   has(dir, /verification\.md chose B1 for context calc, but design\.md's Verification table gives it no command/);
@@ -200,17 +224,27 @@ test('levels read only yes or no, and commands must not chain', () => {
 test('the parsers read the tables as the templates write them', () => {
   assert.deepEqual(conventionCommands('| 用途 | コマンド |\n|---|---|\n| テスト | `npm.cmd test` |\n| 境界チェック | npx depcruise src |\n'), { test: 'npm.cmd test', boundary: 'npx depcruise src' });
   const levels = (text, context = 'billing') => { const problems = []; return [chosenLevels(text, context, problems), problems]; };
-  assert.deepEqual(levels('| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| billing | yes | はい | ✅ | x |\n'), [['B1', 'B2', 'C'], []]);
+  assert.deepEqual(levels('| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| billing | yes | はい | ✅ | ✓ |\n'), [['B1', 'B2', 'C'], []]);
+  assert.deepEqual(levels('| Context | A | B-1 | B2 | Ｃ |\n|---|---|---|---|---|\n| billing | yes | yes | no | yes |\n'), [['B1', 'C'], []]);
+  assert.match(levels('| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| billing | yes | <!-- yes / no --> | x | no |\n')[1].join(' / '), /B1 cell of context billing is empty.*B2 cell of context billing is "x"/);
+  assert.match(levels('| Context | A | B1 |\n|---|---|---|\n| billing | yes | no |\n')[1].join(), /no B2 column/);
   assert.deepEqual(levels('| Context | A | Logic comparison (B1) | B2 | C screenshots |\n|---|---|---|---|---|\n| billing | yes | あり | 不要 | - |\n'), [['B1'], []]);
   // A table without level columns (the modules) is not the levels table.
   assert.deepEqual(levels('| Context | Module |\n|---|---|\n| billing | ts/billing |\n\n| Context | B1 | B2 | C |\n|---|---|---|---|\n| billing | no | no | yes |\n'), [['C'], []]);
-  assert.equal(levels('| Context | A | B1 |\n|---|---|---|\n| billing | yes | no |\n', 'calc')[0], null);
+  assert.equal(levels('| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| billing | yes | no | no | no |\n', 'calc')[0], null);
   assert.match(levels('| Context | B1 | B2 | C |\n|---|---|---|---|\n| billing | 必要なし | no | no |\n')[1].join(), /"必要なし"; write yes or no/);
   assert.deepEqual(designCommands('| Level | Covers | Command |\n|---|---|---|\n| A | all | `mvn -q test` |\n| C screenshots | screens | - |\n| Boundary check | modules | `mvn -q verify -Pboundary` |\n'), { A: 'mvn -q test', boundary: 'mvn -q verify -Pboundary' });
   assert.deepEqual(scenarioList('### Requirement: R\nx\n#### Scenario: a\n```\n#### Scenario: fenced\n```\n## Other\n#### Scenario: orphan\n'), [{ requirement: 'R', scenario: 'a' }]);
   assert.equal(chainProblem('mvn -q test "-Dtest=A|B"'), null);
   assert.equal(chainProblem('dotnet test --filter "A;B"'), null);
   assert.match(chainProblem('npm ci && npm test'), /&&/);
+  assert.match(chainProblem('npm test & exit 0'), /background/);
+  assert.equal(chainProblem('& "C:/Program Files/dotnet/dotnet.exe" test'), null);
+  assert.match(chainProblem('cmd /c "a & b"'), /another shell/);
+  assert.match(chainProblem('sh -c "a; exit 0"'), /another shell/);
+  assert.match(chainProblem('$env:CI="1"; npm test'), /chains/);
+  assert.equal(chainProblem('find . -name "*.ts" -exec cat {} \\;'), null);
+  assert.equal(chainProblem('npm test # then; nothing'), null);
 });
 
 test('verify.mjs runs the commands in the target root and writes the receipt the gate reads', async () => {
@@ -247,6 +281,15 @@ test('verify.mjs stops a command that runs too long, with what it started', asyn
   has(dir, /level A failed in the last verify run \(timed out\)/);
 });
 
+test('verify.mjs goes on when the command exits, even if what it started keeps the output open', async () => {
+  const dir = portRepo();
+  write(dir, 'ts/test.js', 'require("child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 15000)"], { stdio: "inherit", detached: true }).unref();\n');
+  const started = Date.now();
+  const result = await verify(dir, 'port-calc-add', quietly);
+  assert.ok(Date.now() - started < 12000, `${Date.now() - started} ms`);
+  assert.equal(result.ok, true, JSON.stringify(result));
+});
+
 test('verify.mjs refuses what it cannot run', async () => {
   const dir = portRepo();
   assert.match((await verify(dir, 'port-nothing', quietly)).problems.join(), /change not found/);
@@ -260,7 +303,7 @@ test('on Windows the commands run in Windows PowerShell for this process only, w
   const calls = [];
   const exec = (file, args, options) => {
     calls.push([file, args, options.cwd]);
-    const child = { pid: 1, stdout: { on() {} }, stderr: { on() {} }, on(event, fn) { if (event === 'close') setImmediate(() => fn(0)); } };
+    const child = { pid: 1, stdout: { on() {} }, stderr: { on() {} }, on(event, fn) { if (event === 'exit' || event === 'close') setImmediate(() => fn(0)); } };
     return child;
   };
   const result = await runCommand('npm test', 'C:/repo/ts', { platform: 'win32', exec });
@@ -279,8 +322,11 @@ test('in a git repository, files git ignores are not target code, and a nested r
   assert.ok(!files.some((f) => f.includes('node_modules')));
   assert.ok(!files.some((f) => f.startsWith('src/') || f.startsWith('openspec/')));
   spawnSync('git', ['init', '-q'], { cwd: path.join(dir, 'ts') });
+  write(dir, 'ts/.gitignore', 'bin/\n');
+  write(dir, 'ts/bin/out.dll', 'x\n');
   files = targetFiles(dir);
   assert.ok(files.includes('ts/calc/add.ts'), files.join());
+  assert.ok(!files.includes('ts/bin/out.dll'), files.join());
   refresh(dir);
   passes(dir);
 });
@@ -314,6 +360,13 @@ test('the guard and the hook keep subagents away from the evidence', () => {
   assert.match(shell(`Set-Content ${PORT}/verify.json 'null'`), /only verify\.mjs writes verify\.json/);
   assert.match(shell(`node -e "require('fs').writeFileSync('${PORT}/verify.json','{}')"`), /only verify\.mjs writes/);
   assert.equal(shell('node "C:/kit/scripts/verify.mjs" --change port-calc-add'), null);
+  assert.match(shell(`[System.IO.File]::WriteAllText("${PORT}/verify.json", "{}")`), /only verify\.mjs writes/);
+  assert.match(shell(`python -c "open('${PORT}/verify.json','w').write('{}')"`), /only verify\.mjs writes/);
+  assert.match(shell(`Copy-Item forged.json ${PORT}/verify.json`), /only verify\.mjs writes/);
+  // Reading it, or naming it in a message, is fine.
+  assert.equal(shell(`cat ${PORT}/verify.json 2>/dev/null`), null);
+  assert.equal(shell(`Get-Content ${PORT}/verify.json > $null`), null);
+  assert.equal(shell('git commit -m "record verify.json" > $null'), null);
   const edit = (file) => decide({ toolName: 'edit', toolArgs: { path: file }, cwd: dir, agentId: 'a1', agentType: 'spec-relay-implementer' });
   assert.match(edit(path.join(dir, PORT, 'design.md')), /only the orchestrator writes/);
   assert.match(edit(path.join(dir, PORT, 'proposal.md')), /only the orchestrator writes/);

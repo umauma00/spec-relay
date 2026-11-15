@@ -94,8 +94,8 @@ artifacts:
         in the target language, landed in the same group as its code. Each such
         test carries the tag
         `spec-relay: <capability> | <requirement name> | <scenario name>` in a
-        comment or its test name, with the names exactly as in the baseline
-        spec; `gate.mjs port-done` fails for a scenario without a tagged test.
+        comment, or as its whole test name (the string starts with
+        `spec-relay:`), with the names exactly as in the baseline spec; `gate.mjs port-done` fails for a scenario without a tagged test.
         Add tasks for the other levels design.md names: B1 record source
         outputs and compare, B2 replay, C screenshot comparison.
       - The last group runs the boundary check from conventions.md.

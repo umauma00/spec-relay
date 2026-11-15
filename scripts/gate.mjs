@@ -566,13 +566,27 @@ const commandOf = (cell = '') => {
 // only the last statement of `a; b`, and a pipe only its last part, so the
 // commands verify.mjs runs must be one command each.
 export function chainProblem(command) {
+  const refuse = (what) => `"${command}" ${what}; a failure before the last part would not fail the run, so write one command (a script or a build tool task can run several steps)`;
+  if (/^\s*(?:cmd(?:\.exe)?\s+\/[ck]|(?:ba|z)?sh\s+-c|pwsh(?:\.exe)?\b|powershell(?:\.exe)?\b)/i.test(command)) return refuse('starts another shell');
   let quote = null;
   for (let i = 0; i < command.length; i += 1) {
     const c = command[i];
-    if (quote) { if (c === quote) quote = null; else if (c === '`' && quote === '"') i += 1; continue; }
+    if (quote) {
+      if (c === quote) quote = null;
+      else if ((c === '`' || c === '\\') && quote === '"') i += 1;
+      continue;
+    }
     if (c === '"' || c === "'") { quote = c; continue; }
-    if (c === '`') { i += 1; continue; }
-    if (c === ';' || c === '|' || (c === '&' && command[i + 1] === '&')) return `"${command}" chains commands (${c === '&' ? '&&' : c}); a failure before the last part would not fail the run, so write one command (a script or a build tool task can run several steps)`;
+    // PowerShell escapes with a backtick, sh with a backslash.
+    if (c === '`' || (c === '\\' && /[;&|]/.test(command[i + 1] ?? ''))) { i += 1; continue; }
+    // A comment ends the command line.
+    if (c === '#' && (i === 0 || /\s/.test(command[i - 1]))) break;
+    if (c === ';' || c === '|') return refuse(`chains commands (${command[i + 1] === c ? c + c : c})`);
+    if (c === '&') {
+      if (command[i + 1] === '&') return refuse('chains commands (&&)');
+      // `& "tool.exe" args` (PowerShell's call operator) is one command; a later & runs the part before it in the background.
+      if (command.slice(0, i).trim() !== '') return refuse('runs a part in the background (&)');
+    }
   }
   return null;
 }
@@ -592,15 +606,20 @@ export function conventionCommands(text) {
 }
 
 export const LEVELS = ['B1', 'B2', 'C'];
-// The words a level cell may hold. Anything else is reported, so that "yet to
-// decide" is never read as yes or as no.
-const YES = /^(yes|y|true|required|x|はい|あり|有|する|要|必要|✓|✔|✔️|✅|○|◯|〇)$/i;
-const NO = /^(no|n|false|none|-|–|—|いいえ|なし|無|しない|不要|×|✗|✘|❌|)$/i;
-const levelColumn = (header, level) => header.findIndex((h) => new RegExp(`(^|[^a-z0-9])${level.toLowerCase()}([^a-z0-9#+]|$)`).test(h));
+// The words a level cell may hold. Anything else, an empty cell included, is
+// reported, so that "yet to decide" is never read as yes or as no.
+const YES = /^(yes|y|true|required|はい|あり|有|する|要|必要|✓|✔|✔️|✅|○|◯|〇)$/i;
+const NO = /^(no|n|false|none|-|–|—|いいえ|なし|無|しない|不要|×|✗|✘|❌)$/i;
+const wide = (s) => s.normalize('NFKC').toLowerCase();
+const levelColumn = (header, level) => {
+  const pattern = new RegExp(`(^|[^a-z0-9])${level === 'C' ? 'c' : `b[-\\s]?${level[1]}`}([^a-z0-9#+]|$)`);
+  return header.findIndex((h) => pattern.test(wide(h)));
+};
 
 // The comparison levels (B1, B2, C) verification.md chose for a context, or
-// null when no table with a level column has a row for the context. A cell that
-// is neither yes nor no adds a problem.
+// null when no table with level columns has a row for the context. A table
+// that lacks one of the three columns, or a cell that is neither yes nor no,
+// adds a problem.
 export function chosenLevels(text, context, problems = []) {
   for (const table of tablesWithHeader(text)) {
     const columns = LEVELS.map((level) => levelColumn(table.header, level));
@@ -609,10 +628,10 @@ export function chosenLevels(text, context, problems = []) {
     if (!row) continue;
     const chosen = [];
     LEVELS.forEach((level, i) => {
-      if (columns[i] < 0) return;
-      const cell = plain(row[columns[i]] ?? '').trim();
+      if (columns[i] < 0) { problems.push(`verification.md: the levels table has no ${level} column; give it columns B1, B2 and C`); return; }
+      const cell = wide(plain(row[columns[i]] ?? '').trim());
       if (YES.test(cell)) chosen.push(level);
-      else if (!NO.test(cell)) problems.push(`verification.md: the ${level} cell of context ${context} is "${cell}"; write yes or no`);
+      else if (!NO.test(cell)) problems.push(`verification.md: the ${level} cell of context ${context} is ${cell ? `"${cell}"` : 'empty'}; write yes or no`);
     });
     return chosen;
   }
@@ -702,6 +721,12 @@ export function targetFiles(root) {
       if (e.isDirectory()) { if (!TOOL_DIRS.has(e.name) && !(top && BUILD_DIRS.has(e.name))) visit(child, false); } else if (e.isFile()) out.push(child);
     }
   };
+  const nested = (folder) => {
+    const inner = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: path.join(base, folder), encoding: 'buffer', windowsHide: true, maxBuffer: Infinity });
+    if (inner.status === 0 && inner.stdout) {
+      for (const f of inner.stdout.toString('utf8').split('\0').filter(Boolean)) if (fs.existsSync(path.join(base, folder, f))) out.push(`${folder}/${f}`);
+    } else visit(folder, `${folder}/` === prefix);
+  };
   const git = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', prefix || '.'], { cwd: base, encoding: 'buffer', windowsHide: true, maxBuffer: Infinity });
   if (git.status === 0 && git.stdout) {
     const top = spawnSync('git', ['rev-parse', '--show-cdup'], { cwd: base, encoding: 'utf8', windowsHide: true });
@@ -710,8 +735,9 @@ export function targetFiles(root) {
         if (skip(f)) continue;
         let stat = null;
         try { stat = fs.statSync(path.join(base, f)); } catch { continue; }
-        // A nested repository (or submodule) is listed as its folder.
-        if (stat.isDirectory()) visit(f.replace(/\/$/, ''), false); else out.push(f);
+        // A nested repository (or submodule) is listed as its folder: list it
+        // with its own git, so its .gitignore holds too.
+        if (stat.isDirectory()) nested(f.replace(/\/$/, '')); else out.push(f);
       }
       return [...new Set(out)].sort();
     }
@@ -819,9 +845,22 @@ const tagMatches = (tag, capability, { requirement, scenario }) => {
   return tag.exact ? tag.rest === name : tag.rest.startsWith(name) && COMMENT_END.test(tag.rest.slice(name.length));
 };
 
+// Who agreed, from a Follow-up item: "(agreed by Uma)", "（了承: うま）" or
+// "（田中さん了承）"; null for a placeholder or a line that says it is not agreed.
+export function agreedBy(line) {
+  const text = stripComments(line).normalize('NFKC');
+  if (/\bnot\b[^()]*\bagreed\b|\bunagreed\b|了承(?:待ち|前|して(?:い)?ない|を得て(?:い)?ない|なし|未)|未了承/i.test(text)) return null;
+  const name = text.match(/\bagreed by\s+([^\s(),.;]+(?:\s+[^\s(),.;]+)?)/i)?.[1]
+    ?? text.match(/了承\s*[:]\s*([^\s()、,.;]+)/)?.[1]
+    ?? text.match(/([^\s()、,.;:]+?)(?:さん|様)?(?:が)?了承(?:済み|済)?(?:\)|$|\s)/)?.[1];
+  if (!name || PLACEHOLDER.test(name) || /^<.*>$|^(name|名前|tbd|anyone|nobody|someone|誰か|未定)$/i.test(name.replace(/さん$/, ''))) return null;
+  return name;
+}
+
 // The target files whose TODO(port) the person agreed to leave for later: list
 // items under `## Follow-up` in this port's proposal.md, or an archived port's,
-// that name the file in backticks and who agreed ("agreed by <name>").
+// that name the file in backticks and who agreed (see agreedBy). The value
+// tells whether this port's proposal is the one that lists it.
 export function followUpFiles(root, dir) {
   const files = new Map();
   const target = relPath(cleanValue(configValue(root, 'Target root', ''))).replace(/\/$/, '');
@@ -834,8 +873,8 @@ export function followUpFiles(root, dir) {
     let inFollowUp = false;
     for (const line of unfencedLines(stripComments(readIf(file, []) ?? ''))) {
       const h2 = line.match(/^##\s+(.*)$/);
-      if (h2) { inFollowUp = /^(follow-?up|後の作業|残す作業)/i.test(h2[1].trim()); continue; }
-      if (!inFollowUp || !/^\s*(?:[-*+]|\d+[.)])\s/.test(line) || !/(agreed by|了承)\s*[:：]?\s*[^\s)）]/i.test(line)) continue;
+      if (h2) { inFollowUp = /^(?:\d+[.)]?\s*)?(follow[\s-]?ups?\b|後の作業|残す作業)/i.test(h2[1].trim()); continue; }
+      if (!inFollowUp || !/^\s*(?:[-*+]|\d+[.)])\s/.test(line) || !agreedBy(line)) continue;
       for (const m of line.matchAll(/`([^`]+)`/g)) {
         const p = relPath(m[1].trim()).replace(/:\d+$/, '');
         for (const key of [p, target && !p.startsWith(`${target}/`) ? `${target}/${p}` : null].filter(Boolean)) if (!files.has(key)) files.set(key, index === 0);
@@ -910,7 +949,7 @@ function checkPortEvidence(root, change, dir, capability, problems) {
     try { receipt = JSON.parse(receiptText); } catch { /* reported below */ }
     const valid = receipt && typeof receipt === 'object' && !Array.isArray(receipt) && Array.isArray(receipt.runs)
       && receipt.runs.every((r) => r && typeof r === 'object' && typeof r.level === 'string') && receipt.change === change
-      && typeof receipt.target?.sha256 === 'string';
+      && typeof receipt.target?.sha256 === 'string' && (receipt.target.sameCode === undefined || Array.isArray(receipt.target.sameCode));
     if (!valid) { problems.push(`${VERIFY_RECEIPT} is not a verify run of ${change}: ${again}`); receipt = null; }
   }
   if (receipt) {
@@ -951,8 +990,12 @@ function checkPortEvidence(root, change, dir, capability, problems) {
   checkCrosscheck(dir, requirementNames(spec), screens, problems);
   if (crosscheck !== null && files !== null) {
     const stamp = crosscheck.match(CODE_STAMP)?.[1];
+    // The same code as now: the current state, or one that differs from it only
+    // by what verify runs wrote (test reports, recorded output), as the receipt
+    // tracks it while the current state is the receipt's.
+    const same = new Set([now, ...(receipt && receipt.target.sha256 === now ? receipt.target.sameCode ?? [] : [])]);
     if (!stamp) problems.push('crosscheck.md has no code stamp; merge the checkers\' part files into it with merge.mjs');
-    else if (stamp !== now) problems.push('the target code changed after the last crosscheck merge: have a checker check again the rows the change touches, merge with merge.mjs, then run verify.mjs again');
+    else if (!same.has(stamp)) problems.push('the target code changed after the last crosscheck merge: run verify.mjs, have a checker check again the rows the change touches, and merge with merge.mjs');
   }
 
   // `compared`: the source program ran (B1, B2 or C); `inferred`: only tests from

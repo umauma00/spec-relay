@@ -39,6 +39,18 @@ const REVIEWED = new Set(['spec-relay-survey', 'spec-relay-target', 'spec-relay-
 // A shell command that may write a file (PowerShell and POSIX forms).
 const WRITES = /(?:^|[\s;&|(])(?:set-content|add-content|out-file|clear-content|new-item|ni|copy-item|cp|copy|move-item|mv|move|rename-item|ren|remove-item|rm|del|erase|sed|perl|tee|truncate|dd)\b|-replace\b|\[io\.file\]|>/i;
 
+// Whether a shell command writes a port's verify.json, which only verify.mjs
+// writes: a write command or redirection aimed at it, a .NET file write, or a
+// one-line script (node, python) that names it. Reading it is fine.
+const RECEIPT = String.raw`[^\s;|&]*verify(?:\.json|\*)`;
+const RECEIPT_WRITES = [
+  new RegExp(String.raw`(?:^|[\s;&|(])(?:set-content|add-content|out-file|clear-content|new-item|ni|copy-item|cp|copy|move-item|mv|move|rename-item|ren|remove-item|rm|del|erase|tee|tee-object|truncate|dd)\b[^;|&]*${RECEIPT}`, 'i'),
+  new RegExp(String.raw`>>?\s*["']?${RECEIPT}`, 'i'),
+  new RegExp(String.raw`\[(?:system\.)?io\.file\]::\w+\([^)]*${RECEIPT}`, 'i'),
+  new RegExp(String.raw`(?:^|[\s;&|(])(?:node|python3?|py|perl|ruby|php)(?:\.exe)?\b[^;|&]*\s-(?:e|p|c|r)\b[^;|&]*${RECEIPT}`, 'i'),
+];
+export const writesReceipt = (command) => /verify(?:\.json|\*)/i.test(command) && RECEIPT_WRITES.some((pattern) => pattern.test(command));
+
 // The repository root above `start` that spec-relay set up, or null.
 export function findRoot(start) {
   let dir = path.resolve(start || '.');
@@ -213,7 +225,7 @@ export function decide(payload, { pluginRoot = process.env.PLUGIN_ROOT || proces
       if (WRITES.test(command) && (/hook\s+enforcement/i.test(command) || /openspec[\\/]config\.yaml/i.test(command))) {
         return 'openspec/config.yaml holds the person\'s settings, the Hook enforcement line included; ask the person to change it themselves';
       }
-      if (/verify\.json/i.test(command) && (WRITES.test(command) || /writeFile|\bnode\b[^;|]*\s-e\b/i.test(command))) {
+      if (writesReceipt(command)) {
         return 'only verify.mjs writes verify.json, the record of the last verify run; run node "<kit>/scripts/verify.mjs" --change <port change> instead';
       }
       for (const call of archiveCalls(command)) {

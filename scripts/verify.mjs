@@ -15,7 +15,7 @@
 // They stop at the first failure. Progress goes to stderr. Then writes
 // openspec/changes/<change>/verify.json:
 //   { kit, version, change, capability, ranAt, ok,
-//     target: { count, sha256, files: { <path>: <sha256> } },
+//     target: { count, sha256, sameCode: [<sha256>], files: { <path>: <sha256> } },
 //     runs: [{ level, command, exitCode, seconds, timedOut }] }
 // `target.sha256` is one hash over the target root's files after the run
 // (gate.mjs targetHash); port-done fails, naming the files, when the code
@@ -53,6 +53,13 @@ function killTree(child, platform) {
   else { try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* gone */ } } }
 }
 
+// The longest timeout setTimeout can wait (about 24.8 days).
+export const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+// After the command's own process ended (or was killed), how long to wait for
+// the output of what it left behind before going on.
+const GRACE_MS = 2000;
+const running = new Set();
+
 // Runs one command line in the target root and resolves to
 // { exitCode, timedOut, seconds, output } (only the last part of the output).
 export function runCommand(command, cwd, { timeoutMs, platform = process.platform, exec = spawn } = {}) {
@@ -64,26 +71,53 @@ export function runCommand(command, cwd, { timeoutMs, platform = process.platfor
     : ['/bin/sh', ['-c', command], { detached: true }];
   const started = Date.now();
   return new Promise((resolve) => {
-    let output = '';
+    const chunks = [];
+    let size = 0;
     let timedOut = false;
     let settled = false;
-    const keep = (chunk) => { output = (output + chunk.toString('utf8')).slice(-KEEP_BYTES); };
+    let exitCode = null;
     let child;
-    const done = (exitCode, error) => {
+    let timer = null;
+    let grace = null;
+    const keep = (chunk) => {
+      chunks.push(chunk); size += chunk.length;
+      while (size > KEEP_BYTES && chunks.length > 1) size -= chunks.shift().length;
+    };
+    const done = (error) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      resolve({ exitCode, timedOut, seconds: Math.round((Date.now() - started) / 100) / 10, output: error ? `${output}\n${error.message}` : output });
+      clearTimeout(timer); clearTimeout(grace);
+      running.delete(child);
+      child?.stdout?.destroy?.(); child?.stderr?.destroy?.();
+      const output = Buffer.concat(chunks).toString('utf8');
+      resolve({ exitCode: timedOut || typeof exitCode !== 'number' ? -1 : exitCode, timedOut, seconds: Math.round((Date.now() - started) / 100) / 10, output: error ? `${output}\n${error.message}` : output });
     };
     try {
       child = exec(file, args, { cwd, env: process.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], ...extra });
     } catch (error) { resolve({ exitCode: -1, timedOut: false, seconds: 0, output: error.message }); return; }
-    const timer = timeoutMs ? setTimeout(() => { timedOut = true; killTree(child, platform); }, timeoutMs) : null;
+    running.add(child);
+    if (timeoutMs) {
+      timer = setTimeout(() => {
+        timedOut = true;
+        killTree(child, platform);
+        grace = setTimeout(() => done(), GRACE_MS);
+      }, Math.min(timeoutMs, MAX_TIMEOUT_MS));
+    }
     child.stdout?.on('data', keep);
     child.stderr?.on('data', keep);
-    child.on('error', (error) => done(-1, error));
-    child.on('close', (code) => done(timedOut || typeof code !== 'number' ? -1 : code));
+    child.on('error', (error) => done(error));
+    // A process the command left behind may hold the output open: the command's
+    // own exit decides, and its output is read for a short while after.
+    child.on('exit', (code) => { exitCode = code; clearTimeout(grace); grace = setTimeout(() => done(), GRACE_MS); });
+    child.on('close', () => done());
   });
+}
+
+// Ctrl+C on verify.mjs stops the command it is running too (on POSIX the
+// command runs in its own process group, which the terminal does not signal).
+function stopAll(signal) {
+  for (const child of running) killTree(child, process.platform);
+  process.exit(signal === 'SIGINT' ? 130 : 143);
 }
 
 const say = (line) => process.stderr.write(`verify: ${line}\n`);
@@ -101,6 +135,7 @@ export async function verify(root, change, { timeoutMs = 60 * 60 * 1000, run = r
   const cwd = path.resolve(root, target);
   if (!fs.existsSync(cwd)) return { ok: false, problems: [`the target root ${target} does not exist yet`] };
 
+  const before = targetHash(root, files);
   const runs = [];
   const shown = [];
   // The levels run in order and stop at the first failure: a comparison of code
@@ -116,11 +151,20 @@ export async function verify(root, change, { timeoutMs = 60 * 60 * 1000, run = r
   const ok = runs.length === plan.runs.length && runs.every((r) => r.exitCode === 0);
   const after = targetFiles(root) ?? [];
   const hashes = targetHashes(root, after);
+  const sha256 = targetHash(root, after, hashes);
+  // The code states that differ from this one only by what verify runs wrote
+  // (test reports, recorded output): the state before this run, and, when
+  // nothing else changed since the last run, the states that run counted.
+  // port-done takes a crosscheck merged on any of them.
+  let previous = null;
+  try { previous = JSON.parse(fs.readFileSync(path.join(dir, VERIFY_RECEIPT), 'utf8')); } catch { /* first run */ }
+  const carried = previous?.change === change && previous?.target?.sha256 === before && Array.isArray(previous.target.sameCode) ? previous.target.sameCode : [];
+  const sameCode = [...new Set([...carried, before].filter((h) => h !== sha256))].slice(-20);
   let version = 'unknown';
   try { version = JSON.parse(fs.readFileSync(path.join(KIT, 'package.json'), 'utf8')).version; } catch { /* kit without package.json */ }
   const receipt = {
     kit: 'spec-relay', version, change, capability, ranAt: new Date().toISOString(), ok,
-    target: { count: after.length, sha256: targetHash(root, after, hashes), files: hashes },
+    target: { count: after.length, sha256, sameCode, files: hashes },
     runs,
   };
   const problems = shown.filter((r) => r.exitCode !== 0).map((r) => `${r.level === 'boundary' ? 'the boundary check' : `level ${r.level}`} failed (${r.timedOut ? 'timed out' : `exit code ${r.exitCode}`}): ${r.command}`);
@@ -141,7 +185,9 @@ export function main(argv) {
     opts[key] = argv[i + 1];
   }
   const minutes = Number(opts.timeout);
-  if (!opts.change || !(minutes > 0)) return usage();
+  if (!opts.change || !(minutes > 0) || minutes * 60 * 1000 > MAX_TIMEOUT_MS) return usage();
+  process.once('SIGINT', stopAll);
+  process.once('SIGTERM', stopAll);
   if (!fs.existsSync(path.join(opts.root, 'openspec'))) {
     console.error(`verify: no openspec/ folder in ${path.resolve(opts.root)}. Run this from the repository root or pass --root DIR.`);
     return 2;
@@ -153,7 +199,7 @@ export function main(argv) {
 }
 
 function usage() {
-  console.error('Usage: node verify.mjs --change port-<capability> [--root DIR] [--timeout-minutes N]');
+  console.error('Usage: node verify.mjs --change port-<capability> [--root DIR] [--timeout-minutes N (at most 35000)]');
   return 2;
 }
 

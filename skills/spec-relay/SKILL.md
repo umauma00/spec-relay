@@ -216,7 +216,8 @@ not wash out these instructions.
    Before every wave, run `node "<kit>/scripts/gate.mjs" guard --save
    wave-<n>`: it saves the hashes of the files no subagent may write (every
    active change's `review.md`, `questions.md`, `crosscheck.md` and
-   `verify.json`, `plan.md`, `lessons.md`,
+   `verify.json`, every active port's `proposal.md` and `design.md`,
+   `plan.md`, `lessons.md`,
    `openspec/specs/`, `openspec/config.yaml` and the source files). After the
    wave, run `gate.mjs guard --compare wave-<n>`, which lists only the paths
    that changed (exit code 1 then: read the lists). If the wave is still
@@ -490,10 +491,11 @@ port.
    file with the hash of the code it was checked on, and port-done fails once
    the code changes after it. Never run an implementer and a checker of the
    same port in one wave. For every `mismatch`
-   and `unclear` row, give the row to the implementer to fix, then have a new
-   checker check that row again (a part file with a higher number). When the
-   row shows that the source code and the baseline spec disagree, stop and ask
-   the person (step 5). After the fixes, run `verify.mjs` again.
+   and `unclear` row, give the row to the implementer to fix, run `verify.mjs`
+   again, then have a new checker check that row again (a part file with a
+   higher number) and merge it, so the stamp is the fixed code's. When the row
+   shows that the source code and the baseline spec disagree, stop and ask the
+   person (step 5).
 8. **Done check.** Run `node "<kit>/scripts/gate.mjs" port-done --change
    port-<capability>`. Besides the tasks and the baseline hash, it fails when
    the last verify run failed or the target code changed after it, when a

@@ -51,8 +51,8 @@ each, the tasks you ticked, and anything left as `TODO(port)`.
 - Write the tests that come from the spec scenarios together with the code,
   and the comparison tests design.md asks for (B1, B2, C). Give each scenario
   test the tag `spec-relay: <capability> | <requirement name> | <scenario
-  name>` in a comment or its test name, with the names exactly as in the
-  baseline spec (`// spec-relay: billing/invoice | Issue an invoice | Month end
+  name>` in a comment, or as its whole test name (the string starts with
+  `spec-relay:`), with the names exactly as in the baseline spec (`// spec-relay: billing/invoice | Issue an invoice | Month end
   closing`). Never weaken, skip or delete a test to make it pass. Tick a task
   only after its verification passes, and run the boundary check before you
   report.

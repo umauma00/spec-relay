@@ -162,7 +162,8 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 
 - gate を通らない `openspec archive`（`node <キット>/scripts/openspec.mjs`・`openspec`・`openspec.cmd`・`npx @fission-ai/openspec` などの書き方と、`cd` してからの実行を含む）、change 名のない archive、変数で名前を渡す archive、サブエージェントからの archive
 - 元コード（元のフォルダーが `.` のときは `openspec/` と移行先のフォルダー以外のすべて）、`openspec/specs/`、`openspec/changes/archive/`、`openspec/schemas/`、`openspec/spec-relay/tools/`（固定した OpenSpec）、`openspec/config.yaml`、キット自体への書き込み
-- サブエージェントによる review.md・questions.md・計画（plan.md）・学びの記録（lessons.md）の書き込み
+- サブエージェントによる review.md・questions.md・crosscheck.md・port の proposal.md と design.md・計画（plan.md）・学びの記録（lessons.md）の書き込み
+- port のテスト実行の記録（`verify.json`）への書き込み（編集ツールでも、`Set-Content`・リダイレクト・`node -e` などのシェルコマンドでも。書くのは `verify.mjs` だけ）
 
 有効にするには、`openspec/config.yaml` の context に次の1行を足すか、`on` に変えます（導入時なら `--hooks on`。導入済みのリポジトリでは `--hooks` は反映されないので、この行を自分で直します）。フックが有効な間、AI の編集ツールは config.yaml を書けず、この行や config.yaml を書き換えるシェルコマンドも拒否されます（無効の間も、AI には変えないように指示しています）。
 
@@ -171,7 +172,7 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 ```
 
 - 実機（特に Windows）での確認がまだなので、既定は無効です。node が見つからないなどでフックが動かないときは、拒否せずに通常の許可確認へ進みます（Copilot は終了コードが 0 以外だとそのツールの実行を拒否するので、壊れたフックですべての操作が止まらないよう、必ず 0 を返します）。
-- シェルコマンドでの書き込み（`Set-Content` など）は、config.yaml へのもの以外は読み取りません。これはオーケストレーターの `gate.mjs guard` が後から見つけます。
+- シェルコマンドでの書き込み（`Set-Content` など）は、config.yaml と verify.json へのもの以外は読み取りません。これはオーケストレーターの `gate.mjs guard` が後から見つけます。
 - フックはプラグインを入れたすべてのリポジトリで、シェルとファイル編集の前に1回ずつ起動します（node の起動1回分。spec-relay のリポジトリでなければすぐ終わります）。ホストがプラグインの場所（`PLUGIN_ROOT`）を渡さないときは何もしません。
 - チャットでの承認は AI が review.md に書くので、「AI が勝手にチェックを付ける」ことはフックでは区別できません。承認は今も、チャットでのあなたの言葉と gate の合格の両方です。
 
@@ -181,6 +182,7 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 
 - archive 済みの移行先の設計はそのままです。conventions.md の Test と Boundary check のコマンドは、0.8.0 から移行先のフォルダーで実行します。リポジトリの一番上で動く書き方になっていたら、port の design.md の Verification 表で、A と `Boundary check` の行にコマンドを書けば、そちらを使います。
 - archive 済みの verification.md の比べ方の欄は `yes` か `no` で読みます（`はい`・`✓`・`なし`・`-` なども可）。それ以外の言葉があると port-done が止まるので、移行先の設計をやり直す（`target-design-v2`）か、オーケストレーターに相談してください。
+- archive 済みの conventions.md の Test や Boundary check が `npm run build; npm test` のように複数のコマンドをつないでいると、前の失敗が隠れるので port-done が止まります。port の design.md の Verification 表に1つのコマンド（スクリプトやビルドツールのタスク）を書けば、そちらを使います。
 - 進行中の port は、タスクがすべて完了していても `gate.mjs port-done` を通らなくなります。オーケストレーターがテストに印を付け、`verify.mjs` と照合を行ってから、改めて archive してよいかを聞きます。
 
 ## 0.6.0 から更新するとき

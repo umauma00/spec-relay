@@ -123,7 +123,7 @@ flowchart LR
 | テストの実行記録（`verify.json`） | 記録がない、失敗した、実行後にコードが変わった、規約や design.md のコマンドが変わった、選んだ比べ方（B1・B2・C）を実行していない |
 | シナリオごとのテスト | ベースラインのシナリオに `spec-relay: <capability> \| <要件> \| <シナリオ>` の印を付けたテストがない。ベースラインにないシナリオの印がある |
 | `TODO(port)` | 移行先のフォルダーに残っている（人が了承して proposal.md の Follow-up に書いたファイルは除く） |
-| 実装の照合（`crosscheck.md`） | 要件・画面の行がない、`mismatch` か `unclear` が残っている、照合をまとめた後にコードが変わった（`merge.mjs` がまとめたときのコードのハッシュを書き込む） |
+| 実装の照合（`crosscheck.md`） | 要件・画面の行がない、`mismatch` か `unclear` が残っている、照合をまとめた後にコードが変わった（`merge.mjs` がまとめたときのコードのハッシュを書き込む。テスト実行が書いたレポートなどの変化だけなら、`verify.json` がたどれるので止まらない） |
 
 決めたこと：
 
@@ -185,7 +185,7 @@ flowchart LR
 |---|---|
 | サブエージェントは割り当てられたファイルを自分で書き、短い報告だけを返す | 成果物の全文をオーケストレーターが受け取って書き写すと、並列の数だけ文脈が埋まり、圧縮で手順や約束事を忘れやすくなる。オーケストレーターは指示も中継せず、スキーマのパスを渡す |
 | 1つの波で同じファイルを書くサブエージェントは1つだけ | 同じ作業フォルダーを共有するため。分担する表（inventory・crosscheck）は作業フォルダー `openspec/spec-relay/work/<change>/` に別々のファイルとして書き、`scripts/merge.mjs` が1つにまとめる。merge.mjs は作業フォルダーの外を部品として読まず、進行中の change の成果物（review.md を除く）にしか書かない。同じ R 番号に別の名前が来たら止まる |
-| 波の前に `gate.mjs guard --save`、後に `--compare` で比べる | 解析担当と照合担当は書く権限を持つようになったので、割り当て外のファイルが変わっていないかを確かめる。進行中の change の review.md・questions.md、plan.md、lessons.md、ベースライン仕様、config.yaml、元コードのファイルごとのハッシュを保存し、変わったパスだけを出す（git は追跡していない review.md のチェックや、変更済み・未追跡の元ファイルへの再編集を見分けられない。git が無視するファイルは元コードに数えない）。オーケストレーターは波の途中で守られたファイルを自分で書く直前にも比べ、そのパスがすでに変わっていれば止まる。書いた後は保存し直す。それ以外のファイルは、git リポジトリなら `git status` で見る。フック（既定は無効）を有効にすると、実行前にも拒否する |
+| 波の前に `gate.mjs guard --save`、後に `--compare` で比べる | 解析担当と照合担当は書く権限を持つようになったので、割り当て外のファイルが変わっていないかを確かめる。進行中の change の review.md・questions.md・crosscheck.md・verify.json、進行中の port の proposal.md と design.md、plan.md、lessons.md、ベースライン仕様、config.yaml、元コードのファイルごとのハッシュを保存し、変わったパスだけを出す（git は追跡していない review.md のチェックや、変更済み・未追跡の元ファイルへの再編集を見分けられない。git が無視するファイルは元コードに数えない）。オーケストレーターは波の途中で守られたファイルを自分で書く直前にも比べ、そのパスがすでに変わっていれば止まる。書いた後は保存し直す。それ以外のファイルは、git リポジトリなら `git status` で見る。フック（既定は無効）を有効にすると、実行前にも拒否する |
 | review.md・plan.md・lessons.md・questions.md、openspec のコマンド、archive はオーケストレーターだけ | 人の判断と関門に関わる所を1か所に保つ |
 | 同時に動かす数は設定（既定 4） | Copilot CLI のリファレンス（2026-11-10 時点）では契約ごとに上限が違い（Free 2、Pro 4、Max 8、Business 16、Enterprise・従量課金 32、孫も含めたセッション全体）、超えた起動は待たずに断られる。断られたら1つ終わるのを待って起動し直す。従量課金でない契約では、設定でこの数を変えられない。VS Code と Copilot app の上限は公式に書かれていない |
 | サブエージェントのモデルも設定（役割ごと、既定はセッションと同じ） | プラグインのエージェント定義は全リポジトリで共通なので、リポジトリごとのモデルはオーケストレーターが頼むときに指定する。呼び出しごとの指定は Copilot CLI で公式（エージェント定義や利用者の設定より優先される）、VS Code の Copilot ハーネスと Copilot app は未記載。セッションが Auto のときはセッションのモデルになる |
@@ -233,7 +233,7 @@ flowchart LR
    OpenSpec の版は移行対象のリポジトリごとに固定する。導入スクリプトがキットの `templates/openspec-tools/`（package.json と package-lock.json）を `openspec/spec-relay/tools/` に置いて `npm ci` で入れ、キットのスクリプトとオーケストレーターは `node <キット>/scripts/openspec.mjs` でそれだけを起動する。グローバルの `openspec` は使わないので、利用者が別の版を入れても、2.0.0 のときのように置き場所が変わって抜け道が戻ることはない。版を上げるのは、キットが lock ファイルを更新したときだけ（doctor は違う版を FAIL にする）。移行中のリポジトリでは、古い package.json と package-lock.json を消してから導入スクリプトを実行し直す。
 7. **記録**：review.md の各項目と質問への判断が change と一緒に archive に残る。
 
-8. **実行前に拒否する（フック、試験中・既定は無効）**：`com.github.copilot/hooks/hooks.json` の preToolUse フック（`scripts/hook.mjs`）が、`openspec/config.yaml` で `Hook enforcement` を `on` にしたリポジトリでだけ、gate を通らない archive、元コード・ベースライン仕様・archive 済みの change・スキーマ・固定した OpenSpec（`openspec/spec-relay/tools/`）・設定・キットへの書き込み、サブエージェントによる review.md・questions.md・計画・学びの記録の書き込みを拒否する。サブエージェントの呼び出しにもフックは働く（呼び出しに `agentId`・`agentType` が付く。オーケストレーター自身が既定のエージェントのサブエージェントとして動くときは、オーケストレーターとして扱う）。コマンドの中の文字列（コミットメッセージや検索語）に書かれた `openspec archive` は呼び出しとして扱わない。拒否の理由は ASCII に変換して返すので、Windows のコンソールの文字コードで壊れない。フック自体が動かないとき（node がないなど）は、拒否せずに通常の許可確認へ進む。Copilot は command フックが 0 以外で終わるとそのツールを拒否するため、壊れたフックですべての操作が止まらないよう、ラッパーで必ず 0 を返す。
+8. **実行前に拒否する（フック、試験中・既定は無効）**：`com.github.copilot/hooks/hooks.json` の preToolUse フック（`scripts/hook.mjs`）が、`openspec/config.yaml` で `Hook enforcement` を `on` にしたリポジトリでだけ、gate を通らない archive、元コード・ベースライン仕様・archive 済みの change・スキーマ・固定した OpenSpec（`openspec/spec-relay/tools/`）・設定・キットへの書き込み、サブエージェントによる review.md・questions.md・crosscheck.md・port の proposal.md と design.md・計画・学びの記録の書き込み、テスト実行の記録（verify.json）への書き込み（シェルコマンドからのものも）を拒否する。サブエージェントの呼び出しにもフックは働く（呼び出しに `agentId`・`agentType` が付く。オーケストレーター自身が既定のエージェントのサブエージェントとして動くときは、オーケストレーターとして扱う）。コマンドの中の文字列（コミットメッセージや検索語）に書かれた `openspec archive` は呼び出しとして扱わない。拒否の理由は ASCII に変換して返すので、Windows のコンソールの文字コードで壊れない。フック自体が動かないとき（node がないなど）は、拒否せずに通常の許可確認へ進む。Copilot は command フックが 0 以外で終わるとそのツールを拒否するため、壊れたフックですべての操作が止まらないよう、ラッパーで必ず 0 を返す。
 
 フックでも区別できないことが2つ残ります。チャットで承認された項目は AI が review.md に書くので、AI が承認なしにチェックを付けることは止められません。シェルコマンドでの書き込みも読み取らないので、波の前後の `gate.mjs guard` が後から見つけます。チェック後に内容が変わったことを検出する（レビュー時点のハッシュ）ことも、次の段階の課題です（下の「今後の課題」）。
 
