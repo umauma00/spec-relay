@@ -26,7 +26,7 @@ import { checkboxes, questionIds, tableRows, changeSchema, archivedChange } from
 const LABELS = {
   ja: {
     kinds: { 'spec-relay-extract': '抽出レビュー', 'spec-relay-survey': '調査レビュー', 'spec-relay-target': '移行先設計レビュー', 'spec-relay-amend': '修正レビュー', 'spec-relay-port': '移植' },
-    groups: { requirements: '要件', screens: '画面', questions: '質問', coverage: '網羅性', contexts: 'コンテキスト', map: 'マップ', architecture: 'アーキテクチャ', conventions: '規約', verification: '検証', impact: '影響' },
+    groups: { requirements: '要件', screens: '画面', questions: '質問', coverage: '網羅性', contexts: 'コンテキスト', map: 'マップ', architecture: 'アーキテクチャ', conventions: '規約', verification: '検証', impact: '影響', databases: 'データベース', data: 'データ' },
     qkinds: { 'suspected bugs': 'バグの疑い', ambiguities: 'あいまいな点', assumptions: '仮定', 'not migrated': '移行しない' },
     steps: { GIVEN: '前提', WHEN: '操作', THEN: '結果', AND: 'かつ', BUT: 'ただし' },
     deltas: { added: '＋ 追加', removed: '－ 削除', modified: '＊ 変更', renamed: '＊ 名前変更' },

@@ -122,8 +122,10 @@ artifacts:
         in the module that owns the table). Defaults: keep triggers,
         constraints, sequences and views, because they act on every writer,
         including the old system and manual SQL; keep procedures and functions
-        unless the product changes; jobs become batch capabilities, and their
-        schedule moves only when the person says so.
+        unless the product changes. A job's steps are specified like batch
+        capabilities either way; `keep` leaves it scheduled in the database
+        (SQL Server Agent, MySQL events), `move` schedules it in the new
+        system, and is chosen only when the person says so.
       - **Exceptions**: table of object, handling and reason, for objects
         handled unlike their kind. "None" when there are none.
       - **Data access mapping**: table of topic, source behavior and target
@@ -163,11 +165,12 @@ artifacts:
       - Under `## 2. Conventions`: one checkbox per section of conventions.md.
       - Under `## 3. Verification`: one checkbox per context's levels, and one
         for sign-in and recorded data.
-      - Under `## 4. Data`: one checkbox for the schema policy, one per kind in
-        data.md's Database logic (`- [ ] D<n> <kind>: <handling>`), and one
-        each for the exceptions, the data access mapping, and the schema
-        changes with the test database. Leave the heading empty when data.md
-        says None.
+      - Under `## 4. Data`: `- [ ] D0 The schema policy`, one per kind in
+        data.md's Database logic (`- [ ] D<n> <kind>: <handling>`, numbered
+        from D1, with the same keep or move as data.md), `- [ ] D90 The
+        exceptions`, `- [ ] D91 The data access mapping` and `- [ ] D92 The
+        schema changes and the test database`. Leave the heading empty when
+        data.md says None.
       Do not tick any box. Only the reviewer decides.
     requires:
       - architecture

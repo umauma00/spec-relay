@@ -318,14 +318,24 @@ export const DATABASE_DIR = 'openspec/spec-relay/db';
 export const DB_KINDS = ['view', 'procedure', 'function', 'trigger', 'constraint', 'sequence', 'job', 'other'];
 const JUNK = /^(desktop\.ini|thumbs\.db|\.ds_store)$/i;
 
-// Repository-relative paths of the files under openspec/spec-relay/db/.
+// Repository-relative paths of the files under openspec/spec-relay/db/. In a git
+// repository only the files git tracks or would track count, as for source files,
+// so a local file a .gitignore rule hides never makes clones disagree.
 export function databaseFiles(root) {
-  return walk(path.join(root, DATABASE_DIR)).filter((f) => !JUNK.test(path.basename(f)))
+  const onDisk = walk(path.join(root, DATABASE_DIR)).filter((f) => !JUNK.test(path.basename(f)))
+    .filter((f) => { try { return fs.statSync(f).isFile(); } catch { return false; } })
     .map((f) => path.relative(root, f).split(path.sep).join('/')).sort();
+  if (onDisk.length === 0) return onDisk;
+  const top = spawnSync('git', ['rev-parse', '--show-cdup'], { cwd: root, encoding: 'utf8', windowsHide: true });
+  if (top.status !== 0 || top.stdout.trim() !== '') return onDisk;
+  const git = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', DATABASE_DIR], { cwd: root, encoding: 'buffer', windowsHide: true, maxBuffer: Infinity });
+  if (git.status !== 0 || !git.stdout) return onDisk;
+  const listed = new Set(git.stdout.toString('utf8').split('\0').filter(Boolean).map((f) => f.toLowerCase()));
+  return onDisk.filter((f) => listed.has(f.toLowerCase()));
 }
 
-const isUtf16 = (buffer, file) => (buffer[0] === 0xff && buffer[1] === 0xfe) || (buffer[0] === 0xfe && buffer[1] === 0xff)
-  || (/\.(sql|ddl|txt|csv|tsv|md)$/i.test(file) && buffer.includes(0));
+const hasBom16 = (buffer) => (buffer[0] === 0xff && buffer[1] === 0xfe) || (buffer[0] === 0xfe && buffer[1] === 0xff);
+const isUtf16 = (buffer, file) => hasBom16(buffer) || (/\.(sql|ddl|txt|csv|tsv|md)$/i.test(file) && buffer.includes(0));
 
 // Definition files saved as UTF-16 (SSMS "Unicode text", `>` in Windows PowerShell 5.1),
 // which analysts and the gate cannot read as text.
@@ -333,17 +343,31 @@ export function databaseUtf16(root) {
   return databaseFiles(root).filter((f) => { try { return isUtf16(fs.readFileSync(path.join(root, f)), f); } catch { return false; } });
 }
 
-// sha256 over the definition files (paths relative to openspec/spec-relay/db/, text
-// with line endings and BOM normalised so a Windows checkout gives the same hash),
-// or null when the folder holds no file.
+// A text file's bytes without a UTF-8 BOM and with CRLF and CR as LF. It works on
+// bytes, so Shift_JIS or EUC-JP definitions hash by what they hold.
+function normalisedBytes(buffer) {
+  const start = buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf ? 3 : 0;
+  const out = Buffer.alloc(buffer.length - start);
+  let n = 0;
+  for (let i = start; i < buffer.length; i += 1) {
+    if (buffer[i] === 0x0d) { out[n++] = 0x0a; if (buffer[i + 1] === 0x0a) i += 1; } else out[n++] = buffer[i];
+  }
+  return out.subarray(0, n);
+}
+
+// sha256 over the definition files (paths relative to openspec/spec-relay/db/ in
+// lowercase, because Windows folders ignore case; text with line endings and BOM
+// normalised so a Windows checkout gives the same hash), or null when the folder
+// holds no file.
 export function databaseHash(root) {
   const files = databaseFiles(root);
   if (files.length === 0) return null;
   const lines = files.map((f) => {
-    let buffer = fs.readFileSync(path.join(root, f));
-    if (!isUtf16(buffer, f) && !buffer.includes(0)) buffer = Buffer.from(buffer.toString('utf8').replace(/^﻿/, '').replace(/\r\n?/g, '\n'));
-    return `${f.slice(DATABASE_DIR.length + 1)}\0${crypto.createHash('sha256').update(buffer).digest('hex')}`;
-  });
+    let buffer;
+    try { buffer = fs.readFileSync(path.join(root, f)); } catch { buffer = Buffer.from(`unreadable ${f}`); }
+    if (!isUtf16(buffer, f) && !buffer.includes(0)) buffer = normalisedBytes(buffer);
+    return `${f.slice(DATABASE_DIR.length + 1).toLowerCase()}\0${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+  }).sort();
   return crypto.createHash('sha256').update(lines.join('\n')).digest('hex');
 }
 
@@ -360,10 +384,14 @@ export function section(text, title) {
 }
 
 const isNone = (text) => /^(none|なし|該当なし)[.。]?$/i.test(plain(stripComments(text ?? '').replace(/^#.*$/gm, '')));
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-// A review box `<letter><n> <name>...`, the name as its first words.
-const hasItem = (boxes, letter, name) => boxes.some((b) => new RegExp(`^${letter}\\d+\\s*[.:)-]?\\s*\\W*${escapeRe(plain(name))}(?![\\w-])`, 'i').test(b.plain));
-const recordedDbHash = (text) => stripComments(text ?? '').match(/sha256:\s*`?([0-9a-f]{64})\b/i)?.[1].toLowerCase() ?? null;
+// The review boxes `<letter><n> <name>` or `<letter><n> <name>: <note>` for this name.
+const itemsFor = (boxes, letter, name) => boxes.filter((b) => new RegExp(`^${letter}\\d+\\b`, 'i').test(b.plain))
+  .filter((b) => withoutId(b.plain, letter).split(/[:：]/)[0].trim() === norm(name));
+// The note after the name: `D1 trigger: keep` gives "keep".
+const itemNote = (box) => norm(box.plain.split(/[:：]/).slice(1).join(':'));
+const hasId = (boxes, id) => boxes.some((b) => new RegExp(`^${id}\\b`, 'i').test(b.plain));
+// The snapshot hash in `## Snapshot` (or anywhere when that heading is gone).
+const recordedDbHash = (text) => stripComments(section(text, 'Snapshot') ?? text ?? '').match(/sha-?256[^0-9a-f\n]*([0-9a-f]{64})(?![0-9a-f])/i)?.[1].toLowerCase() ?? null;
 
 // The rows of the first table in the text as objects keyed by the lowercase header cells.
 function headedRows(text) {
@@ -402,14 +430,13 @@ function checkDatabases(root, dir, boxes, problems) {
   }
   const missing = [];
   for (const db of databases) {
-    if (!hasItem(boxes, 'D', db.name)) problems.push(`database has no review item: ${db.name} (D<n> ${db.name})`);
+    const items = itemsFor(boxes, 'D', db.name).length;
+    if (items !== 1) problems.push(`database has ${items ? 'more than one' : 'no'} review item: ${db.name} (D<n> ${db.name})`);
     const key = Object.keys(db).find((k) => k.startsWith('definition'));
     if (!key) { problems.push('the ## Databases table of database.md has no Definitions column'); break; }
+    if (isNone(db[key])) { missing.push(db.name); continue; }
     const paths = [...db[key].matchAll(/`([^`]+)`/g)].map((m) => relPath(m[1].trim()));
-    if (paths.length === 0) {
-      if (isNone(db[key])) missing.push(db.name);
-      else problems.push(`database ${db.name} names no definitions path (in backticks) and does not say "none"`);
-    }
+    if (paths.length === 0) problems.push(`database ${db.name} names no definitions path (in backticks) and does not say "none"`);
     for (const p of paths) {
       if (p.split('/').includes('..') || path.isAbsolute(p) || !fs.existsSync(path.join(root, p))) problems.push(`database ${db.name}: the definitions path ${p} does not exist in the repository`);
     }
@@ -417,6 +444,7 @@ function checkDatabases(root, dir, boxes, problems) {
   if (missing.length && isNone(section(text, 'Missing definitions') ?? 'none')) {
     problems.push(`database ${missing.join(', ')} has no definitions; say under ## Missing definitions what is missing and why`);
   }
+  if (!hasId(boxes, 'D90')) problems.push('review.md has no D90 item for the missing definitions');
   const logic = section(text, 'Logic in the database');
   if (logic === null) problems.push('database.md has no "## Logic in the database" section');
   for (const [kind = ''] of tableRows(logic ?? '')) {
@@ -454,8 +482,14 @@ function checkData(survey, dir, boxes, problems) {
   if (data === null) { problems.push('data.md is missing (write "None" when the survey found no database)'); return; }
   if (!(listedDatabases(dbText) ?? []).length) return;
   for (const title of ['Schema policy', 'Database logic', 'Data access mapping', 'Schema changes', 'Test database']) {
-    const body = section(data, title);
-    if (body === null || !stripComments(body).trim()) problems.push(`data.md has no "## ${title}" section, or it is empty (keep the template's English headings)`);
+    const body = stripComments(section(data, title) ?? '').trim();
+    if (!body || PLACEHOLDER.test(plain(body))) problems.push(`data.md has no "## ${title}" section, or it is empty (keep the template's English headings)`);
+  }
+  for (const [topic = '', , rule = ''] of tableRows(section(data, 'Data access mapping') ?? '')) {
+    if (plain(topic) && PLACEHOLDER.test(plain(rule))) problems.push(`data.md: the data access mapping of "${plain(topic)}" has no target rule (write "same" when nothing differs)`);
+  }
+  for (const [id, what] of [['D0', 'the schema policy'], ['D90', 'the exceptions'], ['D91', 'the data access mapping'], ['D92', 'the schema changes and the test database']]) {
+    if (!hasId(boxes, id)) problems.push(`review.md has no ${id} item for ${what}`);
   }
   const kinds = [...new Set(tableRows(section(dbText, 'Logic in the database') ?? '').map(([kind = '']) => norm(kind)).filter((k) => DB_KINDS.includes(k)))];
   const handling = new Map(tableRows(section(data, 'Database logic') ?? '').map(([kind = '', how = '']) => [norm(kind), norm(how)]));
@@ -463,7 +497,11 @@ function checkData(survey, dir, boxes, problems) {
     const how = handling.get(kind);
     if (how === undefined) problems.push(`data.md has no row for ${kind} under ## Database logic (the survey's database.md lists it)`);
     else if (!/^(keep|move)\b/.test(how)) problems.push(`data.md: the handling of ${kind} is "${how || 'blank'}"; write keep or move, and list objects handled the other way under ## Exceptions`);
-    if (!hasItem(boxes, 'D', kind)) problems.push(`the handling of ${kind} has no review item (D<n> ${kind})`);
+    const items = itemsFor(boxes, 'D', kind);
+    if (items.length !== 1) problems.push(`the handling of ${kind} has ${items.length ? 'more than one' : 'no'} review item (D<n> ${kind}: <handling>)`);
+    else if (/^(keep|move)\b/.test(how ?? '') && /^(keep|move)\b/.test(itemNote(items[0])) && itemNote(items[0]).split(/\W/)[0] !== how.split(/\W/)[0]) {
+      problems.push(`the review item of ${kind} says "${itemNote(items[0])}", but data.md says "${how}"`);
+    }
   }
 }
 
@@ -708,6 +746,7 @@ export function checkPortDone(root, change) {
     if (now === null) problems.push(`no baseline spec for ${capability}`);
     else if (now !== hash.toLowerCase()) problems.push(`the baseline of ${capability} changed after this port started (an amendment was archived); update the port to it, then record the new hash`);
   }
+  checkDatabaseDrift(root, problems);
   return { ok: problems.length === 0, problems };
 }
 

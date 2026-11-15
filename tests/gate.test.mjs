@@ -594,7 +594,7 @@ test('the target design decides the handling of every kind of database logic', (
   fs.mkdirSync(path.join(dir, 'openspec/changes/archive'));
   fs.renameSync(path.join(dir, SURVEY), path.join(dir, 'openspec/changes/archive/2026-11-01-survey'));
   const T = 'openspec/changes/target-design';
-  const REVIEW = 'Reviewer: Uma\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform\n- [x] E2 billing\n- [x] D0 schema policy\n- [x] D1 procedure: keep\n- [x] D2 trigger: keep\n';
+  const REVIEW = 'Reviewer: Uma\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform\n- [x] E2 billing\n- [x] D0 schema policy\n- [x] D1 procedure: keep\n- [x] D2 trigger: keep\n- [x] D90 exceptions\n- [x] D91 mapping\n- [x] D92 schema changes and test database\n';
   const DATA = '# Data\n\n## Schema policy\nkeep; old and new side by side\n\n## Database logic\n| Kind | Handling | Reason |\n|---|---|---|\n| procedure | keep | |\n| trigger | keep (acts on every writer) | |\n\n## Exceptions\nNone\n\n## Data access mapping\n| Topic | Source behavior | Target rule |\n|---|---|---|\n| Trailing spaces | ignored | rtrim |\n\n## Schema changes\nddl-auto=validate\n\n## Test database\nLocalDB\n';
   write(dir, `${T}/.openspec.yaml`, 'schema: spec-relay-target\n');
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| billing | ts/billing |\n');
@@ -602,14 +602,26 @@ test('the target design decides the handling of every kind of database logic', (
   write(dir, `${T}/review.md`, REVIEW);
   write(dir, `${T}/data.md`, DATA);
   assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
-  write(dir, `${T}/data.md`, DATA.replace('| trigger | keep (acts on every writer) | |\n', '| procedure | rewrite | |\n').replace(/## Test database\nLocalDB\n/, ''));
-  write(dir, `${T}/review.md`, REVIEW.replace(/- \[x\] D2[^\n]*\n/, ''));
+  write(dir, `${T}/data.md`, DATA.replace('| trigger | keep (acts on every writer) | |\n', '| procedure | rewrite | |\n').replace(/## Test database\nLocalDB\n/, '## Test database\nTBD\n').replace('| ignored | rtrim |', '| ignored | |'));
+  write(dir, `${T}/review.md`, REVIEW.replace(/- \[x\] D2[^\n]*\n/, '').replace(/- \[x\] D91[^\n]*\n/, ''));
   assert.deepEqual(checkReview(dir, 'target-design').problems, [
     'data.md has no "## Test database" section, or it is empty (keep the template\'s English headings)',
+    'data.md: the data access mapping of "Trailing spaces" has no target rule (write "same" when nothing differs)',
+    'review.md has no D91 item for the data access mapping',
     'data.md: the handling of procedure is "rewrite"; write keep or move, and list objects handled the other way under ## Exceptions',
     'data.md has no row for trigger under ## Database logic (the survey\'s database.md lists it)',
-    'the handling of trigger has no review item (D<n> trigger)',
+    'the handling of trigger has no review item (D<n> trigger: <handling>)',
   ]);
+  // The review item says what the person approved: it must match data.md.
+  write(dir, `${T}/data.md`, DATA);
+  write(dir, `${T}/review.md`, REVIEW.replace('D2 trigger: keep', 'D2 trigger: move'));
+  assert.deepEqual(checkReview(dir, 'target-design').problems, ['the review item of trigger says "move", but data.md says "keep acts on every writer"']);
+  write(dir, `${T}/review.md`, REVIEW.replace('D2 trigger: keep', 'D2 trigger audit: keep'));
+  assert.match(checkReview(dir, 'target-design').problems.join(), /the handling of trigger has no review item/);
+  // Jobs take keep or move like the rest.
+  write(dir, `${T}/data.md`, DATA.replace('| trigger |', '| job | move | batch capability |\n| trigger |'));
+  write(dir, `${T}/review.md`, `${REVIEW}- [x] D3 job: move\n`);
+  assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
 });
 
 test('definitions that change after the survey stop extract reviews and ports until the survey is redone', () => {
@@ -627,4 +639,57 @@ test('definitions that change after the survey stop extract reviews and ports un
   // A survey from kit 0.7.0 has no database.md: nothing to compare.
   fs.rmSync(path.join(dir, 'openspec/changes/archive/2026-11-01-survey/database.md'));
   assert.equal(checkReview(dir, 'extract-calc').ok, true);
+});
+
+test('the definitions hash ignores line endings, BOM and case of paths, but sees every byte', () => {
+  const dir = tempDir();
+  const sjis = (b) => Buffer.from([0x43, 0x52, 0x0d, 0x0a, 0x94, b, 0x0d, 0x0a]);
+  fs.mkdirSync(path.join(dir, `${DB}/s`), { recursive: true });
+  fs.writeFileSync(path.join(dir, `${DB}/s/a.sql`), sjis(0x84));
+  const first = databaseHash(dir);
+  fs.writeFileSync(path.join(dir, `${DB}/s/a.sql`), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from([0x43, 0x52, 0x0a, 0x94, 0x84, 0x0d])]));
+  assert.equal(databaseHash(dir), first, 'BOM, CRLF, LF and CR');
+  fs.writeFileSync(path.join(dir, `${DB}/s/a.sql`), sjis(0x85));
+  assert.notEqual(databaseHash(dir), first, 'a changed Shift_JIS byte');
+  fs.writeFileSync(path.join(dir, `${DB}/s/a.sql`), sjis(0x84));
+  fs.renameSync(path.join(dir, `${DB}/s/a.sql`), path.join(dir, `${DB}/s/A.sql`));
+  assert.equal(databaseHash(dir), first, 'a rename that only changes case');
+  fs.rmSync(path.join(dir, DB), { recursive: true });
+  assert.equal(databaseHash(dir), null);
+});
+
+test('db-hash prints the hash and the file count', () => {
+  const dir = tempDir();
+  write(dir, `${DB}/s/a.sql`, 'CREATE TABLE t (a int);\n');
+  let out = '';
+  const log = console.log; console.log = (s) => { out += s; };
+  try { assert.equal(main(['db-hash', '--root', dir]), 0); } finally { console.log = log; }
+  assert.deepEqual(JSON.parse(out), { ok: true, sha256: databaseHash(dir), files: 1 });
+});
+
+test('a definitions cell may say `none`, and git-ignored files are not definitions', { skip: spawnSync('git', ['--version']).status !== 0 && 'git not installed' }, () => {
+  const dir = databaseSurvey();
+  const text = fs.readFileSync(path.join(dir, `${SURVEY}/database.md`), 'utf8');
+  write(dir, `${SURVEY}/database.md`, text.replace('| odbc Legacy | none |', '| odbc Legacy | `none` |'));
+  assert.deepEqual(checkReview(dir, 'survey'), { ok: true, problems: [] });
+  const before = databaseHash(dir);
+  fs.rmSync(path.join(dir, '.git'), { recursive: true });
+  spawnSync('git', ['init', '-q'], { cwd: dir });
+  write(dir, '.gitignore', 'scratch/\n');
+  write(dir, `${DB}/sales/scratch/notes.sql`, 'x');
+  assert.equal(databaseHash(dir), before);
+  assert.ok(!sourceFiles(dir).some((f) => f.includes('scratch')));
+});
+
+test('port-done also stops when the definitions changed after the survey', () => {
+  const dir = surveyed(tempDir());
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/database.md', NO_DATABASE);
+  write(dir, 'openspec/specs/calc/spec.md', SPEC);
+  const P = 'openspec/changes/port-calc';
+  write(dir, `${P}/proposal.md`, `## Baseline\n- \`calc\` sha256:${baselineHash(dir, 'calc')}\n`);
+  write(dir, `${P}/tasks.md`, '- [x] 1.1 a\n');
+  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  write(dir, `${DB}/x/t.sql`, 'CREATE TABLE t (a int);\n');
+  assert.match(checkPortDone(dir, 'port-calc').problems.join(), /database definitions changed after the survey/);
+  assert.match(nextSteps('port-done', checkPortDone(dir, 'port-calc'), 'en').person.join(), /survey is run again \(survey-v2\)/);
 });

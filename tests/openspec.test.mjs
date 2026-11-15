@@ -104,7 +104,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
     'glossary.md': '# Glossary\n',
     'capabilities.md': '# Capabilities\n\n### calc\n1. `calc/add` 足し算\n',
     'database.md': `# Databases\n\n## Databases\n| Database | Product and version | Connection setting | Definitions |\n|---|---|---|---|\n| calc | SQL Server 2012 | CalcDb | \`openspec/spec-relay/db/calc/\` |\n\n## Logic in the database\n| Kind | Count | Contexts | Notes |\n|---|---|---|---|\n| trigger | 1 | calc | |\n\n## Missing definitions\nNone\n\n## Snapshot\nsha256: ${databaseHash(dir)}\n`,
-    'review.md': 'Reviewer: Uma\n\n- [x] K1 platform\n- [x] K2 calc\n- [x] C1 inventory\n- [x] D1 calc: definitions\n',
+    'review.md': 'Reviewer: Uma\n\n- [x] K1 platform\n- [x] K2 calc\n- [x] C1 inventory\n- [x] D1 calc: definitions\n- [x] D90 missing definitions\n',
   });
   assert.deepEqual(checkReview(dir, 'survey'), { ok: true, problems: [] });
   openspec(dir, 'archive', 'survey', '--yes');
@@ -117,7 +117,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
     'conventions.md': '# Conventions\n',
     'verification.md': '| Context | A |\n|---|---|\n| platform | yes |\n| calc | yes |\n',
     'data.md': '# Data\n\n## Schema policy\nkeep\n\n## Database logic\n| Kind | Handling | Reason |\n|---|---|---|\n| trigger | keep | |\n\n## Data access mapping\n| Topic | Source behavior | Target rule |\n|---|---|---|\n| Character set | cp932 | same |\n\n## Schema changes\nno migrations\n\n## Test database\nLocalDB\n',
-    'review.md': 'Reviewer: Uma\n\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 calc\n- [x] E1 platform: levels\n- [x] E2 calc: levels\n- [x] D1 trigger: keep\n',
+    'review.md': 'Reviewer: Uma\n\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 calc\n- [x] E1 platform: levels\n- [x] E2 calc: levels\n- [x] D0 schema policy\n- [x] D1 trigger: keep\n- [x] D90 exceptions\n- [x] D91 mapping\n- [x] D92 schema changes, test database\n',
   });
   assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
   openspec(dir, 'archive', 'target-design', '--yes');

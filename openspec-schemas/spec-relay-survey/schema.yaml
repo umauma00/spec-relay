@@ -123,8 +123,9 @@ artifacts:
         and definitions: the backticked paths that hold its definitions, either
         files in the repository (`.sql`, `.dbml`, `.edmx`, typed DataSet
         `.xsd`, migrations) or the folder the person exported to
-        (`openspec/spec-relay/db/<database>/`), or `none` when they could not
-        be obtained. When the system uses no database, write only "None" under
+        (`openspec/spec-relay/db/<database>/`), or none when they could not
+        be obtained. Put only paths in backticks; the gate checks that each
+        exists. When the system uses no database, write only "None" under
         this heading and under the others.
       - **Logic in the database**: table of kind, count, contexts and notes.
         The kind is one of `view`, `procedure`, `function`, `trigger`,
@@ -163,7 +164,7 @@ artifacts:
         inventory (`gate.mjs review` also checks this).
       - Under `## 4. Databases`, one checkbox per database in database.md's
         table, `- [ ] D<n> <database>: definitions and the logic in it`, and
-        one that the missing definitions are understood. Leave the heading
+        `- [ ] D90 The missing definitions are understood`. Leave the heading
         empty when database.md says None.
       Do not tick any box. Only the reviewer decides; see the apply instruction.
     requires:

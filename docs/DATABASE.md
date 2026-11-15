@@ -16,16 +16,17 @@
 | スキーマ | そのまま使う | 振る舞いを保つ移行で、データ移行も要らず、新旧を同じデータベースで並べて動かせます。作り直しは移行のあとの別作業です |
 | トリガー・制約・既定値・シーケンス・ビュー | データベースに残す | 誰が書き込んでも効くため（古いシステムや手作業の SQL も含む）。アプリへ移すと漏れやすくなります |
 | ストアドプロシージャ・関数 | 残して呼ぶ | 製品を替えるときや、人が選んだものだけ移します |
-| ジョブ（SQL Server Agent など） | バッチの capability として仕様にする | どこで動かすかは人が決めます |
+| ジョブ（SQL Server Agent など） | 中身はバッチと同じく仕様にし、スケジュールはデータベースに残す（keep） | 新しいシステムで動かす（move）のは、人がそう決めたときだけです |
 
-例外は `data.md` の「Exceptions」に1件ずつ書きます。レビューの項目は種類ごとに1つなので、オブジェクトの数だけレビューが増えることはありません。
+例外は `data.md` の「Exceptions」に1件ずつ書きます。レビューの項目は種類ごとに1つ（`D1 trigger: keep` のように、data.md と同じ keep か move を書く）と、方針・例外・方言の対応・スキーマとテスト用 DB の4つなので、オブジェクトの数だけレビューが増えることはありません。
 
 ## 定義を書き出す
 
 定義がリポジトリにない（または古い）データベースは、人が書き出します。AI はデータベースに接続しません。頼めばコマンドの実行は手伝いますが、相手のデータベースとサインインはあなたが決めます。
 
 - 本番ではなく、**複製か開発用のデータベース**から書き出してください。
-- 置き場所は `openspec/spec-relay/db/<データベースの短い名前>/` です。**UTF-8** で保存し、リポジトリにコミットします。
+- 置き場所は `openspec/spec-relay/db/<データベースの短い名前>/` です。**UTF-8** で保存し、リポジトリにコミットします。フォルダーは先に作っておきます（`New-Item -ItemType Directory -Force "openspec/spec-relay/db/sales"`）。
+- 書き出しは原則1回です。取り直すと、構造が同じでも（MySQL の `AUTO_INCREMENT` の値など）ハッシュが変わり、調査のやり直しになります。
 - パスワードや接続文字列は、コマンドにもファイルにも書きません。Windows 認証を使うか、環境変数（例：`SR_DB_USER`）やパスワードの入力を使います。
 - 書き出したら、オーケストレーターに伝えます。AI が `node "<キットのフォルダー>/scripts/gate.mjs" db-hash` でハッシュを取り、UTF-16 のファイルがあれば知らせます。
 
@@ -51,15 +52,17 @@ mysqldump --no-data --routines --triggers --events --skip-dump-date --default-ch
 ```
 
 - 出力先は必ず `--result-file` で指定します。Windows PowerShell 5.1 で `>` を使うと UTF-16 になります。
-- `--skip-dump-date` を付けると、書き出し直しても日付だけでハッシュが変わることがありません。
+- `--skip-dump-date` で、出力に書き出した日時が入らないようにします。ただし `--no-data` でも `CREATE TABLE` に `AUTO_INCREMENT=<次の番号>` が残るので、動いているデータベースから取り直すと中身が変わります。
 
 ### PostgreSQL
 
 ```powershell
-pg_dump --schema-only --no-owner --file="openspec/spec-relay/db/shop/schema.sql" -h localhost -U $env:SR_DB_USER shop
+pg_dump --schema-only --no-owner --encoding=UTF8 --restrict-key=specrelay --file="openspec/spec-relay/db/shop/schema.sql" -h localhost -U $env:SR_DB_USER shop
 ```
 
-パスワードは入力を求められます（環境変数 `PGPASSWORD` も使えます）。
+- パスワードは入力を求められます（環境変数 `PGPASSWORD` も使えます）。
+- `--encoding=UTF8` がないと、データベースの文字コード（EUC_JP など）のまま書き出されます。
+- 2025年8月以降の版の pg_dump は、出力に毎回違う `\restrict` の鍵を入れるので、`--restrict-key` で固定します。古い版でこのオプションがないと言われたら、外してください。
 
 ### Oracle
 
@@ -84,14 +87,14 @@ Access のファイルが失われた、暗号化されたストアドがある�
 `gate.mjs db-hash` や調査の gate が UTF-16 と知らせたファイルだけを、PowerShell で変換します（Windows PowerShell 5.1 と PowerShell 7 のどちらでも動きます）。
 
 ```powershell
-$f = Resolve-Path "openspec/spec-relay/db/sales/dbo/Procedures/usp_Close.sql"; [IO.File]::WriteAllText($f, [IO.File]::ReadAllText($f))
+$f = Resolve-Path "openspec/spec-relay/db/sales/dbo/Procedures/usp_Close.sql"; [IO.File]::WriteAllText($f, [IO.File]::ReadAllText($f, [Text.Encoding]::Unicode))
 ```
 
-`ReadAllText` は先頭の BOM で UTF-16 を判別し、`WriteAllText` は BOM なしの UTF-8 で書きます。知らされていないファイル（Shift_JIS など）に使うと文字化けするので、使わないでください。
+UTF-16 として読み（先頭に BOM があればそれに従います）、BOM なしの UTF-8 で書きます。知らされていないファイル（UTF-8 や Shift_JIS）に使うと文字化けするので、使わないでください。
 
 ## 定義が変わったとき
 
-`database.md` には、書き出した定義全体のハッシュを記録します。調査を archive したあとで `openspec/spec-relay/db/` の中身が変わると、解析のレビューと実装の開始（`gate.mjs port-ready`）が止まります。改行コード（CRLF と LF）と BOM の違いは数えません。
+`database.md` には、書き出した定義全体のハッシュを記録します。調査を archive したあとで `openspec/spec-relay/db/` の中身が変わると、解析のレビュー、実装の開始と完了（`gate.mjs port-ready`・`port-done`）が止まります。改行コード（CRLF と LF）、BOM、ファイル名の大文字と小文字の違いは数えません。git が無視するファイル（`.gitignore`）は定義に含めません。リポジトリの中にもともとある定義ファイル（`.sql` など）は元コードと同じ扱いで、ほかの元コードと同じくハッシュは取りません。
 
 - 意図して取り直したとき（データベースが変わった）：調査をやり直し（`survey-v2`）、変わった定義の振り分けと `database.md` をレビューします。
 - 意図しない変更：git で元に戻します。
@@ -99,4 +102,4 @@ $f = Resolve-Path "openspec/spec-relay/db/sales/dbo/Procedures/usp_Close.sql"; [
 ## 確かめていないこと
 
 - 上の書き出しコマンドは各製品の公式文書をもとにしており、Windows の実機と各データベースではまだ試していません。とくに SqlPackage の `/TargetFile` にフォルダーを渡す書き方は、実機で確かめる必要があります。
-- テスト用のデータベースは、Windows 11 で追加の費用なしに動くもの（SQL Server Express や LocalDB、各製品のインストーラー）を勧めます。Docker Desktop は、従業員 250 人以上か年間売上 1,000 万ドル超の組織では有料の契約が要るため（[Docker の規約](https://docs.docker.com/subscription/desktop-license/)）、既定にはしていません。
+- テスト用のデータベースは、Windows 11 で追加の費用なしに動くもの（SQL Server Express や LocalDB、各製品のインストーラー）を勧めます。ただし Express と LocalDB には SQL Server Agent がないので、ジョブそのものはそこでは動かせません（ジョブの中身のストアドは呼べます）。Docker Desktop は、従業員が 250 人を超えるか年間売上が 1,000 万ドルを超える組織では有料の契約が要るため（[Docker の規約](https://docs.docker.com/subscription/desktop-license/)）、既定にはしていません。
