@@ -283,7 +283,9 @@ test('verify.mjs stops a command that runs too long, with what it started', asyn
 
 test('verify.mjs goes on when the command exits, even if what it started keeps the output open', async () => {
   const dir = portRepo();
-  write(dir, 'ts/test.js', 'require("child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 15000)"], { stdio: "inherit", detached: true }).unref();\n');
+  // It runs outside the repository: Windows cannot delete a folder that is a
+  // running process's working directory.
+  write(dir, 'ts/test.js', 'require("child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 15000)"], { stdio: "inherit", detached: true, cwd: require("os").tmpdir() }).unref();\n');
   const started = Date.now();
   const result = await verify(dir, 'port-calc-add', quietly);
   assert.ok(Date.now() - started < 12000, `${Date.now() - started} ms`);
