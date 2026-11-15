@@ -2,7 +2,7 @@
 
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) を使って、コードベースを別のプログラミング言語へ移すための GitHub Copilot 用キットです。元のコードから仕様を起こし、人間がその仕様をレビューし、レビュー済みの仕様をもとに新しい言語で実装します。
 
-> **状態：0.6.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
+> **状態：0.7.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
 
 ## 流れ
 
@@ -45,7 +45,7 @@ Windows を主な実行環境として扱います（macOS・Linux でも動き�
 | 必要なもの | Windows での入れ方の例 |
 |---|---|
 | Node.js 22.12 以上（OpenSpec の要件） | `winget install OpenJS.NodeJS.LTS` |
-| [OpenSpec CLI](https://github.com/Fission-AI/OpenSpec) 1.17.0（テストはこの版で実行） | `npm install -g @fission-ai/openspec@1.17.0` |
+| [OpenSpec CLI](https://github.com/Fission-AI/OpenSpec) 2.0.0（テストはこの版で実行。1.x は使えません） | `npm install -g @fission-ai/openspec@2.0.0` |
 | GitHub Copilot（CLI・VS Code・Copilot app のいずれか）。CLI は 1.0.109 以降、VS Code は 1.143 以降 | CLI は `npm install -g @github/copilot` |
 
 ## 導入
@@ -75,7 +75,7 @@ node "C:\path\to\spec-relay\scripts\doctor.mjs" --target . --client cli
 |---|---|---|
 | Node.js | 22.12 以上（古い Node.js でも、このメッセージは出ます） | FAIL |
 | キット | スキーマ・スクリプト・エージェントがそろっているか | FAIL |
-| OpenSpec CLI | 起動できて、版が 1.17.0 か（古いと FAIL、新しいと WARN）。入れる前に開いたターミナルで PATH にないとき（WARN） | FAIL |
+| OpenSpec CLI | 起動できて、版が 2.0.0 か（1.x などの古い版は FAIL、新しいと WARN）。入れる前に開いたターミナルで PATH にないとき（WARN） | FAIL |
 | OpenSpec の利用統計 | 送信が止まっているか（止め方を案内。キットは設定を変えません） | INFO |
 | PowerShell | 実行ポリシーで `openspec` が止まるか（`openspec.cmd` を案内） | INFO |
 | Copilot のアプリ | Copilot CLI 1.0.109 以上、VS Code 1.143 以上 | WARN |
@@ -113,10 +113,10 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 |---|---|
 | `openspec/schemas/spec-relay-*/` | 各工程のスキーマとテンプレート（survey・target・extract・amend・port） |
 | `openspec/config.yaml` | 移行元・移行先の言語とフォルダー（全成果物の生成に使われる） |
-| `.github/skills/openspec-*`、`.github/prompts/opsx-*` | `openspec init --tools github-copilot` が置く OpenSpec 標準のスキルとコマンド（propose・explore・update） |
+| `.agents/skills/openspec-*` | `openspec init --tools github-copilot` が置く OpenSpec 標準のスキル（propose・explore・update）。OpenSpec 2.0.0 からはコマンドファイルはなく、`/openspec-propose` のようにスキル名で呼びます。Copilot はこのフォルダーを直接読むので、リンクは作られません |
 
-- 内容の違う既存ファイルがあると、上書きせずに衝突を表示して止まります。`openspec init` が置き換え・削除・編集するファイル（既存の `opsx-*`・`openspec-*`、`openspec/AGENTS.md` など）が既にある場合も、同じく止まります。
-- OpenSpec 標準の apply・archive（bulk-archive を含む）・sync（スキルとコマンド）は、レビューの確認を通らずにチェックや archive ができてしまうため、導入スクリプトが中身を「`spec-relay-orchestrator` を使ってください」という案内に置き換えて無効にします。ファイル自体を消さないのは、消すと後の `openspec update` が利用者の OpenSpec 全体の設定（Windows では `%APPDATA%\openspec`）から、ほかのプロジェクトも含めてこれらのワークフローを外してしまうためです。`openspec update` で元の中身に戻ったときは、もう一度導入スクリプトを実行してください。
+- 内容の違う既存ファイルがあると、上書きせずに衝突を表示して止まります。`openspec init` が置き換え・削除・編集するファイル（`.agents/skills/` の既存の `openspec-*` と `.openspec-target`、OpenSpec 1.x が置いた `.github/skills/openspec-*`・`.github/prompts/opsx-*`、`openspec/AGENTS.md` など）が既にある場合も、同じく止まります。
+- OpenSpec 標準の apply・archive（bulk-archive を含む）・sync のスキルは、レビューの確認を通らずにチェックや archive ができてしまうため、導入スクリプトが中身を「`spec-relay-orchestrator` を使ってください」という案内に置き換えて無効にします。ファイル自体を消さないのは、消すと後の `openspec update` が利用者の OpenSpec 全体の設定（Windows では `%APPDATA%\openspec`）から、ほかのプロジェクトも含めてこれらのワークフローを外してしまうためです。`openspec update` で元の中身に戻ったときは、もう一度導入スクリプトを実行してください。
 
 ## 守っていること
 
@@ -169,6 +169,17 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 - シェルコマンドでの書き込み（`Set-Content` など）は、config.yaml へのもの以外は読み取りません。これはオーケストレーターの `gate.mjs guard` が後から見つけます。
 - フックはプラグインを入れたすべてのリポジトリで、シェルとファイル編集の前に1回ずつ起動します（node の起動1回分。spec-relay のリポジトリでなければすぐ終わります）。ホストがプラグインの場所（`PLUGIN_ROOT`）を渡さないときは何もしません。
 - チャットでの承認は AI が review.md に書くので、「AI が勝手にチェックを付ける」ことはフックでは区別できません。承認は今も、チャットでのあなたの言葉と gate の合格の両方です。
+
+## 0.6.0 から更新するとき
+
+0.7.0 は OpenSpec 2.0.0 が前提です。2.0.0 はスキルを `.github/skills/` ではなく `.agents/skills/` に置くので、0.6.0 のままでは標準の apply・archive・sync を無効にできませんでした。0.7.0 は `.agents/skills/` だけを見るので、OpenSpec 1.x では使えません。
+
+進行中の移行では、次の順に実行します。
+
+1. `npm install -g @fission-ai/openspec@2.0.0`
+2. 移行対象のリポジトリで `openspec update`。OpenSpec が置いた古いファイルは消え、`.agents/skills/` に新しいスキルが入ります。
+3. 0.6.0 が無効にした `.github/skills/openspec-apply-change`・`openspec-archive-change`・`openspec-sync-specs` と `.github/prompts/opsx-apply.prompt.md`・`opsx-archive.prompt.md`・`opsx-sync.prompt.md` は、編集済みとして残ります。中身はキットの案内だけなので、手で消してください（元フォルダーが `.` のとき、残すと調査の gate が元コードとして数えます）。
+4. 導入スクリプトをもう一度実行し、`.agents/skills/` の apply・archive・sync を無効にします。最後に doctor で FAIL がないことを確かめます。
 
 ## 0.5.0 から更新するとき
 
@@ -231,7 +242,7 @@ docs/WINDOWS.md                Windows での準備と注意点
 ## 開発
 
 ```powershell
-npm install -g @fission-ai/openspec@1.17.0
+npm install -g @fission-ai/openspec@2.0.0
 npm test
 ```
 

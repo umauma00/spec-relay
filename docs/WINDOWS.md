@@ -8,7 +8,7 @@ spec-relay は Windows を主な実行環境として扱います。GitHub Actio
 |---|---|---|
 | Node.js 22.12 以上 | `winget install OpenJS.NodeJS.LTS` | `node --version` |
 | Git for Windows | `winget install Git.Git` | `git --version` |
-| OpenSpec CLI 1.17.0 | `npm install -g @fission-ai/openspec@1.17.0` | `openspec --version` |
+| OpenSpec CLI 2.0.0 | `npm install -g @fission-ai/openspec@2.0.0` | `openspec --version` |
 | GitHub Copilot | CLI は `npm install -g @github/copilot`（1.0.109 以降）、または VS Code（1.143 以降、Copilot ハーネス）・Copilot app | `copilot --version` |
 
 入れた直後は、開いていたターミナルに PATH が反映されていません。新しいターミナルを開いてください。
@@ -52,5 +52,6 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "C#"
 - **capability の名前**：英小文字・数字・ハイフンだけにします（例：`billing/invoice`）。日本語や大文字、`_` は OpenSpec が受け付けません。日本語の名前は計画（`openspec/spec-relay/plan.md`）に併記します。
 - **長いパス**：capability のパスは archive の中で繰り返されるため、深い場所では 260 文字の制限に当たることがあります。リポジトリは `C:\work\proj` のような短い場所に置くか、長いパスを有効にしてください（`git config --global core.longpaths true`）。
 - **ネットワーク上のフォルダー**：`\\server\share\...` や `\\wsl.localhost\...` では、npm 版か単体版の OpenSpec を使ってください。ほかの方法で入れた `openspec.cmd` は、こうした場所では起動できないため、その旨を表示して止まります。
+- **シンボリックリンク**：OpenSpec 2.0.0 は Claude Code など一部のツール向けに、`.agents/skills/` のスキルへのリンクを作ります。キットは `--tools github-copilot` だけで導入し、Copilot は `.agents/skills/` を直接読むので、リンクは作られません。開発者モードや `git config core.symlinks true` は要りません（OpenSpec 2.0.0 のコードで確認。Windows の実機ではまだ試していません）。
 - **WSL**：WSL の中で使う場合は Linux として動きます。Windows 側のツールと WSL 側のファイルを混ぜないでください。
 - **OpenSpec 全体の設定**：OpenSpec は利用者ごとの設定を `%APPDATA%\openspec\` に持ちます。spec-relay はここを書き換えません。

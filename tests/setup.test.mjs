@@ -99,12 +99,17 @@ test('an existing config.yml or a non-empty target root is a conflict', () => {
 
 test('files openspec init would replace or clean up are conflicts before init', () => {
   const dir = tempDir();
+  // OpenSpec 2.x writes its skills here, and deletes the files 1.x wrote under .github/.
+  write(dir, '.agents/skills/openspec-explore/SKILL.md', 'mine\n');
+  write(dir, '.agents/skills/.openspec-target', 'claude\n');
+  write(dir, '.agents/skills/my-own-skill/SKILL.md', 'mine\n');
   write(dir, '.github/prompts/opsx-propose.prompt.md', 'mine\n');
   write(dir, '.github/skills/openspec-archive-change/SKILL.md', 'mine\n');
   write(dir, 'openspec/AGENTS.md', 'my notes\n');
   write(dir, 'AGENTS.md', '<!-- OPENSPEC:START -->\n<!-- OPENSPEC:END -->\n');
   write(dir, 'CLAUDE.md', 'unrelated\n');
   assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])).sort(), [
+    '.agents/skills/.openspec-target', '.agents/skills/openspec-explore',
     '.github/prompts/opsx-propose.prompt.md', '.github/skills/openspec-archive-change', 'AGENTS.md', 'openspec/AGENTS.md',
   ]);
   assert.equal(quiet(() => main(['--target', dir, ...BASE, '--apply'])), 2);
@@ -137,12 +142,12 @@ test('running the script through a symlink still runs it', { skip: process.platf
 });
 
 // A stand-in for the CLI: `--version` works and everything else exits 1.
-function fakeOpenspec() {
+function fakeOpenspec(version = '2.0.0') {
   const bin = tempDir('spec-relay-bin-');
   if (process.platform === 'win32') {
-    write(bin, 'openspec.cmd', '@echo off\r\nif "%1"=="--version" (echo 1.17.0& exit /b 0)\r\nexit /b 1\r\n');
+    write(bin, 'openspec.cmd', `@echo off\r\nif "%1"=="--version" (echo ${version}& exit /b 0)\r\nexit /b 1\r\n`);
   } else {
-    write(bin, 'openspec', '#!/bin/sh\n[ "$1" = "--version" ] && { echo 1.17.0; exit 0; }\nexit 1\n');
+    write(bin, 'openspec', `#!/bin/sh\n[ "$1" = "--version" ] && { echo ${version}; exit 0; }\nexit 1\n`);
     fs.chmodSync(path.join(bin, 'openspec'), 0o755);
   }
   return bin;
@@ -163,6 +168,14 @@ test('a failed openspec init removes the files the run created, so a re-run star
   assert.match(result.stderr, /were removed/);
   assert.ok(!fs.existsSync(path.join(dir, 'openspec/config.yaml')));
   assert.equal(plan(parseArgs(['--target', dir, ...BASE])).runInit, true);
+});
+
+test('OpenSpec 1.x stops setup before anything is written', () => {
+  const dir = tempDir();
+  const result = run('setup.mjs', ['--target', dir, ...BASE, '--apply'], { env: envWithPath(fakeOpenspec('1.17.0')) });
+  assert.equal(result.status, 3, result.stderr + result.stdout);
+  assert.match(result.stderr, /1\.17\.0 is too old[\s\S]*openspec@2\.0\.0/);
+  assert.deepEqual(fs.readdirSync(dir), []);
 });
 
 test('a missing openspec CLI stops setup before anything is written', () => {
@@ -202,19 +215,19 @@ test('schema files checked out with CRLF or a BOM are the kit version, not a con
   assert.deepEqual(again.steps.filter((step) => step.action !== 'keep'), []);
 });
 
-test('a re-run disables only OpenSpec-generated apply/archive/sync workflows', () => {
+test('a re-run disables only OpenSpec-generated apply/archive/sync skills', () => {
   const dir = tempDir();
   quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply']));
-  write(dir, '.github/prompts/opsx-apply.prompt.md', 'Run openspec instructions apply\n');
-  write(dir, '.github/prompts/opsx-archive.prompt.md', 'my own notes\n');
-  write(dir, '.github/skills/openspec-archive-change/SKILL.md', 'metadata:\n  generatedBy: "1.17.0"\n');
-  write(dir, '.github/skills/openspec-propose/SKILL.md', 'metadata:\n  generatedBy: "1.17.0"\n');
+  write(dir, '.agents/skills/openspec-apply-change/SKILL.md', 'metadata:\n  generatedBy: "2.0.0"\n');
+  write(dir, '.agents/skills/openspec-archive-change/SKILL.md', 'metadata:\n  generatedBy: "2.0.0"\n');
+  write(dir, '.agents/skills/openspec-sync-specs/SKILL.md', 'my own notes\n');
+  write(dir, '.agents/skills/openspec-propose/SKILL.md', 'metadata:\n  generatedBy: "2.0.0"\n');
   assert.equal(quiet(() => main(['--target', dir, ...BASE, '--apply'])), 0);
   const read = (rel) => fs.readFileSync(path.join(dir, rel), 'utf8');
-  assert.ok(read('.github/prompts/opsx-apply.prompt.md').includes(STUB_MARKER));
-  assert.match(read('.github/skills/openspec-archive-change/SKILL.md'), /name: openspec-archive-change[\s\S]*spec-relay-orchestrator/);
-  assert.equal(read('.github/prompts/opsx-archive.prompt.md'), 'my own notes\n');
-  assert.match(read('.github/skills/openspec-propose/SKILL.md'), /generatedBy/);
+  assert.ok(read('.agents/skills/openspec-apply-change/SKILL.md').includes(STUB_MARKER));
+  assert.match(read('.agents/skills/openspec-archive-change/SKILL.md'), /name: openspec-archive-change[\s\S]*spec-relay-orchestrator/);
+  assert.equal(read('.agents/skills/openspec-sync-specs/SKILL.md'), 'my own notes\n');
+  assert.match(read('.agents/skills/openspec-propose/SKILL.md'), /generatedBy/);
   assert.equal(plan(parseArgs(['--target', dir, ...BASE])).steps.filter((st) => st.action === 'disable').length, 0);
 });
 

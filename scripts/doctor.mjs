@@ -35,7 +35,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const NODE_MIN = '22.12.0';
-export const OPENSPEC_TESTED = '1.17.0';
+export const OPENSPEC_TESTED = '2.0.0';
 // Recommended client versions: fixes for parallel subagents and their permission
 // prompts (Copilot CLI 1.0.106-1.0.109); the Copilot harness is the VS Code default from 1.143.
 export const CLIENT_MIN = { cli: '1.0.109', vscode: '1.143.0' };
@@ -78,7 +78,7 @@ function setTo(env, name) {
   return key === undefined || env[key] === undefined ? undefined : String(env[key]).trim().toLowerCase();
 }
 
-// The same rules as OpenSpec 1.17.0 (src/telemetry): an opt-out in the
+// The same rules as OpenSpec 2.0.0 (src/telemetry, unchanged since 1.17.0): an opt-out in the
 // environment, CI, or `telemetry.enabled: false` in the global config.
 export function telemetryOff(env, platform, readFile) {
   const telemetry = setTo(env, 'OPENSPEC_TELEMETRY');
@@ -172,8 +172,8 @@ export function checkOpenspec(ctx) {
   if (cmp < 0) {
     return {
       id: 'openspec', level: 'fail',
-      message: ctx.t(`OpenSpec ${showVersion(v)} は古く、キットのスキーマを扱えない場合があります（確認済みは ${OPENSPEC_TESTED}）。`, `OpenSpec ${showVersion(v)} is older than ${OPENSPEC_TESTED}, the version the kit is tested with, and may not handle its schemas.`),
-      fix: ctx.t(`\`${install}\` で入れ直してください。`, `Install the tested version: \`${install}\`.`),
+      message: ctx.t(`OpenSpec ${showVersion(v)} は古い版です（確認済みは ${OPENSPEC_TESTED}）。キットは OpenSpec 2.0.0 からのスキルの置き場所（.agents/skills/）を前提にしているので、このままでは標準の apply・archive・sync を止められず、レビューを飛ばせてしまいます。`, `OpenSpec ${showVersion(v)} is older than ${OPENSPEC_TESTED}, the version the kit is tested with. The kit expects the skill folder OpenSpec uses since 2.0.0 (.agents/skills/), so it cannot disable the generic apply, archive and sync workflows, which skip the review.`),
+      fix: ctx.t(`\`${install}\` で入れ直し、移行対象のリポジトリで \`openspec update\` を実行してから、導入スクリプトをもう一度実行してください。`, `Install the tested version with \`${install}\`, run \`openspec update\` in the repository being migrated, then run setup again.`),
     };
   }
   return {

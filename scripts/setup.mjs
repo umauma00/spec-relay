@@ -4,8 +4,8 @@
 //   2. writes openspec/config.yaml with the migration context
 //   3. runs `openspec init --tools github-copilot`, which keeps the config above
 //      (the artifact language lives in that config's context, so init gets no --language)
-//   4. replaces the generic OpenSpec apply/archive/sync workflows init installs
-//      with stubs that send the agent to the orchestrator, because they would
+//   4. replaces the generic OpenSpec apply/archive/sync skills init installs in
+//      .agents/skills/ (OpenSpec 2.x) with stubs that send the agent to the orchestrator, because they would
 //      tick review.md and archive without the review gate. The files stay in
 //      place: deleting them makes a later `openspec update` narrow the person's
 //      global OpenSpec profile (%APPDATA%\\openspec or ~/.config/openspec), which
@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runOpenspec, probeOpenspec } from './openspec.mjs';
+import { runOpenspec, probeOpenspec, INSTALL_HINT } from './openspec.mjs';
 
 export const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SCHEMAS = ['spec-relay-survey', 'spec-relay-target', 'spec-relay-extract', 'spec-relay-amend', 'spec-relay-port'];
@@ -25,14 +25,15 @@ export const CONFIG_MARKER = '# spec-relay: managed';
 // that applies (ticks the tracked file), archives (including bulk-archive) or
 // syncs specs. Matched by name so opt-in profile workflows are covered too.
 const BYPASS_NAME = /apply|archive|sync/;
+// OpenSpec 2.x writes every skill once, here, and no command files. Copilot
+// reads this folder itself, so OpenSpec makes no link for it.
+export const SKILLS_DIR = '.agents/skills';
 export const STUB_MARKER = '<!-- spec-relay: disabled -->';
 
 export function stubFor(file) {
-  const base = path.basename(file) === 'SKILL.md' ? path.basename(path.dirname(file)) : path.basename(file, '.prompt.md');
+  const base = path.basename(path.dirname(file));
   const description = 'Disabled by spec-relay in this repository. Select the spec-relay-orchestrator agent to apply, review, archive or sync OpenSpec changes.';
-  const front = path.basename(file) === 'SKILL.md'
-    ? `---\nname: ${base}\ndescription: ${description}\n---\n`
-    : `---\ndescription: "${description}"\n---\n`;
+  const front = `---\nname: ${base}\ndescription: ${description}\n---\n`;
   return `${front}\n${STUB_MARKER}\n\nThis repository is migrated with spec-relay. Applying, archiving or syncing an OpenSpec change here\nmust go through the \`spec-relay-orchestrator\` agent, which runs the human review gate.\nDo not perform this workflow. Tell the person to select \`spec-relay-orchestrator\` (Copilot CLI: \`/agent\`) and stop.\n`;
 }
 const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
@@ -178,11 +179,13 @@ function isDirWithEntries(dir) {
 // not yet set up. Any of them existing is a conflict for the person to resolve.
 function initConflicts(target) {
   const found = [];
-  for (const dir of ['.github/skills', '.github/prompts']) {
+  // OpenSpec 2.x init also deletes the skills and command files OpenSpec 1.x
+  // wrote under .github/ when nobody edited them, so those are conflicts too.
+  for (const [dir, pattern] of [[SKILLS_DIR, /^(openspec-|\.openspec-target$)/], ['.github/skills', /^openspec-/], ['.github/prompts', /^opsx-/]]) {
     let names = [];
     try { names = fs.readdirSync(path.join(target, dir)); } catch { /* absent */ }
     for (const name of names) {
-      if (/^(openspec-|opsx-)/.test(name)) found.push(path.join(target, dir, name));
+      if (pattern.test(name)) found.push(path.join(target, dir, name));
     }
   }
   for (const rel of ['openspec/AGENTS.md', 'openspec/project.md']) {
@@ -195,26 +198,17 @@ function initConflicts(target) {
   return found;
 }
 
-// The OpenSpec workflow files in a repository that bypass the review gate.
-// Skills are recognised by OpenSpec's generatedBy metadata, prompts by name and
-// by invoking the openspec CLI; a stub this script wrote is skipped. Every
-// change is shown in the dry run first.
+// The OpenSpec skills in a repository that bypass the review gate, recognised
+// by OpenSpec's generatedBy metadata; a stub this script wrote is skipped.
+// Every change is shown in the dry run first.
 export function bypassFiles(target) {
   const found = [];
-  const read = readText;
   let names = [];
-  try { names = fs.readdirSync(path.join(target, '.github/skills')); } catch { /* absent */ }
+  try { names = fs.readdirSync(path.join(target, SKILLS_DIR)); } catch { /* absent */ }
   for (const name of names.filter((n) => n.startsWith('openspec-') && BYPASS_NAME.test(n))) {
-    const file = path.join(target, '.github/skills', name, 'SKILL.md');
-    const text = read(file);
+    const file = path.join(target, SKILLS_DIR, name, 'SKILL.md');
+    const text = readText(file);
     if (/generatedBy:/.test(text) && !text.includes(STUB_MARKER)) found.push(file);
-  }
-  names = [];
-  try { names = fs.readdirSync(path.join(target, '.github/prompts')); } catch { /* absent */ }
-  for (const name of names.filter((n) => /^opsx-.*\.prompt\.md$/.test(n) && BYPASS_NAME.test(n))) {
-    const file = path.join(target, '.github/prompts', name);
-    const text = read(file);
-    if (/\bopenspec /.test(text) && !text.includes(STUB_MARKER)) found.push(file);
   }
   return found;
 }
@@ -258,7 +252,7 @@ export function plan(opts) {
       steps.push({ action: 'conflict', path: file, reason: 'openspec init would replace, remove or edit it; back it up and move it away first' });
     }
   }
-  // Before a first init nothing can match (existing openspec-*/opsx-* files are
+  // Before a first init nothing can match (existing openspec-* skills are
   // conflicts above); after init, main() looks again and disables what init added.
   for (const file of bypassFiles(opts.target)) {
     steps.push({ action: 'disable', path: file, reason: 'generic OpenSpec workflow; bypasses the review gate' });
@@ -283,10 +277,10 @@ export function main(argv) {
   const show = (step) => console.log(`${step.action.padEnd(8)} ${path.relative(opts.target, step.path)}${step.reason ? `  (${step.reason})` : ''}`);
   const removals = steps.filter((s) => s.action === 'disable');
   steps.filter((s) => s.action !== 'disable').forEach(show);
-  if (willInit) console.log('run      openspec init --tools github-copilot (adds OpenSpec skills and prompts under .github/)');
+  if (willInit) console.log('run      openspec init --tools github-copilot (adds OpenSpec skills under .agents/skills/)');
   else console.log(`skip     openspec init (${managed ? 'already set up; run "openspec update" to refresh, then this setup again' : '--skip-init'})`);
   removals.forEach(show);
-  if (willInit) console.log('disable  the apply, archive and sync workflows openspec init adds (they bypass the review gate)');
+  if (willInit) console.log('disable  the apply, archive and sync skills openspec init adds (they bypass the review gate)');
   if (steps.some((s) => s.action === 'conflict')) {
     console.error('\nStopped: resolve the conflicts above, then run setup again. Nothing was changed.');
     return 2;
@@ -295,6 +289,13 @@ export function main(argv) {
     const probe = probeOpenspec();
     if (!probe.ok) {
       console.error(`\nStopped: ${probe.reason}\nThen run setup again. Nothing was changed.`);
+      return 3;
+    }
+    // OpenSpec 1.x writes its skills under .github/, where this script no longer
+    // looks, so its apply/archive/sync would stay live.
+    const major = Number(/(\d+)\.\d+/.exec(probe.version)?.[1]);
+    if (!(major >= 2)) {
+      console.error(`\nStopped: OpenSpec ${probe.version} is too old; spec-relay needs 2.0.0 or later, which keeps skills in .agents/skills/. Install it with "${INSTALL_HINT}".\nThen run setup again. Nothing was changed.`);
       return 3;
     }
   }

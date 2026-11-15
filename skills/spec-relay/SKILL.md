@@ -105,7 +105,7 @@ stop halfway on something the machine or the host lacks.
    - An `info` needs no answer; mention it in a line (for `telemetry`, how to
      turn it off) before setup, and not again later.
    - Never install, update or change settings to fix a check on your own:
-     ask first for installs (`npm install -g @fission-ai/openspec@1.17.0`),
+     ask first for installs (`npm install -g @fission-ai/openspec@2.0.0`),
      and leave the execution policy, git's global config and OpenSpec's
      settings to the person.
 2. If `openspec/config.yaml` already contains `# spec-relay: managed`, setup is

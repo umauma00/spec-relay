@@ -53,16 +53,17 @@ test('setup runs openspec init, keeps the config and removes the gate-bypassing 
   const dir = setUp();
   for (const schema of SCHEMAS) openspec(dir, 'schema', 'validate', schema);
   assert.match(fs.readFileSync(path.join(dir, 'openspec/config.yaml'), 'utf8'), /spec-relay: managed[\s\S]*Source language: Python/);
-  assert.ok(fs.existsSync(path.join(dir, '.github/skills/openspec-propose/SKILL.md')));
+  assert.ok(fs.existsSync(path.join(dir, '.agents/skills/openspec-propose/SKILL.md')));
+  assert.ok(!fs.existsSync(path.join(dir, '.github/prompts')), 'OpenSpec 2.x writes no command files');
   assert.deepEqual(bypassFiles(dir), []);
-  for (const rel of ['.github/skills/openspec-apply-change/SKILL.md', '.github/skills/openspec-archive-change/SKILL.md', '.github/prompts/opsx-archive.prompt.md']) {
+  for (const rel of ['.agents/skills/openspec-apply-change/SKILL.md', '.agents/skills/openspec-archive-change/SKILL.md', '.agents/skills/openspec-sync-specs/SKILL.md']) {
     assert.ok(fs.readFileSync(path.join(dir, rel), 'utf8').includes(STUB_MARKER), `${rel} should be a stub`);
   }
 
   // The stubs keep the files in place, so `openspec update` never narrows the
   // person's global profile. If update restores a workflow, setup disables it again.
   openspec(dir, 'update');
-  assert.ok(fs.existsSync(path.join(dir, '.github/skills/openspec-archive-change/SKILL.md')));
+  assert.ok(fs.existsSync(path.join(dir, '.agents/skills/openspec-archive-change/SKILL.md')));
   // A Windows checkout (core.autocrlf=true) turns the copied schemas into CRLF.
   // Setup must still recognise them, or it would stop before disabling anything.
   const schema = path.join(dir, 'openspec/schemas/spec-relay-extract/schema.yaml');

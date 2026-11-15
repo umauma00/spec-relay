@@ -32,7 +32,7 @@ const tools = (answers = {}) => (name, args) => {
 
 function machine(dir, extra = {}) {
   return {
-    probeOpenspec: () => ({ ok: true, version: '1.17.0' }),
+    probeOpenspec: () => ({ ok: true, version: '2.0.0' }),
     exec: tools(),
     samePath: () => true,
     machine: 'test-machine',
@@ -110,11 +110,15 @@ test('a fresh machine and folder: ready, with what is still to do', async () => 
 test('OpenSpec: missing or older blocks, newer warns', () => {
   const ctx = (probe) => ({ ...en, target: '.', probeOpenspec: () => probe });
   assert.equal(checkOpenspec(ctx({ ok: false, reason: 'the openspec CLI was not found. Install it' })).level, 'fail');
-  assert.match(checkOpenspec(ctx({ ok: false, reason: 'the openspec CLI was not found.' })).fix, /npm install -g @fission-ai\/openspec@1\.17\.0/);
+  assert.match(checkOpenspec(ctx({ ok: false, reason: 'the openspec CLI was not found.' })).fix, /npm install -g @fission-ai\/openspec@2\.0\.0/);
   assert.equal(checkOpenspec(ctx({ ok: false, reason: '"openspec --version" failed' })).level, 'fail');
-  assert.equal(checkOpenspec(ctx({ ok: true, version: '1.16.2' })).level, 'fail');
-  assert.equal(checkOpenspec(ctx({ ok: true, version: '1.18.0' })).level, 'warn');
-  assert.equal(checkOpenspec(ctx({ ok: true, version: '1.17.0' })).level, 'ok');
+  // 1.x puts its skills under .github/, where setup no longer disables them.
+  const old = checkOpenspec(ctx({ ok: true, version: '1.17.0' }));
+  assert.equal(old.level, 'fail');
+  assert.match(old.message, /\.agents\/skills/);
+  assert.match(old.fix, /openspec update/);
+  assert.equal(checkOpenspec(ctx({ ok: true, version: '2.1.0' })).level, 'warn');
+  assert.equal(checkOpenspec(ctx({ ok: true, version: '2.0.0' })).level, 'ok');
 });
 
 test('telemetry follows the same opt-outs as OpenSpec', () => {
@@ -213,7 +217,7 @@ test('after setup: schemas, restored workflows, source root, toolchain and the t
   assert.equal(byId(json, 'schemas').level, 'fail');
   assert.equal(json.ok, false);
 
-  write(dir, '.github/skills/openspec-archive-change/SKILL.md', '---\nname: openspec-archive-change\nmetadata:\n  generatedBy: "1.17.0"\n---\nRun openspec archive.\n');
+  write(dir, '.agents/skills/openspec-archive-change/SKILL.md', '---\nname: openspec-archive-change\nmetadata:\n  generatedBy: "2.0.0"\n---\nRun openspec archive.\n');
   assert.equal(byId(await run(), 'workflows').level, 'fail');
 
   fs.rmSync(path.join(dir, 'src'), { recursive: true });
@@ -342,7 +346,7 @@ test('the text report: one line per check and the fix under each problem', async
   const { code, text } = await doctor(['--target', dir, '--lang', 'ja'], machine(dir, { probeOpenspec: () => ({ ok: false, reason: 'the openspec CLI was not found.' }) }));
   assert.equal(code, 1);
   assert.match(text, /^FAIL  OpenSpec CLI が見つかりません。$/m);
-  assert.match(text, /^ {6}-> `npm install -g @fission-ai\/openspec@1\.17\.0`/m);
+  assert.match(text, /^ {6}-> `npm install -g @fission-ai\/openspec@2\.0\.0`/m);
   assert.match(text, /止まります: FAIL の 1 件/);
 });
 

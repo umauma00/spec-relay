@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-export const OPENSPEC_VERSION = '1.17.0';
+export const OPENSPEC_VERSION = '2.0.0';
 export const INSTALL_HINT = `npm install -g @fission-ai/openspec@${OPENSPEC_VERSION}`;
 
 // Windows environment names are case-insensitive.

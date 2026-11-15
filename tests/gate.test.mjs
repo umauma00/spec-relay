@@ -205,7 +205,8 @@ function survey({ inventory, review } = {}) {
   write(dir, 'vendor/lib.php', '<?php\n');
   write(dir, 'ts/index.ts', '');
   write(dir, '.git/HEAD', 'ref');
-  write(dir, '.github/skills/openspec-explore/SKILL.md', '#');
+  write(dir, '.agents/skills/openspec-explore/SKILL.md', '#');
+  write(dir, '.agents/skills/.openspec-target', 'github-copilot\n');
   write(dir, `${SURVEY}/context-map.md`, '## Contexts\n\n### Context: platform\n- x\n\n### Context: billing\n- y\n');
   write(dir, `${SURVEY}/inventory.md`, inventory ?? '| Path | Context | Notes |\n|---|---|---|\n| src/ | billing | |\n| src/common/db.php | platform | |\n| vendor/ | excluded | library |\n');
   write(dir, `${SURVEY}/capabilities.md`, '# Capabilities\n\n### platform\n1. `platform/db` DB\n\n### billing\n1. `billing/invoice` 請求書\n   - src/billing\n');
