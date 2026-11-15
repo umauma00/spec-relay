@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { scanText, scanFile, decode, parseVerdict, writeParts, markerText } from '../scripts/sites.mjs';
+import { scanText, scanFile, decode, parseVerdict, writeParts, markerText, checkLedger } from '../scripts/sites.mjs';
 import { checkReview } from '../scripts/gate.mjs';
 import { render } from '../scripts/render.mjs';
 import { spawnSync } from 'node:child_process';
@@ -469,8 +469,8 @@ test('what is never claimed in PHP, JavaScript and VB', () => {
   assert.deepEqual(tpl[0].lines, [2, 3, 4]);
   // A conditional include is behavior; one at the top is not.
   assert.deepEqual(scanText("<?php\nif ($save) {\n  include 'save.php';\n}\nrequire 'footer.php';\n", 'c.php')[0].lines, [2, 3]);
-  // JavaScript without semicolons: the import lines only.
-  assert.deepEqual(assertNothingLost("import './styles.css'\ninitAnalytics() // BEHAVIOR\ntype A = string\nrun() // BEHAVIOR\n", 'main.ts')[0].lines, [2, 4]);
+  // JavaScript without semicolons: the import lines up to the first statement that does something.
+  assert.deepEqual(assertNothingLost("import './styles.css'\ninitAnalytics() // BEHAVIOR\ntype A = string\nrun() // BEHAVIOR\n", 'main.ts')[0].lines, [2, 3, 4]);
   assert.deepEqual(assertNothingLost("require('./server').listen(3000); // BEHAVIOR\nconst fs = require('fs');\nexport default { taxRate: 0.1 }; // BEHAVIOR\n", 'srv.js')[0].lines, [1, 3]);
   // A statement in a class body is not a declaration.
   assert.deepEqual(assertNothingLost('class A {\n  x;\n  isClose(s) { if (s) return 1; }\n  this.db.save(s); // BEHAVIOR\n}\n', 'k.js')[0].lines, [4]);
@@ -547,7 +547,7 @@ test('the ledger: evidence for no behavior, two capabilities may not defer a sit
   write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/God.cs:God.Total` | covered R1 | 2 |\n| `src/God.cs:God.Purge` | other capability billing/tax | tax owns it |\n| `src/Ops.vb:Ops./` | no behavior | |\n| `src/Ops.vb:Ops.\\` | no behavior | returns b |\n');
   write(dir, 'openspec/changes/extract-billing-tax/coverage.md', '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/God.cs:God.Purge` | other capability billing/invoice | invoice owns it |\n');
   assert.deepEqual(checkReview(dir, 'extract-billing-invoice').problems, [
-    'coverage of src/God.cs:God.Purge names billing/tax, whose own coverage.md names billing/invoice for it: one of the two must judge the site',
+    'coverage of src/God.cs:God.Purge names billing/tax, and the deferrals billing/invoice -> billing/tax -> billing/invoice come back here: one of them must judge the site',
     'coverage of src/Ops.vb:Ops./ is "no behavior" with no evidence; say why in the Evidence cell',
   ]);
 });
@@ -566,4 +566,64 @@ test('lists and deep nesting: an unclosed list is not a list, nested classes kee
   scanText('if (a) {\n'.repeat(60000), 'a.js');
   scanText('<?php\n' + 'if ($a) {\n'.repeat(60000), 'a.php');
   assert.ok(Date.now() - t < 5000, `took ${Date.now() - t} ms`);
+});
+
+test('fourth review: MySQL executable comments, PHP alternative syntax and annotations, long lines, behavior switches', () => {
+  const view = (text, file) => scanText(text, file).map((s) => `${s.symbol} ${s.lines ? s.lines.join(',') : `${s.from}-${s.to}`}`);
+  // mysqldump runs /*!50003 ... */ as code.
+  assert.deepEqual(view("DELIMITER ;;\n/*!50003 CREATE*/ /*!50003 TRIGGER `t_bi` BEFORE INSERT ON `t` FOR EACH ROW\nBEGIN\n  INSERT INTO audit VALUES (NEW.id);\nEND */;;\n", 'dump.sql'), ['t_bi 2-5']);
+  // Only a whole line of a default setting is inert.
+  assert.deepEqual(view('USE Shop; DELETE FROM Cart;\nSET NOCOUNT ON; UPDATE Stock SET Qty = 0;\nSET ANSI_NULLS ON\nGO\n', 'fix.sql'), ['(file) 1,2']);
+  assert.deepEqual(view('SET ANSI_NULLS OFF\nGO\nCREATE PROCEDURE p AS SELECT 1\nGO\n', 'p.sql'), ['(file) 1', 'p 3-3']);
+  // T-SQL temp tables are not MySQL comments.
+  assert.deepEqual(view('DELETE o FROM Orders o JOIN\n#old x ON x.Id = o.Id\n', 't.sql'), ['(file) 1,2']);
+  // PHP alternative syntax: an include may be in a branch.
+  assert.deepEqual(view("<?php\nif ($user):\n    $x = 1;\n    include 'dashboard.php';\nendif;\n", 'page.php'), ['(file) 2,3,4,5']);
+  assert.deepEqual(view("<?php for ($i = 0; $i < 3; $i++): ?>\n<?php include 'cell.php'; ?>\n<?php endfor; ?>\n", 'grid.php'), ['(file) 1,2,3']);
+  assert.deepEqual(view("<?php\ndeclare(strict_types=1);\nfunction f() { g(); }\n", 'f.php'), ['(file) 2', 'f 3-3']);
+  // Doctrine and Symfony annotations are behavior.
+  assert.deepEqual(view('<?php\nclass C {\n    /**\n     * @Route("/cart/delete/{id}")\n     * @param int $id\n     */\n    public function delete($id) { $this->cart->remove($id); }\n    /** @Assert\\Length(max=10) */\n    private $name;\n}\n', 'C.php'), ['(file) 4,8', 'C.delete 7-7']);
+  // A comment that ends on a long line still ends there.
+  assert.deepEqual(view(`/*\n * Plugin A\n */(function(){${'a();'.repeat(600)}})();\n$('#purge').click(function () { $.post('/purge'); });\n`, 'plugins.js'), ['(file) 3,4']);
+  // A long line with unbalanced braces: nothing is claimed.
+  const cs = view(`class A {\n  void M() {\n    var x = new[] { ${'1, '.repeat(800)}\n    };\n    Purge();\n  }\n  int N;\n}\n`, 'A.cs');
+  assert.ok(cs[0].startsWith('(file)') && cs[0].split(' ')[1].split(',').includes('5'), cs.join(' | '));
+  // JavaScript: a require under a brace-less if is not inert.
+  assert.deepEqual(view("if (config.mock)\n  var db = require('./mock-db');\nelse\n  var db = require('./real-db');\n", 'boot.js'), ['(file) 1,2,3,4']);
+  // Parameter annotations and decorators are behavior.
+  assert.deepEqual(view('public interface Api {\n    void create(@Valid @NotNull Order o);\n}\n', 'Api.java'), ['(file) 2']);
+  assert.deepEqual(view('class Cart {\n  @observable b: number;\n}\n', 'c.ts'), ['(file) 2']);
+  // VB: Option Compare Text changes comparisons; interface defaults are behavior.
+  assert.deepEqual(view('Option Compare Text\nOption Strict On\nModule M\n  Function Same(a As String, b As String) As Boolean\n    Return a = b\n  End Function\nEnd Module\n', 'm.vb'), ['(file) 1', 'M.Same 4-6']);
+  assert.deepEqual(view('Interface IApi\n    Sub Go(Optional retries As Integer = 5)\n    Sub Stop()\nEnd Interface\n', 'i.vb'), ['(file) 2']);
+  // Masking does not rescan to the end for every unclosed /*.
+  const t = Date.now();
+  scanText('x = "a" /* c\n'.repeat(40000), 'a.js');
+  scanText('logs/* tmp/*\n'.repeat(40000), 'ignore.txt');
+  assert.ok(Date.now() - t < 3000, `took ${Date.now() - t} ms`);
+});
+
+test('fourth review: the ledger reads only Site tables, rejects placeholder evidence, deferral cycles and unscannable source-map rows, and skips carry files', () => {
+  const dir = tempDir();
+  const C = 'openspec/changes/extract-billing-a';
+  const S = 'openspec/changes/archive/2026-11-01-survey';
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only): src\n');
+  write(dir, 'src/God.cs', 'class God {\n  void Purge() { Db.DeleteAll(); }\n  void Keep() { Db.Keep(); }\n}\n');
+  write(dir, 'src/site.css', 'body { color: red; }\n');
+  write(dir, 'src/lib/patch.cs', 'class P { void X() { Y(); } }\n');
+  write(dir, `${S}/inventory.md`, '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | port | |\n| src/site.css | billing | carry | |\n| src/lib/ | excluded | | |\n');
+  write(dir, `${S}/capabilities.md`, '1. `billing/a`\n   - `src/`\n2. `billing/b`\n   - `src/God.cs`\n3. `billing/c`\n   - `src/God.cs`\n');
+  write(dir, `${C}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/God.cs | all | full |\n| src/site.css | look | full |\n| src/lib/patch.cs | patch | full |\n');
+  write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `./src/God.cs:God.Purge` | other capability billing/b | b |\n| `src/god.cs:God.Keep` | no behavior | n/a |\n\n| Verdict | Count |\n|---|---|\n| covered | 0 |\n');
+  write(dir, 'openspec/changes/extract-billing-b/coverage.md', '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/God.cs:God.Purge` | other capability billing/c | c |\n');
+  write(dir, 'openspec/changes/extract-billing-c/coverage.md', '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/God.cs:God.Purge` | other capability billing/a | a |\n');
+  const problems = [];
+  checkLedger(dir, path.join(dir, C), { requirements: [], screens: [], asked: new Set(), assignment: new Map([['billing/a', ['src/']], ['billing/b', ['src/God.cs']], ['billing/c', ['src/God.cs']]]), own: 'billing/a' }, problems);
+  assert.deepEqual(problems, [
+    'source-map.md lists src/lib/patch.cs as in scope, but it holds no kept source file (excluded in inventory.md, ignored by git, or outside the source root), so the omission check cannot scan it: fix the row, or mark it out of scope',
+    'coverage of src/God.cs:God.Purge names billing/b, and the deferrals billing/a -> billing/b -> billing/c -> billing/a come back here: one of them must judge the site',
+    'coverage of src/God.cs:God.Keep is "no behavior" with no evidence; say why in the Evidence cell',
+  ]);
+  // A ledger range may have spaces around the dash.
+  assert.deepEqual(parseVerdict('covered R1 - R3').refs, ['R1', 'R2', 'R3']);
 });

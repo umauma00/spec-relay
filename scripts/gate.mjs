@@ -36,7 +36,7 @@ import { checkLedger } from './sites.mjs';
 const CHECKBOX = /^\s*(?:[-*+]|\d+[.)])\s+\[(.?)\]\s*(.*)$/;
 const REQUIREMENT = /^###\s*Requirement:\s*(.+?)\s*$/i;
 const FENCE = /^\s*(```|~~~)/;
-const PLACEHOLDER = /^(<.*>|tbd|todo|tba|n\/a|-|\.\.\.|…)?$/i;
+export const PLACEHOLDER = /^(<.*>|tbd|todo|tba|n\/a|-|\.\.\.|…)?$/i;
 const ticked = (mark) => mark.trim().toLowerCase() === 'x';
 const stripComments = (text) => text.replace(/<!--[\s\S]*?-->/g, '');
 

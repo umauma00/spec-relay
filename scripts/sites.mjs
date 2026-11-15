@@ -33,7 +33,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readIf, sourceFiles, archivedChange, tableRows } from './gate.mjs';
+import { readIf, sourceFiles, archivedChange, headedRows, PLACEHOLDER, inventoryRows as handledRows, inventoryRowFor } from './gate.mjs';
 import { sourceMapPaths, covers, contextOf, inventoryRows, ownersOf } from './coverage.mjs';
 
 // ---------------------------------------------------------------- reading
@@ -99,6 +99,9 @@ export function mask(text, lang) {
   let htmlChars = 0;
   const html = [];
   const hidden = new Set();
+  const annotated = new Set(); // PHP docblock lines with @Route(...), @ORM\Column...: behavior in a comment
+  const execClose = new Set(); // where a MySQL /*!50003 ... */ ends
+  let noClose = false; // no */ remains after an unclosed /*
   const blank = (from, to, both) => {
     for (let k = from; k < to && k < n; k += 1) {
       if (text[k] === '\n' || text[k] === '\r') continue;
@@ -107,6 +110,8 @@ export function mask(text, lang) {
     }
   };
   const lineEnd = (k) => { const e = text.indexOf('\n', k); return e < 0 ? n : e; };
+  let startsCache = null;
+  const lineStartsOf = () => (startsCache ??= lineStarts(text));
   // A quoted string from `i` (the opening quote); returns the offset after it.
   const quoted = (i, quote, { escapes = true, doubled = false, holes = null } = {}) => {
     let k = i + 1;
@@ -132,7 +137,7 @@ export function mask(text, lang) {
     return n;
   };
   // MySQL strings take backslash escapes ('it\'s'); SQL Server's do not ('C:\').
-  const mysql = lang === 'sql' && /`|\bENGINE\s*=|\bDELIMITER\b|\bAUTO_INCREMENT\b|^\s*#/im.test(text);
+  const mysql = lang === 'sql' && /`|\)\s*ENGINE\s*=|^\s*DELIMITER\b|\bAUTO_INCREMENT\b|^\s*#(?![\w#@])/im.test(text);
   let i = 0;
   let inPhp = lang !== 'php';
   let prev = ''; // last significant code character, for JavaScript regex literals
@@ -152,6 +157,7 @@ export function mask(text, lang) {
     }
     const ch = text[i];
     const next = text[i + 1];
+    if (execClose.has(i)) { blank(i, i + 2, true); i += 2; continue; }
     if (lang === 'php' && ch === '?' && next === '>') { blank(i, i + 2, true); code[i] = ';'; i += 2; inPhp = false; continue; } // ?> ends a statement
     // Line comments. PHP's end at ?> too.
     const lineComment = (ch === '/' && next === '/' && lang !== 'vb' && lang !== 'sql')
@@ -166,10 +172,24 @@ export function mask(text, lang) {
       if (lang === 'php') { const close = text.slice(i, end).indexOf('?>'); if (close >= 0) end = i + close; }
       blank(i, end, true); i = end; continue;
     }
-    if (ch === '/' && next === '*' && lang !== 'vb') {
+    if (ch === '/' && next === '*' && lang !== 'vb' && !noClose) {
       // A comment that never closes is more likely a /* in a misread string: not trusted.
       const close = text.indexOf('*/', i + 2);
-      if (close >= 0) { blank(i, close + 2, true); i = close + 2; continue; }
+      if (close < 0) noClose = true;
+      else if (lang === 'sql' && text[i + 2] === '!') {
+        // MySQL runs /*!50003 CREATE TRIGGER ... */ as code: only the marks go.
+        const mark = /^\/\*!\d*/.exec(text.slice(i, i + 12))[0];
+        blank(i, i + mark.length, true);
+        execClose.add(close);
+        i += mark.length; continue;
+      } else {
+        if (lang === 'php' && text[i + 2] === '*') {
+          // Doctrine and Symfony annotations are routes, rules and mappings.
+          let line = lineAt(lineStartsOf(), i);
+          for (const piece of text.slice(i, close).split('\n')) { if (/(?:^|[\s*])@[A-Z][\w\\]*/.test(piece)) annotated.add(line); line += 1; }
+        }
+        blank(i, close + 2, true); i = close + 2; continue;
+      }
     }
     let end = -1;
     const raw = lang === 'csharp' && (ch === '"' || ch === '$') ? /^\$*("{3,})/.exec(text.slice(i, i + 40)) : null;
@@ -235,7 +255,7 @@ export function mask(text, lang) {
       offset += line.length + 1;
     }
   }
-  return { code: code.join(''), plain: plain.join(''), htmlChars, html, hidden };
+  return { code: code.join(''), plain: plain.join(''), htmlChars, html, hidden, annotated };
 }
 
 // ---------------------------------------------------------------- markers
@@ -481,7 +501,7 @@ function scanBraces(code) {
           if (!name && ASSIGN.test(value) && (constantName(value) || /=>/.test(value.split(ASSIGN).slice(1).join('=')))) name = fieldName(value);
           if (name) site(name, firstCodeLine(boundary), lineAt(starts, i));
           // A declaration without a body or a value; default values and attributes in its parameters are behavior.
-          else if (whole && ((memberName(trimmed) && !/=/.test(trimmed) && !/\[\s*[A-Za-z_]/.test(trimmed)) || isDeclaration(trimmed))) claims.push([markEnd, i + 1]);
+          else if (whole && ((memberName(trimmed) && !/=/.test(trimmed) && !/\[\s*[A-Za-z_]/.test(trimmed) && !/@[A-Za-z_]/.test(trimmed)) || isDeclaration(trimmed))) claims.push([markEnd, i + 1]);
         }
       } else if (frame.kind === 'root' || frame.kind === 'namespace') {
         const trimmed = withoutAttributes(header);
@@ -499,7 +519,7 @@ function scanBraces(code) {
 // strings (a dynamic include has a $ in its path) and without inline HTML.
 // PHP, a whole statement: namespace, use, declare(strict_types), a require or
 // include of a fixed path.
-const PHP_TRIVIAL_TOP = /^\s*(?:namespace\s+[\w\\]+|use\s+(?:function\s+|const\s+)?[\w\\]+(?:\s+as\s+\w+)?(?:\s*,\s*[\w\\]+(?:\s+as\s+\w+)?)*|declare\s*\(\s*\w+\s*=\s*\w+\s*\)|(?:require|include)(?:_once)?\s*\(?\s*(?:(?:__DIR__|dirname\s*\(\s*__FILE__\s*\))\s*\.\s*)?(?:'[^'$\\\n]*'|"[^"$\\{\n]*")\s*\)?)\s*$/;
+const PHP_TRIVIAL_TOP = /^\s*(?:namespace\s+[\w\\]+|use\s+(?:function\s+|const\s+)?[\w\\]+(?:\s+as\s+\w+)?(?:\s*,\s*[\w\\]+(?:\s+as\s+\w+)?)*|(?:require|include)(?:_once)?\s*\(?\s*(?:(?:__DIR__|dirname\s*\(\s*__FILE__\s*\))\s*\.\s*)?(?:'[^'$\\\n]*'|"[^"$\\{\n]*")\s*\)?)\s*$/;
 // JavaScript and TypeScript, one line at a time (a statement may lack its ;):
 // "use strict", imports and re-exports, a require into a constant, TypeScript
 // type aliases and ambient declarations.
@@ -573,12 +593,22 @@ function scanFunctions(text, lang, lit) {
   const firstCodeLine = (from) => { let k = from; while (k < code.length && /\s/.test(code[k])) k += 1; return lineAt(starts, k); };
   const named = (name) => { const cls = className(); return cls ? `${cls}.${name}` : name; };
   let alt = 0;
+  // With PHP's alternative syntax (if (...): ... endif;) anywhere, an include may sit in a branch: none is claimed.
+  const altSyntax = lang === 'php' && /\bend(?:if|foreach|for|while|switch|declare)\b|\belse\s*:/i.test(code);
   const claimLines = (from, to) => {
-    if (lang === 'php') { if (PHP_TRIVIAL_TOP.test(lit.slice(from, to))) claims.push([from, to + 1]); return; }
-    // One line at a time: a statement without ; can follow an import.
+    if (lang === 'php') {
+      const statement = lit.slice(from, to);
+      if (PHP_TRIVIAL_TOP.test(statement) && !(altSyntax && /\b(?:require|include)/i.test(statement))) claims.push([from, to + 1]);
+      return;
+    }
+    // One line at a time, since a statement without ; can follow an import; but
+    // only while every earlier line was claimed (if (x)\n require(...) is not inert).
     let at = from;
     for (const line of lit.slice(from, to).split('\n')) {
-      if (line.trim() && JS_TRIVIAL_LINE.test(line)) claims.push([at, at + line.length]);
+      if (line.trim()) {
+        if (!JS_TRIVIAL_LINE.test(line)) return;
+        claims.push([at, at + line.length]);
+      }
       at += line.length + 1;
     }
   };
@@ -633,7 +663,7 @@ function scanFunctions(text, lang, lit) {
         const arrow = lang === 'js' && !constant && header.match(new RegExp(`${JS_ARROW_FIELD.source.replace(/\\s\*\$$/, '')}`));
         if (constant) sites.push({ symbol: named(constant[1]), from: firstCodeLine(boundary), to: lineAt(starts, i) });
         else if (arrow) sites.push({ symbol: named(arrow[1]), from: firstCodeLine(boundary), to: lineAt(starts, i) });
-        else if (whole && !withoutAttributes(header).includes('\n') && (lang === 'php' ? PHP_MEMBER_DECLARATION : JS_MEMBER_DECLARATION).test(withoutAttributes(header))) claims.push([boundary + marksLength(header), i + 1]); // a declaration without a value
+        else if (whole && !header.slice(marksLength(header)).trim().includes('\n') && !/@[A-Za-z_]|=/.test(withoutAttributes(header)) && (lang === 'php' ? PHP_MEMBER_DECLARATION : JS_MEMBER_DECLARATION).test(withoutAttributes(header))) claims.push([boundary + marksLength(header), i + 1]); // a declaration without a value
       } else {
         const arrow = lang === 'js' && header.match(JS_ARROW_CONST);
         if (arrow) sites.push({ symbol: named(arrow[1]), from: firstCodeLine(boundary), to: lineAt(starts, i) });
@@ -666,7 +696,7 @@ function scanVb(code) {
   const TYPE_LINE = new RegExp(`^\\s*${ATTR}(?:(?:Public|Private|Protected|Friend|Partial|Shared|MustInherit|NotInheritable|Shadows)\\s+)*(Class|Module|Structure|Interface|Enum)\\s+(\\w+)`, 'i');
   const CONST = new RegExp(`^\\s*${ATTR}(?:(?:Public|Private|Protected|Friend|Shadows)\\s+)*(?:Const|Shared\\s+ReadOnly|ReadOnly\\s+Shared)\\s+(?:(?:Public|Private|Protected|Friend|Shadows)\\s+)*(\\w+)[^=]*=`, 'i');
   const FIELD = new RegExp(`^\\s*${ATTR}(?:(?:Public|Private|Protected|Friend|Shared|ReadOnly|Dim|Static|WithEvents|Shadows)\\s+)+\\w`, 'i');
-  const TRIVIAL = /^\s*(?:Imports\b|Option\s+(?:Strict|Explicit|Compare|Infer)\b|Namespace\b|End\s+(?:Namespace|Class|Module|Structure|Interface|Enum)\b|Inherits\b|Implements\b)/i;
+  const TRIVIAL = /^\s*(?:Imports\b|Option\s+(?:(?:Strict|Explicit|Infer)(?:\s+On)?|Compare\s+Binary)\s*$|Namespace\b|End\s+(?:Namespace|Class|Module|Structure|Interface|Enum)\b|Inherits\b|Implements\b)/i;
   const LAMBDA = /\b(Sub|Function)\s*\((?:[^()]|\([^()]*\))*\)\s*(?:As\s+[\w.]+(?:\s*\([^)]*\))?)?\s*$/i;
   const continued = (line) => /\s_\s*$/.test(line);
   const qualified = (name) => `${types.map((t) => t.name).join('.')}${types.length ? '.' : ''}${name}`;
@@ -689,9 +719,14 @@ function scanVb(code) {
     for (let j = k; continued(lines[j]) && j + 1 < lines.length && j < k + 50; j += 1) full += ` ${lines[j + 1]}`;
     const type = line.match(TYPE_LINE);
     if (type && /^enum$/i.test(type[1])) { open = { kind: 'Enum', name: `${qualified(type[2])}.(values)`, from: k + 1, nested: {} }; continue; } // the values of an enum are one site
-    if (type) { types.push({ name: type[2], plain: /interface/i.test(type[1]) }); if (!/^\s*</.test(line)) trivial.add(k + 1); carry = false; continue; } // attributes on the line stay in (file)
+    if (type) { if (!/:\s*End\s+\w+\s*$/i.test(line)) types.push({ name: type[2], plain: /interface/i.test(type[1]) }); if (!/^\s*</.test(line)) trivial.add(k + 1); carry = false; continue; } // attributes on the line stay in (file)
     if (/^\s*End\s+(Class|Module|Structure|Interface)\b/i.test(line)) { types.pop(); trivial.add(k + 1); continue; }
-    if (types.at(-1)?.plain) { if (!/^\s*</.test(line)) trivial.add(k + 1); carry = continued(line); continue; } // interface members have no body; their attributes are (file)
+    if (types.at(-1)?.plain) {
+      // Interface members have no body; their attributes and default values are (file).
+      if (/[<=]/.test(full)) carry = false;
+      else { trivial.add(k + 1); carry = continued(line); }
+      continue;
+    }
     if (TRIVIAL.test(line)) { trivial.add(k + 1); carry = continued(line); continue; }
     const constant = full.match(CONST);
     if (constant) { sites.push({ symbol: qualified(constant[1]), from: k + 1, to: k + 1 }); continue; }
@@ -731,7 +766,8 @@ function scanSql(code) {
     const m = lines[k].match(new RegExp(`^\\s*(?:CREATE|ALTER)\\s+(?:OR\\s+(?:REPLACE|ALTER)\\s+)?(?:DEFINER\\s*=\\s*\\S+\\s+)?(PROC(?:EDURE)?|FUNCTION|TRIGGER|VIEW|PACKAGE(?:\\s+BODY)?)\\s+(${part}(?:\\s*\\.\\s*${part})*)`, 'i'));
     if (m) { close(k); open = { name: m[2].replace(/\s*\.\s*/g, '.').replace(/[[\]"`]/g, ''), from: k + 1 }; continue; }
     if (/^\s*GO\s*;?\s*$/i.test(lines[k])) { close(k); trivial.add(k + 1); continue; }
-    if (!open && /^\s*(?:USE\s|SET\s+(?:ANSI_NULLS|QUOTED_IDENTIFIER|NOCOUNT|ANSI_PADDING|ANSI_WARNINGS|ARITHABORT|CONCAT_NULL_YIELDS_NULL|NUMERIC_ROUNDABORT|XACT_ABORT)\b|DELIMITER\b)/i.test(lines[k])) trivial.add(k + 1);
+    // Only the settings generated scripts carry at their defaults; OFF changes how NULL and quotes behave.
+    if (!open && /^\s*(?:USE\s+(?:\[[^\]\n]+\]|`[^`\n]+`|"[^"\n]+"|[\w$#@]+)|SET\s+(?:ANSI_NULLS|QUOTED_IDENTIFIER|ANSI_PADDING|ANSI_WARNINGS|ARITHABORT|CONCAT_NULL_YIELDS_NULL)\s+ON|SET\s+NUMERIC_ROUNDABORT\s+OFF|DELIMITER\s+\S+)\s*;?\s*$/i.test(lines[k])) trivial.add(k + 1);
   }
   let last = lines.length;
   while (last > 1 && !lines[last - 1].trim()) last -= 1;
@@ -769,11 +805,21 @@ export function scanText(text, file) {
   const all = normalized.split('\n');
   const fileSite = (lines, extra = {}) => ({ id: `${file}:(file)`, file, symbol: '(file)', from: lines[0] ?? 1, to: lines.at(-1) ?? 1, lines, markers: [], ...extra });
   // Lines over 2000 characters (minified code, embedded data) are not read:
-  // they are blanked, kept as (file) lines unless a member holds them, and
-  // marked `long`, so the checker reads them itself.
+  // they are blanked after masking (so a comment that ends on one still ends),
+  // kept as (file) lines unless a member holds them, and marked `long`, so the
+  // checker reads them itself.
   const long = new Set();
-  const readable = all.map((line, k) => { if (line.length <= 2000) return line; long.add(k + 1); return ' '.repeat(line.length); }).join('\n');
-  const { code, plain, html, hidden } = mask(readable, lang);
+  all.forEach((line, k) => { if (line.length > 2000) long.add(k + 1); });
+  const blankLong = (t) => (long.size ? t.split('\n').map((line, k) => (long.has(k + 1) ? ' '.repeat(line.length) : line)).join('\n') : t);
+  const masked = lang === 'text' ? { code: normalized, plain: normalized, html: [], hidden: new Set(), annotated: new Set() } : mask(normalized, lang);
+  const { html, hidden, annotated } = masked;
+  // A long line whose braces do not balance changes the structure around it:
+  // then nothing in the file is claimed, so every line outside a member is (file).
+  const codeLines = long.size && ['csharp', 'java', 'php', 'js'].includes(lang) ? masked.code.split('\n') : [];
+  const unbalanced = codeLines.length > 0 && [...long].some((l) => (codeLines[l - 1].match(/\{/g)?.length ?? 0) !== (codeLines[l - 1].match(/\}/g)?.length ?? 0));
+  const code = blankLong(masked.code);
+  const plain = blankLong(masked.plain);
+  const readable = lang === 'text' ? plain : null;
   let found;
   if (lang === 'csharp' || lang === 'java') found = scanBraces(code);
   else if (lang === 'php' || lang === 'js') {
@@ -786,7 +832,8 @@ export function scanText(text, file) {
   else if (lang === 'sql') found = scanSql(code);
   else found = { sites: [] };
   const starts = lineStarts(normalized);
-  const extra = [...hidden, ...long];
+  if (unbalanced) { found.claims = []; found.trivial = null; }
+  const extra = [...hidden, ...long, ...annotated];
   for (const [a, b] of html) {
     for (let k = a; k < b; k += 1) if (!/\s/.test(normalized[k])) extra.push(lineAt(starts, k));
   }
@@ -806,10 +853,16 @@ export function scanText(text, file) {
   return sites;
 }
 
+// Files over this size are not read: one (file) site the checker opens itself.
+export const MAX_BYTES = 32 * 1024 * 1024;
+
 export function scanFile(root, file) {
   if (NO_CODE.test(file)) return [];
   let buffer;
-  try { buffer = fs.readFileSync(path.join(root, file)); } catch { return [{ id: `${file}:(file)`, file, symbol: '(file)', from: 1, to: 1, lines: [], markers: [], unreadable: true }]; }
+  try {
+    if (fs.statSync(path.join(root, file)).size > MAX_BYTES) return [{ id: `${file}:(file)`, file, symbol: '(file)', from: 1, to: 1, lines: [], markers: [], large: true }];
+    buffer = fs.readFileSync(path.join(root, file));
+  } catch { return [{ id: `${file}:(file)`, file, symbol: '(file)', from: 1, to: 1, lines: [], markers: [], unreadable: true }]; }
   const text = decode(buffer);
   if (text === null) return [{ id: `${file}:(file)`, file, symbol: '(file)', from: 1, to: 1, lines: [], markers: [], binary: true }];
   return scanText(text, file);
@@ -818,13 +871,27 @@ export function scanFile(root, file) {
 // ---------------------------------------------------------------- a change
 
 // The kept source files a change's source map names (a folder row stands for
-// the files below it), in path order.
+// the files below it), in path order. Files the survey marks `carry` are not
+// scanned: a port copies them unchanged and port-done compares the copy.
 export function changeFiles(root, dir) {
+  return sourceMapFiles(root, dir).files;
+}
+
+// { files, unscanned }: the files to scan, and the source-map paths that name
+// a file or folder on disk with no kept file in it (excluded, ignored by git,
+// outside the source root), which the omission check cannot see.
+export function sourceMapFiles(root, dir) {
   const listed = sourceMapPaths(readIf(path.join(dir, 'source-map.md'), []) ?? '', root);
   const all = sourceFiles(root) ?? [];
   const survey = archivedChange(root, 'survey');
-  const inventory = survey ? inventoryRows(readIf(path.join(survey, 'inventory.md'), []) ?? '') : [];
-  return all.filter((file) => listed.some((p) => covers(p, file)) && contextOf(inventory, file) !== 'excluded');
+  const text = survey ? readIf(path.join(survey, 'inventory.md'), []) ?? '' : '';
+  const inventory = inventoryRows(text);
+  const handled = handledRows(text);
+  const kept = all.filter((file) => listed.some((p) => covers(p, file)) && contextOf(inventory, file) !== 'excluded');
+  const carried = (file) => inventoryRowFor(handled, file)?.handling === 'carry';
+  const files = kept.filter((file) => !carried(file));
+  const unscanned = listed.filter((p) => !kept.some((file) => covers(p, file)) && fs.existsSync(path.join(root, p)));
+  return { files, unscanned, carried: kept.length - files.length };
 }
 
 export function changeSites(root, dir) {
@@ -842,6 +909,7 @@ export const markerText = (markers) => {
 export function lineText(site) {
   if (site.binary) return 'binary';
   if (site.unreadable) return 'unreadable';
+  if (site.large) return 'too large';
   if (!site.lines) return `${site.from}-${site.to}`;
   const parts = [];
   for (let k = 0; k < site.lines.length; k += 1) {
@@ -860,8 +928,9 @@ export function lineText(site) {
 const ledgerKey = (text) => {
   const id = text.replace(/<!--[\s\S]*?-->/g, '').trim().replace(/^`(.*)`$/, '$1').trim().replace(/\\\|/g, '|');
   const colon = id.indexOf(':');
+  const where = (p) => p.replace(/\\/g, '/').replace(/^(\.\/)+/, '').toLowerCase();
   // Backslashes are path separators only in the path: `Operator \` is not `Operator /`.
-  return colon < 0 ? id.replace(/\\/g, '/').toLowerCase() : `${id.slice(0, colon).replace(/\\/g, '/').toLowerCase()}${id.slice(colon)}`;
+  return colon < 0 ? where(id) : `${where(id.slice(0, colon))}${id.slice(colon)}`;
 };
 
 // One verdict cell: { kind, refs, capability, question } or { kind: 'invalid' }.
@@ -871,7 +940,7 @@ export function parseVerdict(text) {
   const v = text.replace(/<!--[\s\S]*?-->/g, '').replace(/[*_`]/g, '').trim().replace(/[.。]$/, '').trim();
   let m = v.match(/^covered\s*:?\s*(.+)$/i);
   if (m) {
-    const tokens = m[1].split(/[\s,、;/]+|\band\b/i).filter(Boolean);
+    const tokens = m[1].replace(/\s*([-–~〜])\s*/g, '$1').split(/[\s,、;/]+|\band\b/i).filter(Boolean);
     const refs = [];
     for (const token of tokens) {
       const one = token.match(/^([RS])0*(\d+)$/i);
@@ -895,19 +964,22 @@ export function parseVerdict(text) {
 // The ledger of an extract change: every site the scanner finds now in the
 // files of its source map, with the row coverage.md gives it.
 export function readLedger(root, dir, problems = []) {
-  const files = changeFiles(root, dir);
+  const { files, unscanned, carried } = sourceMapFiles(root, dir);
   const sites = files.flatMap((file) => scanFile(root, file));
   const text = readIf(path.join(dir, 'coverage.md'), problems);
   const rows = new Map();
   const duplicates = new Set();
-  for (const [site = '', verdict = '', evidence = ''] of tableRows(text ?? '')) {
+  for (const [site = '', verdict = '', evidence = ''] of siteRows(text)) {
     const key = ledgerKey(site);
     if (!key) continue;
     if (rows.has(key)) duplicates.add(key);
     rows.set(key, { site, verdict, evidence, parsed: parseVerdict(verdict) });
   }
-  return { text, files, sites, rows, duplicates };
+  return { text, files, unscanned, carried, sites, rows, duplicates };
 }
+
+// The rows of the tables whose first column is Site: a summary table below is not read as sites.
+const siteRows = (text) => headedRows(text ?? '').filter(({ header }) => /^(site|箇所)/.test(header[0] ?? '')).map(({ cells }) => cells);
 
 const NO_FILES = 'source-map.md names no kept source file, so the omission check has nothing to scan: check its Source files table';
 
@@ -918,7 +990,7 @@ function otherLedger(root, capability, cache) {
   const active = path.join(root, 'openspec/changes', name);
   const dir = fs.existsSync(active) ? active : archivedChange(root, name);
   const rows = new Map();
-  for (const [site = '', verdict = ''] of tableRows((dir && readIf(path.join(dir, 'coverage.md'), [])) ?? '')) rows.set(ledgerKey(site), { parsed: parseVerdict(verdict) });
+  for (const [site = '', verdict = ''] of siteRows(dir && readIf(path.join(dir, 'coverage.md'), []))) rows.set(ledgerKey(site), { parsed: parseVerdict(verdict) });
   cache.set(capability, rows);
   return rows;
 }
@@ -933,9 +1005,10 @@ function capped(problems, list, say, max = 20) {
 // the question ids with a review item, `assignment` the plan's capabilities
 // with their source paths, and `own` this change's capability.
 export function checkLedger(root, dir, { requirements, screens, asked, assignment, own }, problems) {
-  const { text, files, sites, rows, duplicates } = readLedger(root, dir, problems);
+  const { text, files, unscanned, carried, sites, rows, duplicates } = readLedger(root, dir, problems);
+  capped(problems, unscanned, (p) => `source-map.md lists ${p} as in scope, but it holds no kept source file (excluded in inventory.md, ignored by git, or outside the source root), so the omission check cannot scan it: fix the row, or mark it out of scope`);
   if (text === null) { problems.push('coverage.md is missing (the omission check: run sites.mjs, then the checkers)'); return; }
-  if (files.length === 0) { problems.push(NO_FILES); return; }
+  if (files.length === 0 && !carried) { problems.push(NO_FILES); return; }
   const ids = new Set(sites.map((s) => ledgerKey(s.id)));
   capped(problems, sites.filter((s) => !rows.has(ledgerKey(s.id))).map((s) => s.id), (id) => `site has no row in coverage.md: ${id}`);
   capped(problems, [...duplicates], (key) => `site has more than one row in coverage.md: ${rows.get(key).site}; keep only the current verdict`);
@@ -957,11 +1030,20 @@ export function checkLedger(root, dir, { requirements, screens, asked, assignmen
       if (v.capability === own) bad.push(`coverage of ${site.id} names its own capability as "other capability"`);
       else if (!paths) bad.push(`coverage of ${site.id} names ${v.capability}, which is not a capability of the plan`);
       else if (!ownersOf(assignment, site.file).includes(v.capability)) bad.push(`coverage of ${site.id} names ${v.capability}, but the plan does not give ${site.file} to that capability (list the file itself under it too, or judge the site here)`);
-      else if (otherLedger(root, v.capability, others).get(ledgerKey(site.id))?.parsed.capability === own) bad.push(`coverage of ${site.id} names ${v.capability}, whose own coverage.md names ${own} for it: one of the two must judge the site`);
+      else {
+        // Follow the deferrals: a chain that comes back here leaves the site unjudged.
+        const chain = [own, v.capability];
+        let next = otherLedger(root, v.capability, others).get(ledgerKey(site.id))?.parsed;
+        while (next?.kind === 'other' && !chain.includes(next.capability) && chain.length < 20) {
+          chain.push(next.capability);
+          next = otherLedger(root, next.capability, others).get(ledgerKey(site.id))?.parsed;
+        }
+        if (next?.kind === 'other' && next.capability === own) bad.push(`coverage of ${site.id} names ${v.capability}, and the deferrals ${[...chain, own].join(' -> ')} come back here: one of them must judge the site`);
+      }
     } else if (v.kind === 'question') {
       if (!asked.has(v.question)) bad.push(`coverage of ${site.id} points to ${v.question}, which is not in questions.md with a review item`);
     } else if (v.kind === 'gap') bad.push(`site ${site.id} is a gap: add the requirement it needs (then check it again), or move it to questions.md as "question Q<n>"`);
-    else if (v.kind === 'no-behavior') { if (!row.evidence.replace(/<!--[\s\S]*?-->/g, '').trim()) bad.push(`coverage of ${site.id} is "no behavior" with no evidence; say why in the Evidence cell`); }
+    else if (v.kind === 'no-behavior') { if (PLACEHOLDER.test(row.evidence.replace(/<!--[\s\S]*?-->/g, '').trim())) bad.push(`coverage of ${site.id} is "no behavior" with no evidence; say why in the Evidence cell`); }
     else bad.push(`coverage of ${site.id} is "${row.verdict.trim() || 'blank'}"; write only covered R<n>/S<n>, no behavior, other capability <path>, question Q<n> or gap, and put reasons in the Evidence cell`);
   }
   capped(problems, bad, (p) => p);

@@ -209,7 +209,6 @@ artifacts:
       - `covered R<n>, S<n>`: every observable effect of the site (results,
         errors, writes, messages, every marker line) is in these
         requirements' scenarios or these screens.
-      The Verdict cell holds the verdict alone; reasons go in the Evidence cell.
       - `no behavior`: the site has no effect a user or caller could notice
         (a plain getter, a constructor that only stores its arguments, a
         log line nobody reads). Say why in the evidence.
@@ -219,14 +218,19 @@ artifacts:
       - `question Q<n>`: the person must decide (dead code, a branch that
         looks unreachable, behavior that may be a bug).
       - `gap`: the site does something no requirement or screen covers.
-      Resolve every `gap`: an analyst adds the requirement it needs (with its
+      The Verdict cell holds the verdict alone; reasons go in the Evidence cell.
+      Files the survey marks `carry` are not scanned (a port copies them
+      unchanged). Resolve every `gap`: an analyst adds the requirement it needs (with its
       trace), a checker checks the new requirement and that site again, or the
       orchestrator moves it to questions.md and writes `question Q<n>`.
       `gate.mjs review` scans the files again and fails while a site has no
       row, a row names a site the scanner does not find (delete such rows: a
-      renamed member or a file that left the source map), a verdict is blank
-      or `gap`, or names a requirement, screen, question or capability that
-      does not exist.
+      renamed member or a file that left the source map), a site has two rows,
+      a verdict is blank or `gap`, a `no behavior` row has no evidence, a
+      verdict names a requirement, screen, question or capability that does
+      not exist, a chain of `other capability` verdicts comes back to this
+      capability, or an in-scope source-map row names a file the scanner
+      cannot read (excluded, ignored by git, outside the source root).
     requires:
       - trace
 
