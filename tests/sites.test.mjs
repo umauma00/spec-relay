@@ -582,7 +582,11 @@ test('fourth review: MySQL executable comments, PHP alternative syntax and annot
   assert.deepEqual(view("<?php for ($i = 0; $i < 3; $i++): ?>\n<?php include 'cell.php'; ?>\n<?php endfor; ?>\n", 'grid.php'), ['(file) 1,2,3']);
   assert.deepEqual(view("<?php\ndeclare(strict_types=1);\nfunction f() { g(); }\n", 'f.php'), ['(file) 2', 'f 3-3']);
   // Doctrine and Symfony annotations are behavior.
-  assert.deepEqual(view('<?php\nclass C {\n    /**\n     * @Route("/cart/delete/{id}")\n     * @param int $id\n     */\n    public function delete($id) { $this->cart->remove($id); }\n    /** @Assert\\Length(max=10) */\n    private $name;\n}\n', 'C.php'), ['(file) 4,8', 'C.delete 7-7']);
+  assert.deepEqual(view('<?php\nclass C {\n    /**\n     * @Route("/cart/delete/{id}")\n     * @param int $id\n     */\n    public function delete($id) { $this->cart->remove($id); }\n    /** @Assert\\Length(max=10) */\n    private $name;\n}\n', 'C.php'), ['(file) 4,5,8', 'C.delete 7-7']);
+  // An annotation's arguments run on over lines; the marker shows it on the review page.
+  const doc = scanText('<?php\nclass C {\n    /**\n     * @Route(\n     *   "/cart/delete/{id}",\n     *   methods={"DELETE"}\n     * )\n     */\n    public function delete($id) { $this->cart->remove($id); }\n}\n', 'D.php');
+  assert.deepEqual(doc[0].lines, [4, 5, 6, 7]);
+  assert.ok(doc[0].markers.some((m) => m.kind === 'annotation'));
   // A comment that ends on a long line still ends there.
   assert.deepEqual(view(`/*\n * Plugin A\n */(function(){${'a();'.repeat(600)}})();\n$('#purge').click(function () { $.post('/purge'); });\n`, 'plugins.js'), ['(file) 3,4']);
   // A long line with unbalanced braces: nothing is claimed.
@@ -622,6 +626,17 @@ test('fourth review: the ledger reads only Site tables, rejects placeholder evid
   assert.deepEqual(problems, [
     'source-map.md lists src/lib/patch.cs as in scope, but it holds no kept source file (excluded in inventory.md, ignored by git, or outside the source root), so the omission check cannot scan it: fix the row, or mark it out of scope',
     'coverage of src/God.cs:God.Purge names billing/b, and the deferrals billing/a -> billing/b -> billing/c -> billing/a come back here: one of them must judge the site',
+    'coverage of src/God.cs:God.Keep is "no behavior" with no evidence; say why in the Evidence cell',
+  ]);
+  // Server-side code under a carry folder is still scanned; a lone mark is no evidence.
+  write(dir, 'src/assets/upload.php', '<?php\nmove_uploaded_file($a, $b);\n');
+  write(dir, `${S}/inventory.md`, '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | port | |\n| src/site.css | billing | carry | |\n| src/assets/ | billing | carry | |\n| src/lib/ | excluded | | |\n');
+  write(dir, `${C}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/God.cs | all | full |\n| src/site.css | look | full |\n| src/assets/ | assets | full |\n');
+  write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/God.cs:God.Purge` | covered R1 | x |\n| `src/God.cs:God.Keep` | no behavior | — |\n');
+  const again = [];
+  checkLedger(dir, path.join(dir, C), { requirements: ['R'], screens: [], asked: new Set(), assignment: new Map([['billing/a', ['src/']]]), own: 'billing/a' }, again);
+  assert.deepEqual(again, [
+    'site has no row in coverage.md: src/assets/upload.php:(file)',
     'coverage of src/God.cs:God.Keep is "no behavior" with no evidence; say why in the Evidence cell',
   ]);
   // A ledger range may have spaces around the dash.

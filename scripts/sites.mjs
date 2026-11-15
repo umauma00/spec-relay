@@ -21,7 +21,8 @@
 // using/import/package lines and a require or include of a fixed path outside
 // functions and blocks, namespace and type headers (without their attributes),
 // field declarations without a value, declarations without a body or default values,
-// auto-properties, VB Imports/Option/End lines, SQL GO/SET/USE lines, comments
+// auto-properties, VB Imports/End lines and default Option lines, whole lines of
+// SQL GO, USE <name>, DELIMITER and default SET options, comments
 // and punctuation. Every other line, read with only comments blanked (so a
 // string the masker misread still counts), is in a member's site or in
 // `(file)`. So unusual code (macros, eval, generated members) makes a site
@@ -102,6 +103,7 @@ export function mask(text, lang) {
   const annotated = new Set(); // PHP docblock lines with @Route(...), @ORM\Column...: behavior in a comment
   const execClose = new Set(); // where a MySQL /*!50003 ... */ ends
   let noClose = false; // no */ remains after an unclosed /*
+  let lastClose = -1; // the next */ found, reused while it is still ahead
   const blank = (from, to, both) => {
     for (let k = from; k < to && k < n; k += 1) {
       if (text[k] === '\n' || text[k] === '\r') continue;
@@ -137,7 +139,7 @@ export function mask(text, lang) {
     return n;
   };
   // MySQL strings take backslash escapes ('it\'s'); SQL Server's do not ('C:\').
-  const mysql = lang === 'sql' && /`|\)\s*ENGINE\s*=|^\s*DELIMITER\b|\bAUTO_INCREMENT\b|^\s*#(?![\w#@])/im.test(text);
+  const mysql = lang === 'sql' && /`|\)[ \t]*ENGINE[ \t]*=|^[ \t]*DELIMITER\b|\bAUTO_INCREMENT\b|^[ \t]*#(?![\w#@])/im.test(text);
   let i = 0;
   let inPhp = lang !== 'php';
   let prev = ''; // last significant code character, for JavaScript regex literals
@@ -163,7 +165,7 @@ export function mask(text, lang) {
     const lineComment = (ch === '/' && next === '/' && lang !== 'vb' && lang !== 'sql')
       || (ch === '#' && lang === 'php' && next !== '[')
       || (ch === '-' && next === '-' && lang === 'sql')
-      || (ch === '#' && lang === 'sql' && mysql)
+      || (ch === '#' && lang === 'sql' && mysql && !/[\w#@]/.test(next ?? ''))
       || (ch === "'" && lang === 'vb')
       || (ch === '#' && lang === 'csharp' && /(^|\n)[ \t]*$/.test(text.slice(Math.max(0, i - 200), i))) // #if, #region
       || (lang === 'vb' && /^rem\b/i.test(text.slice(i, i + 4)) && /(^|[\s:])$/.test(text.slice(Math.max(0, i - 1), i)));
@@ -174,11 +176,12 @@ export function mask(text, lang) {
     }
     if (ch === '/' && next === '*' && lang !== 'vb' && !noClose) {
       // A comment that never closes is more likely a /* in a misread string: not trusted.
-      const close = text.indexOf('*/', i + 2);
+      if (lastClose < i + 2) lastClose = text.indexOf('*/', i + 2);
+      const close = lastClose;
       if (close < 0) noClose = true;
-      else if (lang === 'sql' && text[i + 2] === '!') {
-        // MySQL runs /*!50003 CREATE TRIGGER ... */ as code: only the marks go.
-        const mark = /^\/\*!\d*/.exec(text.slice(i, i + 12))[0];
+      else if (lang === 'sql' && /^\/\*M?!/.test(text.slice(i, i + 4))) {
+        // MySQL runs /*!50003 CREATE TRIGGER ... */ (MariaDB /*M!100100 ... */) as code: only the marks go.
+        const mark = /^\/\*M?!\d*/.exec(text.slice(i, i + 14))[0];
         blank(i, i + mark.length, true);
         execClose.add(close);
         i += mark.length; continue;
@@ -186,7 +189,13 @@ export function mask(text, lang) {
         if (lang === 'php' && text[i + 2] === '*') {
           // Doctrine and Symfony annotations are routes, rules and mappings.
           let line = lineAt(lineStartsOf(), i);
-          for (const piece of text.slice(i, close).split('\n')) { if (/(?:^|[\s*])@[A-Z][\w\\]*/.test(piece)) annotated.add(line); line += 1; }
+          // From the first @Uppercase line on, every line with text is kept: an annotation's arguments run on.
+          let on = false;
+          for (const piece of text.slice(i, close).split('\n')) {
+            if (/(?:^|[\s*])@[A-Z][\w\\]*/.test(piece)) on = true;
+            if (on && /[^\s*/]/.test(piece)) annotated.add(line);
+            line += 1;
+          }
         }
         blank(i, close + 2, true); i = close + 2; continue;
       }
@@ -517,8 +526,8 @@ function scanBraces(code) {
 
 // Top-level statements that do nothing by themselves. They are read with their
 // strings (a dynamic include has a $ in its path) and without inline HTML.
-// PHP, a whole statement: namespace, use, declare(strict_types), a require or
-// include of a fixed path.
+// PHP, a whole statement: namespace, use, a require or include of a fixed path
+// (none in a file with the alternative syntax). declare() changes behavior.
 const PHP_TRIVIAL_TOP = /^\s*(?:namespace\s+[\w\\]+|use\s+(?:function\s+|const\s+)?[\w\\]+(?:\s+as\s+\w+)?(?:\s*,\s*[\w\\]+(?:\s+as\s+\w+)?)*|(?:require|include)(?:_once)?\s*\(?\s*(?:(?:__DIR__|dirname\s*\(\s*__FILE__\s*\))\s*\.\s*)?(?:'[^'$\\\n]*'|"[^"$\\{\n]*")\s*\)?)\s*$/;
 // JavaScript and TypeScript, one line at a time (a statement may lack its ;):
 // "use strict", imports and re-exports, a require into a constant, TypeScript
@@ -560,7 +569,7 @@ function listRanges(text) {
 }
 
 // PHP and JavaScript/TypeScript: functions and methods. Returns { sites, claims }.
-function scanFunctions(text, lang, lit) {
+function scanFunctions(text, lang, lit, unblanked = text) {
   const claims = [];
   // The braces of import lists are blanked; the lists do nothing by themselves.
   let code = text;
@@ -594,8 +603,9 @@ function scanFunctions(text, lang, lit) {
   const named = (name) => { const cls = className(); return cls ? `${cls}.${name}` : name; };
   let alt = 0;
   // With PHP's alternative syntax (if (...): ... endif;) anywhere, an include may sit in a branch: none is claimed.
-  const altSyntax = lang === 'php' && /\bend(?:if|foreach|for|while|switch|declare)\b|\belse\s*:/i.test(code);
+  const altSyntax = lang === 'php' && /\bend(?:if|foreach|for|while|switch|declare)\b|\belse\s*:/i.test(unblanked);
   const claimLines = (from, to) => {
+    if (to - from > 2000) return; // never claim from a statement too long to read whole
     if (lang === 'php') {
       const statement = lit.slice(from, to);
       if (PHP_TRIVIAL_TOP.test(statement) && !(altSyntax && /\b(?:require|include)/i.test(statement))) claims.push([from, to + 1]);
@@ -826,7 +836,7 @@ export function scanText(text, file) {
     // Strings visible, PHP's inline HTML blanked.
     const lit = plain.split('');
     for (const [a, b] of html) for (let k = a; k < b; k += 1) if (lit[k] !== '\n') lit[k] = ' ';
-    found = scanFunctions(code, lang, lit.join(''));
+    found = scanFunctions(code, lang, lit.join(''), masked.code);
   }
   else if (lang === 'vb') found = scanVb(code);
   else if (lang === 'sql') found = scanSql(code);
@@ -841,7 +851,7 @@ export function scanText(text, file) {
   // masker misread, or a multi-line string, still counts.
   const rest = residualLines(lang === 'text' ? readable : plain, found.sites, { ...found, extra });
   const plainLines = (lang === 'text' ? readable : plain).split('\n');
-  const markers = (lines) => [...markersIn(plainLines, lines), ...lines.filter((l) => long.has(l)).map((line) => ({ kind: 'long', line }))];
+  const markers = (lines) => [...markersIn(plainLines, lines), ...lines.filter((l) => long.has(l)).map((line) => ({ kind: 'long', line })), ...lines.filter((l) => annotated.has(l)).map((line) => ({ kind: 'annotation', line }))];
   const seen = new Map();
   const sites = found.sites.sort((a, b) => a.from - b.from || a.to - b.to).map((s) => {
     const count = (seen.get(s.symbol) ?? 0) + 1;
@@ -860,7 +870,7 @@ export function scanFile(root, file) {
   if (NO_CODE.test(file)) return [];
   let buffer;
   try {
-    if (fs.statSync(path.join(root, file)).size > MAX_BYTES) return [{ id: `${file}:(file)`, file, symbol: '(file)', from: 1, to: 1, lines: [], markers: [], large: true }];
+    if (fs.statSync(path.join(root, file)).size > MAX_BYTES) return [{ id: `${file}:(file)`, file, symbol: '(file)', from: 1, to: 1, lines: [], markers: [{ kind: 'large', line: 1 }], large: true }];
     buffer = fs.readFileSync(path.join(root, file));
   } catch { return [{ id: `${file}:(file)`, file, symbol: '(file)', from: 1, to: 1, lines: [], markers: [], unreadable: true }]; }
   const text = decode(buffer);
@@ -877,6 +887,8 @@ export function changeFiles(root, dir) {
   return sourceMapFiles(root, dir).files;
 }
 
+const unscannedText = (p) => `source-map.md lists ${p} as in scope, but it holds no kept source file (excluded in inventory.md, ignored by git, or outside the source root), so the omission check cannot scan it: fix the row, or mark it out of scope`;
+
 // { files, unscanned }: the files to scan, and the source-map paths that name
 // a file or folder on disk with no kept file in it (excluded, ignored by git,
 // outside the source root), which the omission check cannot see.
@@ -888,7 +900,8 @@ export function sourceMapFiles(root, dir) {
   const inventory = inventoryRows(text);
   const handled = handledRows(text);
   const kept = all.filter((file) => listed.some((p) => covers(p, file)) && contextOf(inventory, file) !== 'excluded');
-  const carried = (file) => inventoryRowFor(handled, file)?.handling === 'carry';
+  // Server-side code under a carry row is still scanned: carry is for CSS, images, fonts and libraries.
+  const carried = (file) => inventoryRowFor(handled, file)?.handling === 'carry' && !['csharp', 'java', 'vb', 'php', 'sql'].includes(languageOf(file));
   const files = kept.filter((file) => !carried(file));
   const unscanned = listed.filter((p) => !kept.some((file) => covers(p, file)) && fs.existsSync(path.join(root, p)));
   return { files, unscanned, carried: kept.length - files.length };
@@ -981,6 +994,12 @@ export function readLedger(root, dir, problems = []) {
 // The rows of the tables whose first column is Site: a summary table below is not read as sites.
 const siteRows = (text) => headedRows(text ?? '').filter(({ header }) => /^(site|箇所)/.test(header[0] ?? '')).map(({ cells }) => cells);
 
+// An Evidence cell that says nothing: empty, a dash, n/a, none, a lone mark.
+const noEvidence = (cell) => {
+  const t = cell.replace(/<!--[\s\S]*?-->/g, '').replace(/[`'"*_]/g, '').trim();
+  return PLACEHOLDER.test(t) || /^(?:[-–—―‐ー.。?？!・…]+|none|nothing|nil|null|na|なし|無し|特になし|不明)$/i.test(t);
+};
+
 const NO_FILES = 'source-map.md names no kept source file, so the omission check has nothing to scan: check its Source files table';
 
 // The rows of another capability's ledger (its active or archived extract change), without scanning.
@@ -1006,7 +1025,7 @@ function capped(problems, list, say, max = 20) {
 // with their source paths, and `own` this change's capability.
 export function checkLedger(root, dir, { requirements, screens, asked, assignment, own }, problems) {
   const { text, files, unscanned, carried, sites, rows, duplicates } = readLedger(root, dir, problems);
-  capped(problems, unscanned, (p) => `source-map.md lists ${p} as in scope, but it holds no kept source file (excluded in inventory.md, ignored by git, or outside the source root), so the omission check cannot scan it: fix the row, or mark it out of scope`);
+  capped(problems, unscanned, unscannedText);
   if (text === null) { problems.push('coverage.md is missing (the omission check: run sites.mjs, then the checkers)'); return; }
   if (files.length === 0 && !carried) { problems.push(NO_FILES); return; }
   const ids = new Set(sites.map((s) => ledgerKey(s.id)));
@@ -1043,7 +1062,7 @@ export function checkLedger(root, dir, { requirements, screens, asked, assignmen
     } else if (v.kind === 'question') {
       if (!asked.has(v.question)) bad.push(`coverage of ${site.id} points to ${v.question}, which is not in questions.md with a review item`);
     } else if (v.kind === 'gap') bad.push(`site ${site.id} is a gap: add the requirement it needs (then check it again), or move it to questions.md as "question Q<n>"`);
-    else if (v.kind === 'no-behavior') { if (PLACEHOLDER.test(row.evidence.replace(/<!--[\s\S]*?-->/g, '').trim())) bad.push(`coverage of ${site.id} is "no behavior" with no evidence; say why in the Evidence cell`); }
+    else if (v.kind === 'no-behavior') { if (noEvidence(row.evidence)) bad.push(`coverage of ${site.id} is "no behavior" with no evidence; say why in the Evidence cell`); }
     else bad.push(`coverage of ${site.id} is "${row.verdict.trim() || 'blank'}"; write only covered R<n>/S<n>, no behavior, other capability <path>, question Q<n> or gap, and put reasons in the Evidence cell`);
   }
   capped(problems, bad, (p) => p);
@@ -1071,9 +1090,10 @@ export function writeParts(root, change, per = 40) {
   const dir = path.join(root, 'openspec/changes', change);
   if (!fs.existsSync(dir)) return { ok: false, problems: [`change not found: ${change}`] };
   if (!fs.existsSync(path.join(dir, 'source-map.md'))) return { ok: false, problems: ['source-map.md is missing: the sites come from the files it lists'] };
-  const files = changeFiles(root, dir);
+  const { files, unscanned, carried } = sourceMapFiles(root, dir);
   const sites = files.flatMap((file) => scanFile(root, file));
-  if (files.length === 0) return { ok: false, change, sites: 0, files: 0, parts: [], problems: [NO_FILES] };
+  const warnings = unscanned.map(unscannedText);
+  if (files.length === 0 && !carried) return { ok: false, change, sites: 0, files: 0, parts: [], problems: [NO_FILES, ...warnings] };
   const out = path.join(root, 'openspec/spec-relay/work', change, 'sites');
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
@@ -1085,7 +1105,8 @@ export function writeParts(root, change, per = 40) {
     fs.writeFileSync(path.join(out, name), `# Sites ${k * per + 1}-${k * per + chunk.length} of ${sites.length} (${change})\n\n| Site | Lines | Markers |\n|---|---|---|\n${rows.join('\n')}\n`);
     parts.push(`openspec/spec-relay/work/${change}/sites/${name}`);
   }
-  return { ok: true, change, sites: sites.length, files: files.length, parts, problems: [] };
+  // The parts are written either way; a row the scanner cannot read still fails, so the analyst fixes it now.
+  return { ok: warnings.length === 0, change, sites: sites.length, files: files.length, parts, problems: warnings };
 }
 
 export function main(argv) {
