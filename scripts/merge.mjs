@@ -55,13 +55,17 @@ export function tables(lines) {
 
 // Rows of a crosscheck table (first column `Item`) are keyed by R<n> / S<n>, so a
 // recheck that changes the evidence replaces the row; other tables by their
-// first cell read as a path (forward slashes, no leading ./).
+// first cell read as a path (forward slashes, no leading ./, any letter case).
 export function rowKey(line, byId) {
   const cell = visible(cellsOf(line)[0] ?? '');
   const id = byId ? plain(cell).match(ID) : null;
   if (id) return { key: `${id[1].toUpperCase()}${Number(id[2])}`, name: norm(id[3]) };
-  // Paths keep every character (my_module.php, [id].tsx, (shop)/page.tsx), as gate.mjs reads them.
-  return { key: cell.replace(/^`(.*)`$/, '$1').trim().replace(/\\/g, '/').replace(/^(\.\/)+/, ''), name: null };
+  // Paths keep every character (my_module.php, [id].tsx, (shop)/page.tsx), as gate.mjs reads them,
+  // but not their letter case (Windows): the path part of a site id (path:symbol) is compared
+  // without case, its symbol with case.
+  const site = cell.replace(/^`(.*)`$/, '$1').trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '');
+  const colon = site.indexOf(':');
+  return { key: colon < 0 ? site.toLowerCase() : `${site.slice(0, colon).toLowerCase()}${site.slice(colon)}`, name: null };
 }
 
 const isPlaceholder = (line) => cellsOf(line).every((c) => visible(c) === '');

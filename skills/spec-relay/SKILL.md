@@ -442,12 +442,17 @@ waves.
    Never give it the analysts' notes. Merge with `merge.mjs --into
    openspec/changes/extract-<capability>/coverage.md --parts
    openspec/spec-relay/work/extract-<capability>/coverage --clean`. For every
-   `gap`, have an analyst add the requirement it needs (and its trace), have
-   a checker crosscheck the new requirement and judge that site again (a part
-   file with a higher number, merged the same way), or move it to
+   `gap`, have an analyst add the requirement it needs (and its trace) at
+   the END of the spec, so the R numbers the ledger already uses stay the
+   same; have a checker crosscheck the new requirement and judge that site
+   again (give it the site ids from the sites file, and have it write a part
+   file with a higher number, merged the same way); or move it to
    questions.md and write `question Q<n>` as its verdict yourself. A changed
-   source map means running sites.mjs again: `gate.mjs review` scans the
-   files itself and fails on a site without a row.
+   source map or source file means running sites.mjs again and judging the
+   new sites: `gate.mjs review` scans the files itself, fails on a site
+   without a row, and names the rows of sites it no longer finds, which you
+   delete from coverage.md. When sites.mjs writes no group (the files hold no
+   code), coverage.md keeps its empty table.
 5. **Questions and review.** Write questions.md from the analysts' reported
    doubts and the rows moved to questions, then review.md (names by search,
    not by reading the spec).

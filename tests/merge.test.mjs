@@ -139,7 +139,9 @@ test('paths keep every character; a translated crosscheck header is still keyed 
 test('keys and order', () => {
   assert.deepEqual(rowKey('| r3 Name | x |', true), { key: 'R3', name: 'name' });
   assert.deepEqual(rowKey('| `.\\src\\a.cs` | x |', false), { key: 'src/a.cs', name: null });
-  assert.deepEqual(rowKey('| R3.php | x |', false), { key: 'R3.php', name: null });
+  assert.deepEqual(rowKey('| R3.php | x |', false), { key: 'r3.php', name: null });
+  // A site id: the path without letter case, the symbol with it.
+  assert.deepEqual(rowKey('| `Src\\A.php:Cart.Total` | x |', false), { key: 'src/a.php:Cart.Total', name: null });
   assert.deepEqual(['S2', 'src/a', 'R10', 'R2', 'S1'].sort(compareKeys), ['R2', 'R10', 'S1', 'S2', 'src/a']);
 });
 

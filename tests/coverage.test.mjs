@@ -135,7 +135,7 @@ test('source maps: the Source files table only, any letter case, rows marked out
 
 test('source map cells: a path with spaces, notes after the path, out-of-scope notes', () => {
   const dir = project({ sourceMap: [] });
-  write(dir, 'src/billing/My Project/AssemblyInfo.vb', 'x');
+  write(dir, 'src/billing/My Project/AssemblyInfo.vb', 'Imports System\n');
   write(dir, `${CHANGE}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/billing/My Project/AssemblyInfo.vb | info | full |\n| src/billing/invoice.php (main) | x | full |\n| **src/billing/print.php** | x | partial |\n| src/billing/tax.php | x | No (belongs to billing/tax) |\n');
   assert.deepEqual(problems(dir), []);
 });

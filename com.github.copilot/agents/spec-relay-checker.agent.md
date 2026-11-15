@@ -50,11 +50,21 @@ results, errors and messages, writes (database, files, mail, session),
 redirects, calls to other systems, rounding, defaults, the current time. The
 markers in the sites file point at lines that usually matter; account for
 each marker line, but do not stop at them.
+- A site id is `<path>:<symbol>`. `Class.Method#2` is the second member of
+  that name in the file (an overload), in file order. `(init)` and
+  `(static init)` are initializer blocks.
+- `(file)` is the code of the file that is in no other site: page code and
+  HTML outside functions, top-level statements, field values, code the
+  scanner did not recognize. Its Lines cell lists those lines (`2, 4-5`);
+  read exactly them. `binary` means a file that is not text (an Office or
+  database file): judge it from what the file is, or write `gap` when it
+  may hold logic (macros, queries). `minified: not scanned` means one-line
+  generated code: say whether it is the project's own code.
 - `covered R<n>, S<n>`: every effect of the site is in these requirements'
   scenarios or these screens (R and S numbered as the task gives them).
 - `no behavior`: nothing to notice. Say why in the evidence.
-- `other capability <path>`: the task names that capability as the owner of
-  this part of the file.
+- `other capability <path>`: the task names that capability as an owner of
+  this file, and this site is that capability's part.
 - `gap`: an effect no requirement or screen describes. Say what the code does,
   with path:line, so an analyst can write the requirement.
 - `unclear` is not a verdict here: when the code does not settle it (dead
@@ -65,7 +75,9 @@ scenario is a `gap`, even when its main path is covered.
 
 Write your verdict file as one Markdown table, `| Site | Verdict | Evidence |`,
 one row per site of the sites file in its order, with the site id copied
-exactly (backticks included). Return the file's path, the number of rows per
+exactly (backticks included). When the task names only some site ids (a
+check again after a requirement was added), judge those, with their lines
+from the sites file, and write rows for them only. Return the file's path, the number of rows per
 verdict, every `gap` row, and how many source files you read.
 
 A task that starts with `spec-relay environment trial` is the orchestrator's

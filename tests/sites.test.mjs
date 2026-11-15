@@ -87,7 +87,9 @@ SQL;
 
 test('PHP: functions, methods, class constants, and the page code outside them; heredoc and inline HTML', () => {
   const sites = scanText(PHP, 'web/invoice.php');
-  assert.deepEqual(ids(sites), ['(file) 1-18', 'total 6-6', 'Invoice.RATE 8-8', 'Invoice.save 9-12']);
+  assert.deepEqual(ids(sites), ['(file) 1-17', 'total 6-6', 'Invoice.RATE 8-8', 'Invoice.save 9-12']);
+  // (file) holds the page code and the HTML outside functions, not the functions.
+  assert.deepEqual(sites[0].lines, [1, 4, 5, 16, 17]);
   assert.equal(marks(sites, '(file)'), 'input 4; db-write 5; db-read 5; redirect 17');
   assert.equal(marks(sites, 'Invoice.save'), 'db-write 10,12');
   // A class file with only namespace, use and require lines has no file site.
@@ -106,7 +108,8 @@ test('VB.NET: Sub, Function and Property blocks; auto-properties and comments do
 test('JavaScript: functions, object and class methods, arrows, and the code outside them; regex and template literals', () => {
   const js = "var re = /[{]/g;\nfunction check(f) { if (!f.value) { alert('x'); return false; } return true; }\n$(function () { $('#a').click(function () { save(); }); });\nvar obj = { go: function () { location.href = '/a'; } };\nconst arrow = (x) => { return x / 2; };\nclass K { m(a) { return `${a}}`; } }\n";
   const sites = scanText(js, 'site.js');
-  assert.deepEqual(ids(sites), ['(file) 1-7', 'check 2-2', 'go 4-4', 'arrow 5-5', 'K.m 6-6']);
+  assert.deepEqual(ids(sites), ['(file) 1-3', 'check 2-2', 'go 4-4', 'arrow 5-5', 'K.m 6-6']);
+  assert.deepEqual(sites[0].lines, [1, 3]);
   assert.equal(marks(sites, 'go'), 'redirect 4');
 });
 
@@ -115,7 +118,7 @@ test('SQL: procedures and functions up to GO; other files are one site; minified
   const sites = scanText(sql, 'db/procs.sql');
   assert.deepEqual(ids(sites), ['dbo.usp_Save 1-4', 'dbo.fn_Tax 6-6']);
   assert.equal(marks(sites, 'dbo.fn_Tax'), 'rounding 6');
-  assert.deepEqual(ids(scanText('<asp:Button runat="server" OnClick="Save_Click" />\n', 'Invoice.aspx')), ['(file) 1-2']);
+  assert.deepEqual(ids(scanText('<asp:Button runat="server" OnClick="Save_Click" />\n', 'Invoice.aspx')), ['(file) 1-1']);
   assert.deepEqual(scanText('\n\n', 'empty.config'), []);
   const minified = scanText(`function a(){${'x();'.repeat(2000)}}`, 'lib.min.js');
   assert.deepEqual(ids(minified), ['(file) 1-1']);
@@ -177,12 +180,12 @@ test('the extract gate needs one valid ledger row per site', () => {
   const ledger = (rows) => write(dir, `${C}/coverage.md`, `| Site | Verdict | Evidence |\n|---|---|---|\n${rows}`);
   const problems = () => checkReview(dir, 'extract-billing-invoice').problems;
 
-  ledger('| `src/invoice.php:total` | covered R1 | 2 |\n| `src/invoice.php:save` | question Q1 | 3 |\n| src\\invoice.php:LABEL | no behavior | constant text |\n');
+  ledger('| `src/invoice.php:total` | covered R1 | 2 |\n| `src/invoice.php:save` | question Q1 | 3 |\n| SRC\\invoice.php:label | no behavior | constant text |\n');
   assert.deepEqual(problems(), []);
   ledger('| `src/invoice.php:total` | covered R1 | 2 |\n| `src/invoice.php:save` | gap | writes an invoice row |\n| `src/invoice.php:old` | no behavior | x |\n');
   assert.deepEqual(problems(), [
     'site has no row in coverage.md: src/invoice.php:label',
-    'coverage.md has a row for a site the scanner does not find: `src/invoice.php:old` (a mistyped id, or a file no longer in source-map.md)',
+    'coverage.md has a row for a site the scanner does not find: `src/invoice.php:old` (a mistyped id, a renamed member, or a file no longer in source-map.md; delete the row)',
     'site src/invoice.php:save is a gap: add the requirement it needs (then check it again), or move it to questions.md as "question Q<n>"',
   ]);
   ledger('| `src/invoice.php:total` | covered R2, S1 | 2 |\n| `src/invoice.php:save` | other capability billing/invoice | x |\n| `src/invoice.php:label` | other capability shop/cart | x |\n| `src/invoice.php:label` | question Q7 | x |\n');
@@ -196,6 +199,7 @@ test('the extract gate needs one valid ledger row per site', () => {
   ledger('| `src/invoice.php:total` | confirmed | 2 |\n| `src/invoice.php:save` | other capability billing/tax | x |\n| `src/invoice.php:label` | | x |\n');
   assert.deepEqual(problems(), [
     'coverage of src/invoice.php:total is "confirmed"; write covered R<n>/S<n>, no behavior, other capability <path>, question Q<n> or gap',
+    'coverage of src/invoice.php:save names billing/tax, but the plan does not give src/invoice.php to that capability (list the file under it too, or judge the site here)',
     'coverage of src/invoice.php:label is "blank"; write covered R<n>/S<n>, no behavior, other capability <path>, question Q<n> or gap',
   ]);
   // The review page shows the counts first, the questions and the "no behavior" sites that hold markers.
@@ -223,4 +227,207 @@ test('merge.mjs merges coverage parts by site, a later part winning', () => {
   const text = fs.readFileSync(path.join(dir, C, 'coverage.md'), 'utf8');
   assert.match(text, /\| `src\/a.php:b` \| covered R2 \| 3, after R2 was added \|/);
   assert.equal((text.match(/src\/a.php:/g) ?? []).length, 3);
+});
+
+// Every line with BEHAVIOR in it must be in a site: a member's lines or (file)'s.
+function assertNothingLost(text, file) {
+  const sites = scanText(text, file);
+  const inSite = new Set(sites.flatMap((s) => s.lines ?? Array.from({ length: s.to - s.from + 1 }, (_, k) => s.from + k)));
+  const lost = text.split('\n').map((line, k) => [k + 1, line]).filter(([n, line]) => line.includes('BEHAVIOR') && !inSite.has(n));
+  assert.deepEqual(lost, [], `${file}: lines in no site`);
+  return sites;
+}
+
+test('C#: generic return types, constraints, contextual names, auto-properties, #if, raw strings, lambda fields', () => {
+  const cs = `using System;
+[assembly: AssemblyTitle("x")]
+namespace N;
+[Route("api/[controller]")]
+public class Repo<T> : Base where T : class, new()
+{
+    private static int counter = BEHAVIOR();
+    public int Id { get; set; }
+    public string Name { get; private set; } = BEHAVIOR("x");
+    public List<int> Get(int id) { return BEHAVIOR(id); }
+    public Dictionary<string, List<int>> Add(int a) { BEHAVIOR(); return null; }
+    public void Remove<TKey>(TKey k) where TKey : struct, new() { BEHAVIOR(); }
+    public string? Find(string key) { return BEHAVIOR(key); }
+    public static implicit operator int(Repo<T> r) => BEHAVIOR(r);
+    Task<int> Load(int quantity = 1);
+    private Func<int, int> twice = x => BEHAVIOR(x * 2);
+    private Action<int> log = x => {
+        BEHAVIOR(x);
+    };
+    private readonly object sync = new object();
+#if DEBUG
+    public void Trace() {
+        BEHAVIOR("debug");
+#else
+    public void Trace() { BEHAVIOR("release");
+#endif
+    }
+    public string Json() => """
+        { "open": "{" }
+        """;
+    int Count => BEHAVIOR();
+}
+var app = BEHAVIOR();
+`;
+  const sites = assertNothingLost(cs, 'Repo.cs');
+  assert.deepEqual(sites.map((s) => s.symbol), ['(file)', 'Repo.Get', 'Repo.Add', 'Repo.Remove', 'Repo.Find', 'Repo.operator int', 'Repo.twice', 'Repo.log', 'Repo.Trace', 'Repo.Json', 'Repo.Count']);
+  // (file): the field values and the top-level statement. The #else branch is in Trace's lines.
+  assert.deepEqual(sites[0].lines, [7, 9, 20, 33]);
+  assert.deepEqual(ids(sites).find((s) => s.startsWith('Repo.Trace')), 'Repo.Trace 22-27');
+  // A branch of #if outside every member is in (file).
+  const branch = assertNothingLost('class A {\n#if X\n  void F() { }\n#else\n  void G() { BEHAVIOR(); }\n#endif\n}\n', 'A.cs');
+  assert.deepEqual(ids(branch), ['(file) 5-5', 'A.F 3-3']);
+});
+
+test('Java: enum methods, anonymous classes in fields, generics', () => {
+  const java = `package a;
+public enum Rate {
+  LOW(1), HIGH(2);
+  private final int v;
+  Rate(int v) { this.v = v; }
+  public <T extends Comparable<T>> List<T> sorted(List<T> xs) { return BEHAVIOR(xs); }
+}
+class Job {
+  private Runnable task = new Runnable() {
+    public void run() { BEHAVIOR(); }
+  };
+  static { BEHAVIOR(); }
+}
+`;
+  const sites = assertNothingLost(java, 'Rate.java');
+  assert.deepEqual(ids(sites), ['Rate.Rate 5-5', 'Rate.sorted 6-6', 'Job.task 9-11', 'Job.(static init) 12-12']);
+});
+
+test('VB.NET: multi-line lambdas, attributes on the class line, Shared ReadOnly, #If, field values', () => {
+  const vb = `Imports System
+<Serializable()> Public Class Order
+    Public Shared ReadOnly Rate As Decimal = 0.1D
+    Private count As Integer = BEHAVIOR()
+    Private name As String
+    Public Sub Save()
+        Dim items = list.Where(Function(x)
+                                   Return BEHAVIOR(x)
+                               End Function)
+        AddHandler b.Click, Sub(s, e)
+                                BEHAVIOR()
+                            End Sub
+        BEHAVIOR()
+    End Sub
+#If DEBUG Then
+    Public Sub Dump()
+    End Sub
+#Else
+    Public Sub Dump()
+        BEHAVIOR()
+    End Sub
+#End If
+End Class
+`;
+  const sites = assertNothingLost(vb, 'Order.vb');
+  assert.deepEqual(ids(sites), ['(file) 4-21', 'Order.Rate 3-3', 'Order.Save 6-14', 'Order.Dump 16-17']);
+  assert.deepEqual(sites[0].lines, [4, 19, 20, 21]);
+});
+
+test('SQL outside procedures, TypeScript classes, PHP function_exists and group use', () => {
+  const sql = 'SET ANSI_NULLS ON\nGO\nINSERT INTO settings VALUES (1) -- BEHAVIOR\nGO\nCREATE PROCEDURE p AS\nBEGIN\n  SELECT 1\nEND\nGO\nUPDATE x SET a = 1 -- BEHAVIOR\n';
+  const sqlSites = assertNothingLost(sql, 'seed.sql');
+  assert.deepEqual(ids(sqlSites), ['(file) 3-10', 'p 5-8']);
+  assert.deepEqual(sqlSites[0].lines, [3, 10]);
+  assert.equal(markerText(sqlSites[0].markers), 'db-write 3,10');
+
+  const ts = `import {
+  Injectable,
+} from '@angular/core';
+export type Id = { value: string };
+@Injectable()
+export class OrderService {
+  private readonly cache: Map<string, number>;
+  constructor(private http: HttpClient) {}
+  async load(id: string): Promise<Order> { return BEHAVIOR(id); }
+  get total(): number { return BEHAVIOR(); }
+  get(key: string) { return BEHAVIOR(key); }
+  *ids(): Generator<number> { yield BEHAVIOR(); }
+  handle = (e: Event): void => { BEHAVIOR(e); };
+  twice = (x: number) => BEHAVIOR(x);
+  limit = BEHAVIOR();
+}
+export const fmt = (n: number): string => BEHAVIOR(n);
+`;
+  const tsSites = assertNothingLost(ts, 'order.service.ts');
+  assert.deepEqual(tsSites.map((s) => s.symbol), ['(file)', 'OrderService.constructor', 'OrderService.load', 'OrderService.total', 'OrderService.get', 'OrderService.ids', 'OrderService.handle', 'OrderService.twice', 'fmt']);
+  assert.deepEqual(tsSites[0].lines, [15]);
+
+  const php = "<?php\nuse App\\{A, B};\nif (!function_exists('money')) {\n  function money($x) { return BEHAVIOR($x); }\n}\nclass Cart {\n  public $items;\n  public $rate = BEHAVIOR;\n  function add($x) { BEHAVIOR(); }\n}\n";
+  const phpSites = assertNothingLost(php, 'cart.php');
+  assert.deepEqual(ids(phpSites), ['(file) 3-8', 'money 4-4', 'Cart.add 9-9']);
+  assert.deepEqual(phpSites[0].lines, [3, 8]);
+});
+
+test('UTF-16 without a byte order mark is read; other binary content is one (file) site', () => {
+  const dir = tempDir();
+  fs.writeFileSync(path.join(dir, 'A.cs'), Buffer.from('class A { void B() { } }\n', 'utf16le'));
+  assert.deepEqual(ids(scanFile(dir, 'A.cs')), ['A.B 1-1']);
+  fs.writeFileSync(path.join(dir, 'Report.frx'), Buffer.from([1, 0, 0, 0, 0x41, 0x42, 0, 0, 0xff, 0x10, 0x20]));
+  const binary = scanFile(dir, 'Report.frx');
+  assert.equal(binary.length, 1);
+  assert.equal(binary[0].binary, true);
+  assert.equal(binary[0].id, 'Report.frx:(file)');
+});
+
+test('verdicts with notes and ranges', () => {
+  assert.deepEqual(parseVerdict('covered R1-R3, S2'), { kind: 'covered', refs: ['R1', 'R2', 'R3', 'S2'] });
+  assert.deepEqual(parseVerdict('covered R2 (main path)'), { kind: 'covered', refs: ['R2'] });
+  assert.equal(parseVerdict('covered R3-S4').kind, 'invalid');
+  assert.deepEqual(parseVerdict('question: Q01'), { kind: 'question', question: 'Q1' });
+  assert.deepEqual(parseVerdict('question Q2 (dead code?)'), { kind: 'question', question: 'Q2' });
+  assert.equal(parseVerdict('no behavior (a getter)').kind, 'no-behavior');
+  assert.equal(parseVerdict('no behavior: logging only').kind, 'no-behavior');
+  assert.equal(parseVerdict('gap - writes a row').kind, 'gap');
+  assert.equal(parseVerdict('no behaviorx').kind, 'invalid');
+});
+
+test('the ledger: symbols keep their letter case, other capability must own the file, a source map without files fails', () => {
+  const dir = tempDir();
+  const C = 'openspec/changes/extract-billing-invoice';
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only): src\n');
+  write(dir, 'src/Invoice.cs', 'class Invoice {\n  int Total() { return 1; }\n  int total(int a) { return a; }\n}\n');
+  write(dir, 'src/shared.php', '<?php\nfunction tax() { return 1; }\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/inventory.md', '| Path | Context |\n|---|---|\n| src/ | billing |\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md', '1. `billing/invoice`\n   - `src/`\n2. `billing/tax`\n   - `src/shared.php`\n');
+  write(dir, `${C}/.openspec.yaml`, 'schema: spec-relay-extract\n');
+  write(dir, `${C}/specs/billing/invoice/spec.md`, '## Purpose\n\nInvoices.\n\n## ADDED Requirements\n\n### Requirement: Total\nThe system SHALL add.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n');
+  write(dir, `${C}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/Invoice.cs | all | full |\n| src/shared.php | tax | full |\n');
+  write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Total | src/Invoice.cs:Invoice.Total:2 | none |\n');
+  write(dir, `${C}/screens.md`, 'None\n');
+  write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Total | confirmed | x |\n');
+  write(dir, `${C}/questions.md`, 'None\n');
+  write(dir, `${C}/review.md`, 'Reviewer: Uma\n- [x] R1 Total\n');
+  const ledger = (rows) => write(dir, `${C}/coverage.md`, `| Site | Verdict | Evidence |\n|---|---|---|\n${rows}`);
+  const problems = () => checkReview(dir, 'extract-billing-invoice').problems;
+  ledger('| `src/invoice.cs:Invoice.Total` | covered R1 | 2 |\n| `SRC/Invoice.cs:Invoice.total` | no behavior | unused |\n| `src/shared.php:tax` | other capability billing/tax | listed there |\n');
+  assert.deepEqual(problems(), []);
+  // Invoice.total and Invoice.Total are two sites; one row does not answer both.
+  ledger('| `src/invoice.cs:Invoice.Total` | covered R1 | 2 |\n| `src/shared.php:tax` | other capability billing/tax | x |\n');
+  assert.deepEqual(problems(), ['site has no row in coverage.md: src/Invoice.cs:Invoice.total']);
+  write(dir, `${C}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/Invoice.cs | all | No (moved) |\n| src/shared.php | tax | out |\n');
+  assert.ok(problems().includes('source-map.md names no kept source file, so the omission check has nothing to scan: check its Source files table'), problems().join('\n'));
+});
+
+test('sites.mjs as a program: exit codes and the residual lines of (file)', () => {
+  const dir = tempDir();
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only): src\n');
+  write(dir, 'src/page.php', '<?php\n$a = 1;\nfunction f() { return 1; }\n$b = 2;\n$c = 3;\n');
+  write(dir, 'openspec/changes/extract-x/source-map.md', '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/ | all | full |\n');
+  const sites = (args) => spawnSync(process.execPath, [path.join(KIT, 'scripts/sites.mjs'), ...args], { encoding: 'utf8' });
+  const ok = sites(['--change', 'extract-x', '--root', dir]);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(JSON.parse(ok.stdout).sites, 2);
+  assert.match(fs.readFileSync(path.join(dir, 'openspec/spec-relay/work/extract-x/sites/01.md'), 'utf8'), /\| `src\/page.php:\(file\)` \| 2, 4-5 \| - \|/);
+  assert.equal(sites(['--change', 'extract-none', '--root', dir]).status, 1);
+  assert.equal(sites(['--change']).status, 2);
+  assert.equal(sites(['--change', 'extract-x', '--root', path.join(dir, 'src')]).status, 2);
 });
