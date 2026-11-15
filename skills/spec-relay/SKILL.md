@@ -68,7 +68,8 @@ need the reasoning behind a step.
 - **Port change**: `openspec/changes/port-<capability>` (schema
   `spec-relay-port`). Implements the baseline spec (step 5).
 - **Amend change**: `openspec/changes/amend-<capability>` (schema
-  `spec-relay-amend`). Corrects a baseline spec that misread the source code.
+  `spec-relay-amend`). Corrects a baseline spec that misread or left out what
+  the source code does.
 - **Baseline spec**: `openspec/specs/<capability>/spec.md`, created when a
   reviewed extract change is archived.
 - **Database definitions**: `openspec/spec-relay/db/<database>/`, the
@@ -380,13 +381,28 @@ the domain, not the folders.
    `openspec/changes/archive/` and Windows limits paths to 260 characters.
 3. Write review.md, validate (`node "<kit>/scripts/openspec.mjs" validate survey --strict`), then run
    the review (above). `gate.mjs review` also fails while a source file is
-   missing from the inventory. While the person reviews, ask the questions the
+   missing from the inventory, or a file that is not `excluded` belongs to no
+   capability (the indented paths under each capability in capabilities.md).
+   Tell the person which files are excluded and why: an excluded file is
+   never specified or ported, so that box is theirs. While the person reviews, ask the questions the
    target design needs (step 2) so that it can start right after the archive.
 4. After archiving, write the plan: copy capabilities.md's lists under a
    `## Capabilities` heading in `openspec/spec-relay/plan.md`, keeping the
-   `### <context>` headings. `status.mjs` counts only the top-level items that
-   start with a backticked capability path; put other notes, such as follow-up
-   work, under another `##` heading.
+   `### <context>` headings and the indented source paths under each
+   capability. `status.mjs` counts only the top-level items that start with a
+   backticked capability path; put other notes, such as follow-up work, under
+   another `##` heading. From now on the plan is where files belong (once it
+   lists any source path, the gates read only the plan's paths): when an
+   analyst reports that a file belongs to another capability, move its path
+   there (a file path under the other capability wins over a folder), tell
+   the person in one line, and run `node "<kit>/scripts/gate.mjs" coverage`.
+   If that capability's extract is already archived, its behavior reaches the
+   spec through an amendment of that capability whose change also holds a
+   source-map.md with the moved file (same table as the extract's).
+   It fails while a kept source file belongs to no capability, a listed path
+   has no file, or an analyzed capability's source map lacks one of its files,
+   and it lists the capabilities not analyzed yet. Run it also after the last
+   extract is archived.
 
 ## 2. Target design: decide how the new system is built
 
@@ -427,7 +443,8 @@ waves.
 1. **Create the change.** `node "<kit>/scripts/openspec.mjs" new change extract-<capability> --schema
    spec-relay-extract`. Use the capability path with `/` replaced by `-` as the
    change name.
-2. **Draft**: give each capability to one `spec-relay-analyst`: it writes
+2. **Draft**: give each capability to one `spec-relay-analyst`, with the
+   source paths the plan lists under it: it writes
    source-map.md, then `specs/<capability>/spec.md`, screens.md and trace.md
    in the change folder, following the artifacts of schema
    `spec-relay-extract` and the glossary of the archived survey
@@ -453,8 +470,10 @@ waves.
    doubts and the rows moved to questions, then review.md (names by search,
    not by reading the spec).
 5. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
-   analyst fix every error and warning, then check that every requirement has
-   a trace entry.
+   analyst fix every error and warning. `gate.mjs review` also checks the
+   coverage, so the person does not: source-map.md holds every file the plan
+   assigns to the capability, and every requirement has a trace row whose
+   paths exist.
 6. **Report** to the person: the number of requirements and screens, what the
    crosscheck found and fixed, the questions they must decide, the path of the
    review page, and that step 4 is theirs. Then stop and wait.
@@ -500,6 +519,18 @@ port.
 5. When the code and the baseline spec disagree, stop and ask the person. Never
    change the spec or the code's behavior to make the two agree on your own. If
    the spec misread the source code, propose an amendment (below).
+   The implementer also reports unspecified behavior: something the original
+   code does that the spec does not mention. Nothing ports it, so it would
+   vanish from the new system. Record each one at once as an unticked task
+   under `## Unspecified behavior` in the port's tasks.md (`- [ ] U<n>
+   <path:line>: <what it does>`), so `gate.mjs port-done` stops until it is
+   settled. Show each one to the person with its source line, and propose an
+   amendment that adds it (`## ADDED Requirements`) when the person agrees the
+   spec missed it. Tick the task when the person decides it is not behavior to
+   keep, or when the amendment is archived and the behavior is ported. Port
+   the tasks that do not depend on it meanwhile. When the behavior is in a file
+   the plan assigns to another capability, it belongs to that capability's
+   spec instead.
 6. When every task is done and verified, run `node "<kit>/scripts/gate.mjs"
    port-done --change port-<capability>`, report the results, and archive the
    port change after the person agrees: `node "<kit>/scripts/openspec.mjs" archive port-<capability>
@@ -507,8 +538,9 @@ port.
 
 ## Amend: correct a baseline spec
 
-Only when a baseline spec does not describe what the source code does (found
-by a port test, a crosscheck or a person). Changing the behavior itself, such as
+Only when a baseline spec does not describe what the source code does, or
+leaves out something it does (found by a port test, a crosscheck, an
+implementer's report of unspecified behavior or a person). Changing the behavior itself, such as
 fixing a bug, is never an amendment: it is follow-up work after the migration.
 
 1. `node "<kit>/scripts/openspec.mjs" new change amend-<capability> --schema spec-relay-amend` (add

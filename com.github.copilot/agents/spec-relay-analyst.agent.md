@@ -40,8 +40,10 @@ instructions), and the exact file paths you may write.
   symbols that go to each. Database definitions (`openspec/spec-relay/db/`,
   `.sql` files) are source files like the rest: for each object, the tables it
   writes and reads, and for a trigger, the table it fires on.
-- **Extract tasks**: describe what the code does today, including edge cases
-  and behavior that looks wrong. Never "fix" behavior in a spec; list doubts
+- **Extract tasks**: list in source-map.md every file the task assigns to
+  the capability; when one belongs to another capability, say so in your
+  report instead of leaving it out. Describe what the code does today,
+  including edge cases and behavior that looks wrong. Never "fix" behavior in a spec; list doubts
   in your report so the orchestrator can put them in questions.md. Keep specs
   language-neutral: no class, function or library names of the source
   language. What triggers, constraints, defaults and procedures do to the data

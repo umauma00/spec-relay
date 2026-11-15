@@ -105,7 +105,19 @@ artifacts:
         order: `platform` first, then contexts by dependency (upstream first).
       - Under each, top-level items in order, each starting with the
         backticked capability path: `` 1. `billing/invoice` 請求書の作成 ``.
-        Put its source folders or files in indented items below it.
+      - Below each capability, one indented item per source folder or file it
+        owns, as a backticked repository-relative path: `` - `src/billing/` ``.
+        A folder path ends in `/` and covers every file below it; a more
+        specific path under another capability wins, so a folder can go to one
+        capability and one file in it to another. List a file split by method
+        (a god class) under each capability that gets a part of it.
+      - Every file the inventory does not mark `excluded` must belong to a
+        capability: `gate.mjs review` lists each file that belongs to none,
+        and each listed path with no file on disk. A file in no capability
+        reaches no spec, and the new system loses what it does.
+        The database definitions under `openspec/spec-relay/db/` too: list
+        each object's file (or a folder of them) under the capability whose
+        tables it reads or writes, so its logic reaches that spec.
       - Each path segment is lowercase ASCII kebab-case, never a Windows device
         name (`con`, `prn`, `aux`, `nul`, `com1`...), short, and no two paths
         may become the same once `/` is replaced by `-`.
@@ -169,8 +181,10 @@ artifacts:
       - Under `## 2. Map`, one checkbox each for: the relationships, the owners
         of shared data, the glossary conflicts, the capability list and
         order, and the files marked carry.
-      - Under `## 3. Coverage`, one checkbox that every source file is in the
-        inventory (`gate.mjs review` also checks this).
+      - Under `## 3. Coverage`, one checkbox that every file marked `excluded`
+        may really be left out of the migration. The gate checks that every
+        other file is in the inventory and in a capability; what is excluded
+        is the person's decision.
       - Under `## 4. Databases`, one checkbox per database in database.md's
         table, `- [ ] D<n> <database>: definitions and the logic in it`, and
         `- [ ] D90 The missing definitions are understood`. Leave the heading

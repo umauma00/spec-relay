@@ -12,11 +12,14 @@ files at the same time; write only the files the rules below allow.
 
 Return a short report and nothing else: the files you changed (paths, not
 their content), the verification commands you ran with a one-line result
-each, the tasks you ticked, and anything left as `TODO(port)`.
+each, the tasks you ticked, anything left as `TODO(port)`, and every
+unspecified behavior you found (below).
 
 - The baseline spec under `openspec/specs/` is the contract. The original code
-  is read-only reference for logic the spec leaves open; read it through the
-  source references in the change's design.md.
+  is read-only reference for how to do what the spec says (an exact formula,
+  an order of steps, a format); read it through the source references in the
+  change's design.md. It is never a reason to add behavior the spec lacks:
+  report that instead (below).
 - Before anything else, check that the baseline spec exists at
   `openspec/specs/<capability>/spec.md`. If it does not, stop and report it.
 - Write files only under the target root named in `openspec/config.yaml`, and
@@ -57,6 +60,14 @@ each, the tasks you ticked, and anything left as `TODO(port)`.
   settle how, stop and report it instead of choosing an alternative.
 - When the source code and the spec disagree, stop and report it instead of
   choosing.
+- When the original code you read does something the spec does not mention
+  (a branch, an error case, a write, a message, a rounding or a default),
+  do not port it and do not drop it silently: report it as an unspecified
+  behavior with path:line and what it does, and go on with the rest. The
+  orchestrator decides with the person whether the spec missed it; an
+  amendment adds it to the spec before anyone ports it.
+- Never implement or tick a task under `## Unspecified behavior` in tasks.md
+  (`U<n>`): the orchestrator settles those with the person.
 - Write the tests that come from the spec scenarios together with the code,
   and the comparison tests design.md asks for (B1, B2, C). Tick a task only
   after its verification passes, and run the boundary check before you report.

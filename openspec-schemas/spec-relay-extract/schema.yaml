@@ -13,7 +13,12 @@ artifacts:
       Sections:
       - **Scope**: One or two sentences on what the capability does for its users.
       - **Source files**: Every file in scope, with its repository-relative path
-        and a one-line role. Mark files that are only partly in scope.
+        and a one-line role. Mark files that are only partly in scope. It must
+        hold every file `openspec/spec-relay/plan.md` assigns to this
+        capability (the indented items under it): `gate.mjs review` lists each
+        one that is missing, and each listed path with no file on disk. When an
+        assigned file belongs to another capability, report it instead of
+        leaving it out; the orchestrator moves it in the plan.
       - **Entry points**: Public functions, endpoints, commands, jobs or screens
         through which callers reach this capability (path and symbol).
       - **Dependencies**: Other capabilities, libraries, databases, files,
@@ -144,6 +149,9 @@ artifacts:
       Also record existing tests that exercise the requirement, if any.
       A requirement with no source location is an error: either find it or
       report it, so the orchestrator moves it into questions.md.
+      `gate.mjs review` fails while a requirement has no row (first column:
+      the requirement name, optionally after `R<n>`), a row names no
+      `path:symbol` or `path:lines`, or a path does not exist.
     requires:
       - specs
       - screens
@@ -221,8 +229,6 @@ artifacts:
         screens.md says None).
       - One checkbox per question: `- [ ] Q<n> <short title>: decision: ...`
         under `## 3. Questions`. Leave the decision blank.
-      - Under `## 4. Coverage`, one checkbox that the source map covers the
-        capability and one that every requirement has a trace entry.
 
       Do not tick any box. Only the reviewer decides; see the apply instruction.
     requires:
