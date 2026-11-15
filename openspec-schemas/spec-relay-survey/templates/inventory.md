@@ -1,5 +1,5 @@
 # Inventory
 
-| Path | Context | Notes |
-|---|---|---|
-| <!-- src/billing/ --> | <!-- billing --> | <!-- why, or other contexts and symbols for shared files --> |
+| Path | Context | Handling | Notes |
+|---|---|---|---|
+| <!-- src/billing/ --> | <!-- billing --> | <!-- port / carry; blank for excluded --> | <!-- why, or other contexts and symbols for shared files --> |

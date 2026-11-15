@@ -37,7 +37,7 @@ const PLAN = 'openspec/spec-relay/plan.md';
 // so an artifact added to a schema later is counted without touching this file.
 const DEFAULT_ARTIFACTS = {
   'spec-relay-survey': ['inventory.md', 'context-map.md', 'glossary.md', 'capabilities.md', 'review.md'],
-  'spec-relay-target': ['architecture.md', 'conventions.md', 'verification.md', 'review.md'],
+  'spec-relay-target': ['architecture.md', 'conventions.md', 'ui.md', 'verification.md', 'review.md'],
   'spec-relay-extract': ['source-map.md', 'specs/**/*.md', 'screens.md', 'trace.md', 'crosscheck.md', 'coverage.md', 'questions.md', 'review.md'],
   'spec-relay-amend': ['reason.md', 'specs/**/*.md', 'trace.md', 'crosscheck.md', 'impact.md', 'review.md'],
   'spec-relay-port': ['proposal.md', 'design.md', 'tasks.md'],
@@ -50,7 +50,7 @@ const changeKey = (capability) => capability.split('/').join('-');
 const WORDS = {
   en: {
     analyze: 'Analyze', review: 'Review', implement: 'Implement', capability: 'Capability', group: 'Group',
-    survey: 'Survey: map the bounded contexts', target: 'Target design: modules, conventions, verification',
+    survey: 'Survey: map the bounded contexts', target: 'Target design: modules, conventions, screens, verification',
     amending: (n, of) => `amendment under review ${n}/${of}`,
     amendedAfterPort: 'the spec was amended after the port; port it again',
     overall: (done, total, reviewed) => `Overall: ${done} of ${total} capabilities ported (${reviewed} with a reviewed spec)`,
@@ -71,7 +71,7 @@ const WORDS = {
   },
   ja: {
     analyze: '解析', review: 'レビュー', implement: '実装', capability: '機能', group: 'グループ',
-    survey: '調査: コンテキストの地図', target: '移行先の設計: モジュール・規約・比べ方',
+    survey: '調査: コンテキストの地図', target: '移行先の設計: モジュール・規約・画面・比べ方',
     amending: (n, of) => `仕様の修正をレビュー中 ${n}/${of}`,
     amendedAfterPort: '移行後に仕様が修正された・再実装が必要',
     overall: (done, total, reviewed) => `全体: ${total}機能のうち${done}機能が移行済み（仕様確定 ${reviewed}）`,

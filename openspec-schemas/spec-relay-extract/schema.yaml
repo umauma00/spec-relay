@@ -50,6 +50,10 @@ artifacts:
       - Do NOT fix behavior. If the code looks wrong, still specify what it
         does, and raise it as a question for questions.md (the orchestrator
         writes that file from the doubts you report).
+      - Behavior that runs on the screen itself is behavior too: client-side
+        validation, items enabled or hidden by other items, totals computed
+        in JavaScript or in form event handlers, confirmation dialogs. Write
+        it here and trace it to the script or handler.
 
       Format (`openspec validate --strict` checks most of it):
       - New capability: the first section is `## Purpose`, one or two
@@ -78,9 +82,24 @@ artifacts:
       One `### Screen: <name>` per screen, with:
       - **Entry**: URL, form or menu path, and the source file (path:symbol).
       - **Layout**: the regions from top to bottom and left to right.
+      - **Look**: where the look comes from, with paths: the template, layout
+        or master page, the stylesheets and theme, images and fonts. For a
+        desktop form, the form's size, font, colours and scaling
+        (AutoScaleMode, WPF styles and resources).
+      - **Scripts**: the client-side scripts this screen loads (path) and what
+        the user sees them do, or "none". The rules they enforce go into the
+        specs as behavior.
       - **Items**: table of label (exact text), kind (text box, select,
         button, label, grid column...), required, format and limits, default,
         and read-only or editable.
+      - **Look details**: a table with one row per item, so the new screen
+        can be built to look the same. Web: the element and the ids and
+        classes the stylesheets select on (the new markup must keep them for
+        carried stylesheets to apply). Desktop: the control name, position
+        (x, y), size (width, height), tab order, anchor or dock, and font or
+        colour when it differs from the form's, read from the designer file
+        (`*.Designer.cs`, `.resx`) or the XAML. Copy the numbers; do not
+        round them.
       - **Actions**: buttons, links and keys, and what each does.
       - **Messages**: every message, title and confirmation, word for word,
         with when it appears.
@@ -90,6 +109,14 @@ artifacts:
         "none". Never invent one.
       Copy labels and messages exactly from the source (templates, resource
       files, string literals), including full-width characters and spacing.
+      When the archived target design's ui.md gives this context the policy
+      `new`, Look details may be left out (write "policy new"); everything
+      else is still recorded. When the target design is not archived yet,
+      record everything.
+      ASP.NET WebForms renders server controls into HTML the source does not
+      show (generated ids such as `ctl00_Main_txtName`, tables from
+      GridView). Write what the control renders only when the source settles
+      it; otherwise write the control and mark it "rendered markup not read".
 
       If the capability has no screens (a batch job, a library), write
       `None` under the heading.
@@ -133,7 +160,10 @@ artifacts:
       The checker opens every trace reference and decides for each requirement
       and each screen:
       - `confirmed`: the source code does what the spec or screen says,
-        including every scenario's values.
+        including every scenario's values. For a screen this includes its
+        Look, Scripts and Look details: the paths exist, the ids and classes
+        are in the markup, and positions, sizes and tab order match the
+        designer file or XAML.
       - `mismatch`: the code does something else. Evidence: the line and what it
         really does.
       - `unclear`: the code does not settle it (configuration, data,

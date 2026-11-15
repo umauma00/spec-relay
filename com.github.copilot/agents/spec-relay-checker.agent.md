@@ -28,7 +28,11 @@ reference and decide:
   or the branch looks unreachable). Say what would settle it.
 
 Be strict: a scenario value you did not trace through the code is not
-confirmed.
+confirmed. A screen is confirmed only when its labels and messages, and the
+Look, Scripts and Look details it gives, match the source: the stylesheet and
+script paths exist, the ids and classes are in the markup, and positions,
+sizes and tab order match the designer file or XAML. A screen without Look
+details because it says "policy new" is not a mismatch for that.
 
 Write your verdict file in UTF-8 with your edit tool, as one Markdown table:
 `| Item | Verdict | Evidence |`, then one row per item in spec order and then
