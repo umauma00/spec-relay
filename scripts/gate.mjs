@@ -28,7 +28,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkSurveyCoverage, checkSourceMap, checkTrace, checkCoverage } from './coverage.mjs';
+import { checkSurveyCoverage, checkSourceMap, checkTrace, checkAmendSourceMap, checkCoverage } from './coverage.mjs';
 
 // Same shapes OpenSpec 2.0.0 (and 1.17.0) counts as tasks and requirements, so the gate never
 // sees fewer items than `openspec instructions apply` or `openspec archive` do.
@@ -242,6 +242,7 @@ function checkAmend(root, dir, boxes, problems) {
   }
   const kept = requirements.map((r) => r.name).filter((n) => !removed.has(n));
   checkTrace(root, dir, kept, problems);
+  checkAmendSourceMap(root, dir, kept, problems);
   checkCrosscheck(dir, kept, [], problems);
 }
 

@@ -365,7 +365,8 @@ the domain, not the folders.
    `### <context>` headings and the indented source paths under each
    capability. `status.mjs` counts only the top-level items that start with a
    backticked capability path; put other notes, such as follow-up work, under
-   another `##` heading. From now on the plan is where files belong: when an
+   another `##` heading. From now on the plan is where files belong (once it
+   lists any source path, the gates read only the plan's paths): when an
    analyst reports that a file belongs to another capability, move its path
    there (a file path under the other capability wins over a folder), tell
    the person in one line, and run `node "<kit>/scripts/gate.mjs" coverage`.

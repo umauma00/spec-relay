@@ -64,7 +64,7 @@ capability ごとの元ファイルは、capabilities.md（archive 後は plan.m
 | 解析の `gate.mjs review` | source-map.md に、plan がその capability に割り当てたファイルがすべてある。source-map と trace に書いたパスが存在する。すべての要件に trace の行がある |
 | `gate.mjs coverage` | plan 全体で上の2つ。調査のあとに増えたファイル。まだ解析していない capability の一覧 |
 
-解析担当が「このファイルは別の capability のもの」と報告したら、オーケストレーターが plan.md の行を移し、`gate.mjs coverage` で確かめます。移した先の capability の extract がすでに archive 済みなら、そのファイルの動作は修正（amend）で仕様に足し、その change に移したファイルを書いた source-map.md を置きます。plan に元ファイルを書いていない capability は、調査の capabilities.md の割り当てを使います。どちらにも書いていない capability は gate が止めます。ファイルの中の動作（分岐や例外など）の抜けは、この確認では分かりません。
+解析担当が「このファイルは別の capability のもの」と報告したら、オーケストレーターが plan.md の行を移し、`gate.mjs coverage` で確かめます。移した先の capability の extract がすでに archive 済みなら、そのファイルの動作は修正（amend）で仕様に足し、その change に移したファイルを書いた source-map.md を置きます。plan に capability があれば、その一覧が正です（名前の変更や統合は plan が勝ちます）。plan に元ファイルを1つも書いていない間は、capability ごとに調査の capabilities.md の割り当てを使い、1つでも書いたら plan の割り当てだけを使います。元ファイルのない capability は gate が止めます。ファイルの中の動作（分岐や例外など）の抜けは、この確認では分かりません。
 
 ### 工程 2：移行先の設計（target-design）の成果物
 

@@ -39,9 +39,24 @@ const indentOf = (s) => s.replace(/\t/g, '    ').length;
 // The path an item names: its first backticked token, else its first word when
 // that looks like a path (has a "/" or a file extension). A link keeps its text.
 export function itemPath(text) {
-  const t = text.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
-  const quoted = t.match(/`([^`]+)`/);
-  if (quoted) return repoPath(quoted[1]);
+  return itemPaths(text)[0] ?? '';
+}
+
+// Every path an item names: the backticked tokens that hold a "/" (a symbol
+// such as `formatMoney` beside a path is not one), else the first backticked
+// token, else the first word when it looks like a path.
+export function itemPaths(text) {
+  const t = text.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\*\*|__/g, '');
+  const quoted = [...t.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  if (quoted.length) {
+    const paths = quoted.filter((q) => q.includes('/'));
+    return (paths.length ? paths : quoted.slice(0, 1)).map(repoPath).filter(Boolean);
+  }
+  const bare = barePath(t);
+  return bare ? [bare] : [];
+}
+
+function barePath(t) {
   const bare = (t.trim().split(/\s+/)[0] ?? '').replace(/[,;:、。]+$/, '');
   if (/^n\/a$/i.test(bare) || !/^[^*<>"|?]+$/.test(bare) || !(/\//.test(bare) || /\.[A-Za-z0-9]{1,8}$/.test(bare))) return '';
   return repoPath(bare);
@@ -103,8 +118,7 @@ export function capabilitySources(text, onlyUnder = null) {
       continue;
     }
     if (!current) continue;
-    const listed = itemPath(item[2]);
-    if (listed) out.get(current).push(listed);
+    out.get(current).push(...itemPaths(item[2]));
   }
   return out;
 }
@@ -122,20 +136,28 @@ function asFolders(root, map) {
 
 const PLAN_SECTION = /^(?:\d+[.)]?\s*)?(?:capabilit(?:y|ies)\b|機能|ケイパビリティ)/i;
 
-// The assignment the checks use, per capability: the source paths the plan lists
-// under it, else (a plan copied without them, or a capability with none there)
-// the ones the archived survey's capabilities.md lists. `from` names where
-// each capability's paths came from, for messages.
+// The assignment the checks use. Once the plan lists capabilities, they are the
+// capabilities (a rename or a merge there wins). Their paths are the plan's when
+// the plan lists any path at all; a plan copied without paths takes each
+// capability's paths from the archived survey's capabilities.md. Without a plan,
+// the survey's list is the assignment. `from` names where each capability's
+// paths came from, for messages.
 export function assignment(root, problems = []) {
-  const planText = readIf(path.join(root, PLAN), problems);
-  const plan = capabilitySources(planText ?? '', PLAN_SECTION);
+  const plan = capabilitySources(readIf(path.join(root, PLAN), problems) ?? '', PLAN_SECTION);
   const survey = archivedChange(root, 'survey');
   const listed = capabilitySources((survey ? readIf(path.join(survey, 'capabilities.md'), problems) : null) ?? '');
+  const SURVEY = 'capabilities.md of the archived survey';
   const map = new Map();
   const from = new Map();
-  for (const [capability, paths] of listed) { map.set(capability, [...paths]); from.set(capability, 'capabilities.md of the archived survey'); }
-  for (const [capability, paths] of plan) {
-    if (paths.length || !map.has(capability)) { map.set(capability, [...paths]); from.set(capability, PLAN); }
+  if (plan.size === 0) {
+    for (const [capability, paths] of listed) { map.set(capability, [...paths]); from.set(capability, SURVEY); }
+  } else {
+    const planPaths = [...plan.values()].some((paths) => paths.length);
+    for (const [capability, paths] of plan) {
+      const own = planPaths ? paths : listed.get(capability) ?? [];
+      map.set(capability, [...own]);
+      from.set(capability, planPaths ? PLAN : SURVEY);
+    }
   }
   return { map: asFolders(root, map), from };
 }
@@ -194,12 +216,12 @@ export function checkSurveyCoverage(root, dir, inventory, problems) {
 }
 
 const SOURCE_FILES = /^##\s+(?:\d+[.)]?\s*)?(?:source\s+files\b|ソースファイル|元ファイル|対象ファイル|ファイル)/i;
-const OUT_OF_SCOPE = /^(no|none|out|out of scope|excluded|範囲外|対象外|なし)$/i;
+const OUT_OF_SCOPE = /^(no\b|none\b|out\b|excluded\b|範囲外|対象外|なし)/i;
 
 // The paths in the first column of the source map's "## Source files" table
 // (every table when there is no such heading), so a dependency table is never
 // read as files. A row whose "In scope" cell says it is out of scope does not count.
-export function sourceMapPaths(text) {
+export function sourceMapPaths(text, root = null) {
   const all = stripComments(text ?? '').split(/\r?\n/);
   const start = all.findIndex((line) => SOURCE_FILES.test(line.trim()));
   let section = all;
@@ -209,7 +231,14 @@ export function sourceMapPaths(text) {
   }
   return tableRows(section.join('\n'))
     .filter(([, , scope = '']) => !OUT_OF_SCOPE.test(plain(scope)))
-    .map(([p = '']) => itemPath(p) || repoPath(p)).filter((p) => p && !/^path$/i.test(p));
+    .map(([p = '']) => {
+      // A plain cell is the path as written (`My Project/AssemblyInfo.vb` has a space);
+      // a cell with marks or a note after the path gives its path.
+      const whole = repoPath(p.replace(/\*\*|__/g, ''));
+      if (root && whole && fs.existsSync(path.join(root, whole))) return whole;
+      if (!/[`[*_]/.test(p) && !/\s\(|\s[-–—]\s/.test(p)) return whole;
+      return itemPath(p) || whole;
+    }).filter((p) => p && !/^path$/i.test(p));
 }
 
 // Extract review: the source map exists, every path in it exists, and it holds
@@ -217,7 +246,7 @@ export function sourceMapPaths(text) {
 export function checkSourceMap(root, dir, capability, problems) {
   const text = readIf(path.join(dir, 'source-map.md'), problems);
   if (text === null) { problems.push('source-map.md is missing'); return; }
-  const listed = sourceMapPaths(text);
+  const listed = sourceMapPaths(text, root);
   if (listed.length === 0) { problems.push('source-map.md lists no source files ("| Path | Role | In scope |")'); return; }
   for (const p of listed) {
     if (p.split('/').includes('..') || !fs.existsSync(path.join(root, p))) problems.push(`source-map.md lists ${p}, which does not exist`);
@@ -266,6 +295,24 @@ export function checkTrace(root, dir, requirements, problems) {
   }
 }
 
+// Amend review: a source-map.md in an amendment (a file moved to the capability
+// after its extract was archived) lists existing files, and each of them is
+// cited by the trace of a requirement the amendment adds or modifies, so the
+// file is specified, not only listed.
+export function checkAmendSourceMap(root, dir, requirements, problems) {
+  const text = readIf(path.join(dir, 'source-map.md'), problems);
+  if (text === null) return;
+  const listed = sourceMapPaths(text, root);
+  const wanted = new Set(requirements.map(norm));
+  const cited = tableRows(readIf(path.join(dir, 'trace.md'), []) ?? '')
+    .filter(([name = '']) => wanted.has(withoutRequirementId(name)))
+    .flatMap(([, source = '']) => parseRefs(source).map((ref) => repoPath(ref.file)));
+  for (const p of listed) {
+    if (p.split('/').includes('..') || !fs.existsSync(path.join(root, p))) problems.push(`source-map.md lists ${p}, which does not exist`);
+    else if (!cited.some((file) => covers(p, file))) problems.push(`source-map.md lists ${p}, but no requirement of this amendment traces to it; specify what it does, or leave it out`);
+  }
+}
+
 // The newest extract change of a capability: an active one, else the archived one.
 export function extractChange(root, capability) {
   const key = `extract-${capability.split('/').join('-')}`;
@@ -293,7 +340,7 @@ export function capabilitySourceMap(root, capability, extract) {
       if (e.isDirectory() && m && baseName(m[1]) === key) add(path.join(changes, 'archive'), e.name);
     }
   } catch { /* none */ }
-  return dirs.flatMap((dir) => sourceMapPaths(readIf(path.join(dir, 'source-map.md'), []) ?? ''));
+  return dirs.flatMap((dir) => sourceMapPaths(readIf(path.join(dir, 'source-map.md'), []) ?? '', root));
 }
 
 // `gate.mjs coverage`: the whole plan. Every kept file has a capability, every

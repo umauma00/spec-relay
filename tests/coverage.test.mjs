@@ -38,7 +38,7 @@ const problems = (dir) => checkReview(dir, 'extract-billing-invoice').problems;
 test('capability sources: indented items under each capability, in the plan only under ## Capabilities', () => {
   const text = '### billing\n1. `billing/invoice` 請求書\n   - `src/billing/` and `src/shared/money.php`\n   - src/print/\n   - 印刷まわり\n   <!-- - `src/hidden/` -->\n2. `billing/tax`\n    1. `src/tax.php`\n### platform\n   - `src/orphan/`\n- `platform/db`\n';
   assert.deepEqual([...capabilitySources(text)], [
-    ['billing/invoice', ['src/billing/', 'src/print/']],
+    ['billing/invoice', ['src/billing/', 'src/shared/money.php', 'src/print/']],
     ['billing/tax', ['src/tax.php']],
     ['platform/db', []],
   ]);
@@ -132,6 +132,30 @@ test('source maps: the Source files table only, any letter case, rows marked out
   assert.match(problems(dir).join(), /not in source-map.md: src\/billing\/print.php/);
 });
 
+test('source map cells: a path with spaces, notes after the path, out-of-scope notes', () => {
+  const dir = project({ sourceMap: [] });
+  write(dir, 'src/billing/My Project/AssemblyInfo.vb', 'x');
+  write(dir, `${CHANGE}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/billing/My Project/AssemblyInfo.vb | info | full |\n| src/billing/invoice.php (main) | x | full |\n| **src/billing/print.php** | x | partial |\n| src/billing/tax.php | x | No (belongs to billing/tax) |\n');
+  assert.deepEqual(problems(dir), []);
+});
+
+test('an amendment\'s source map needs the trace of one of its requirements', () => {
+  const dir = project();
+  const A = 'openspec/changes/amend-billing-invoice';
+  write(dir, 'openspec/specs/billing/invoice/spec.md', SPEC);
+  write(dir, `${A}/.openspec.yaml`, 'schema: spec-relay-amend\n');
+  write(dir, `${A}/reason.md`, '# Reason\n\nRefunds were left out (src/billing/refund.php:2).\n');
+  write(dir, `${A}/specs/billing/invoice/spec.md`, '## ADDED Requirements\n\n### Requirement: Refund\nThe system SHALL refund.\n\n#### Scenario: r\n- **WHEN** x\n- **THEN** y\n');
+  write(dir, `${A}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Refund | confirmed | x |\n');
+  write(dir, `${A}/review.md`, 'Reviewer: Uma\n- [x] R1 Refund\n');
+  write(dir, 'src/billing/refund.php', '<?php\n');
+  write(dir, `${A}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/billing/refund.php | refunds | full |\n');
+  write(dir, `${A}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Refund | src/billing/invoice.php:2 | none |\n');
+  assert.deepEqual(checkReview(dir, 'amend-billing-invoice').problems, ['source-map.md lists src/billing/refund.php, but no requirement of this amendment traces to it; specify what it does, or leave it out']);
+  write(dir, `${A}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Refund | src/billing/refund.php:refund:2 | none |\n');
+  assert.deepEqual(checkReview(dir, 'amend-billing-invoice').problems, []);
+});
+
 test('trace rows: a symbol or lines, in a kept source file, several rows per requirement', () => {
   const dir = project();
   write(dir, 'ts/invoice.ts', 'x');
@@ -149,10 +173,18 @@ test('trace rows: a symbol or lines, in a kept source file, several rows per req
 test('a capability that owns no file fails the extract gate', () => {
   const dir = project({ capabilities: '### billing\n1. `billing/invoice` 請求書\n2. `billing/tax`\n   - `src/billing/`\n   - `src/common/`\n' });
   assert.deepEqual(problems(dir), ['openspec/spec-relay/plan.md assigns no source file to billing/invoice; list its folders or files in indented items under it']);
-  // The plan's paths for one capability do not erase the survey's for the others.
-  write(dir, 'openspec/spec-relay/plan.md', '# Plan\n\n## Capabilities\n\n1. `billing/invoice`\n   - `src/billing/invoice.php`\n2. `billing/tax`\n');
+  // A plan copied without paths takes each capability's paths from the survey.
+  write(dir, 'openspec/spec-relay/plan.md', '# Plan\n\n## Capabilities\n\n1. `billing/invoice`\n2. `billing/tax`\n');
+  assert.match(problems(dir).join(), /assigns no source file to billing\/invoice/);
+  // Once the plan lists a path, only the plan's paths count: billing/tax has none there.
+  write(dir, 'openspec/spec-relay/plan.md', '# Plan\n\n## Capabilities\n\n1. `billing/invoice`\n   - `src/billing/invoice.php`\n   - `src/billing/print.php`\n2. `billing/tax`\n');
   assert.deepEqual(problems(dir), []);
-  assert.deepEqual(checkCoverage(dir).problems, []);
+  assert.match(checkCoverage(dir).problems.join('\n'), /capability billing\/tax owns no source file/);
+  // The plan's capabilities win: a capability the plan renamed is not looked for.
+  write(dir, 'openspec/spec-relay/plan.md', '# Plan\n\n## Capabilities\n\n1. `billing/invoice`\n   - `src/`\n');
+  const renamed = checkCoverage(dir);
+  assert.deepEqual(renamed.capabilities, { analyzed: 1, pending: [] });
+  assert.deepEqual(renamed.problems.map((p) => p.split(': ').pop()), ['src/billing/tax.php', 'src/common/db.php']);
 });
 
 test('gate.mjs and render.mjs run as programs despite the import cycle', () => {

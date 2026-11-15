@@ -18,6 +18,7 @@ const PLAN = `# Plan
 
 ### 請求
 2. \`billing/invoice\` 請求書
+   - \`src/invoice.php\`
 3. \`billing/payment\` 入金
 
 ## Follow-up

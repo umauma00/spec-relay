@@ -56,6 +56,8 @@ unspecified behavior you found (below).
   behavior with path:line and what it does, and go on with the rest. The
   orchestrator decides with the person whether the spec missed it; an
   amendment adds it to the spec before anyone ports it.
+- Never implement or tick a task under `## Unspecified behavior` in tasks.md
+  (`U<n>`): the orchestrator settles those with the person.
 - Write the tests that come from the spec scenarios together with the code,
   and the comparison tests design.md asks for (B1, B2, C). Tick a task only
   after its verification passes, and run the boundary check before you report.
