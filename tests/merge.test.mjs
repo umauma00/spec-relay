@@ -20,14 +20,14 @@ function repo() {
 
 test('inventory parts merge into the template, sorted by path, and --clean removes them', () => {
   const dir = repo();
-  write(dir, 'openspec/spec-relay/work/survey/inventory-02.md', '| Path | Context | Notes |\n|---|---|---|\n| `src/web/` | platform | layout |\n');
-  write(dir, 'openspec/spec-relay/work/survey/inventory-01.md', '| Path | Context | Notes |\n|---|---|---|\n| src/billing/ | billing | |\n| src/billing/Tax.cs | tax | god class |\n');
+  write(dir, 'openspec/spec-relay/work/survey/inventory-02.md', '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| `src/web/` | platform | port | layout |\n');
+  write(dir, 'openspec/spec-relay/work/survey/inventory-01.md', '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/billing/ | billing | port | |\n| src/billing/Tax.cs | tax | port | god class |\n');
   write(dir, 'openspec/spec-relay/work/survey/evidence-01.md', '# Evidence\n\nNo table here.\n');
   const result = merge(dir, { into: 'openspec/changes/survey/inventory.md', parts: ['openspec/spec-relay/work/survey/inventory-01.md', 'openspec/spec-relay/work/survey/inventory-02.md'], clean: true });
   assert.equal(result.ok, true, result.problems.join('\n'));
   assert.equal(result.rows, 3);
   const text = read(dir, 'openspec/changes/survey/inventory.md');
-  assert.match(text, /^# Inventory\n\n\| Path \| Context \| Notes \|\n\|---\|---\|---\|\n\| src\/billing\/ \|/);
+  assert.match(text, /^# Inventory\n\n\| Path \| Context \| Handling \| Notes \|\n\|---\|---\|---\|---\|\n\| src\/billing\/ \|/);
   assert.ok(text.indexOf('src/billing/Tax.cs') < text.indexOf('`src/web/`'));
   assert.doesNotMatch(text, /<!--/, 'the template placeholder row is dropped');
   assert.equal(fs.existsSync(path.join(dir, 'openspec/spec-relay/work/survey/inventory-01.md')), false);
@@ -54,11 +54,11 @@ test('crosscheck rows upsert by R/S id; a later part wins and hand-made rows sta
 test('a bad part writes nothing', () => {
   const dir = repo();
   const into = 'openspec/changes/survey/inventory.md';
-  write(dir, 'openspec/spec-relay/work/survey/a.md', '| Path | Context | Notes |\n|---|---|---|\n| src/a | x | |\n');
-  write(dir, 'openspec/spec-relay/work/survey/b.md', '| Path | Context | Notes |\n|---|---|---|\n| src/b | x |\n');
+  write(dir, 'openspec/spec-relay/work/survey/a.md', '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/a | x | port | |\n');
+  write(dir, 'openspec/spec-relay/work/survey/b.md', '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/b | x |\n');
   const result = merge(dir, { into, parts: ['openspec/spec-relay/work/survey'] });
   assert.equal(result.ok, false);
-  assert.match(result.problems.join('\n'), /2 cells, the table has 3/);
+  assert.match(result.problems.join('\n'), /2 cells, the table has 4/);
   assert.equal(fs.existsSync(path.join(dir, into)), false);
 
   fs.writeFileSync(path.join(dir, 'openspec/spec-relay/work/survey/b.md'), Buffer.from('﻿| Path |\n', 'utf16le'));
@@ -68,7 +68,7 @@ test('a bad part writes nothing', () => {
 test('only change artifacts are written and only work-folder files are parts', () => {
   const dir = repo();
   const part = 'openspec/spec-relay/work/survey/a.md';
-  write(dir, part, '| Path | Context | Notes |\n|---|---|---|\n| src/a | x | |\n');
+  write(dir, part, '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/a | x | port | |\n');
   write(dir, 'src/a.md', '| Path |\n|---|\n| x |\n');
   const bad = (into, parts) => merge(dir, { into, parts, clean: true }).problems.join('\n');
   for (const into of ['src/out.md', 'openspec/config.yaml', 'openspec/specs/billing/invoice/spec.md', 'openspec/changes/survey/review.md', 'openspec/changes/archive/2026-01-01-survey/inventory.md', 'openspec/changes/survey/specs/x.md']) {
@@ -78,7 +78,7 @@ test('only change artifacts are written and only work-folder files are parts', (
   assert.equal(fs.existsSync(path.join(dir, 'openspec/changes/extract-billing-invioce')), false);
   fs.mkdirSync(path.join(dir, 'openspec/changes/survey/glossary.md'));
   assert.match(bad('openspec/changes/survey/glossary.md', [part]), /--into is a folder/);
-  write(dir, 'openspec/changes/survey/inventory.md', '# Inventory\n\n| Path | Context | Notes |\n|---|---|---|\n');
+  write(dir, 'openspec/changes/survey/inventory.md', '# Inventory\n\n| Path | Context | Handling | Notes |\n|---|---|---|---|\n');
   for (const parts of [['src/a.md'], ['openspec/changes/survey/inventory.md'], ['openspec/changes/survey'], ['openspec/spec-relay/work/../../changes/survey'], ['openspec/spec-relay/work']]) {
     assert.match(bad('openspec/changes/survey/inventory.md', parts), /--parts must be under openspec\/spec-relay\/work\//, parts[0]);
   }
@@ -87,7 +87,7 @@ test('only change artifacts are written and only work-folder files are parts', (
 
 test('inventory paths that look like R/S ids stay apart; every table of a part is read', () => {
   const dir = repo();
-  write(dir, 'openspec/spec-relay/work/survey/inv/1.md', '## src/s3\n\n| Path | Context | Notes |\n|---|---|---|\n| s3/upload.js | files | |\n| s3/download.js | files | |\n\n## top\n\n| Path | Context | Notes |\n|---|---|---|\n| S3.php | files | |\n| ./R10.sql | data | |\n| R10.sql | data | dup |\n');
+  write(dir, 'openspec/spec-relay/work/survey/inv/1.md', '## src/s3\n\n| Path | Context | Handling | Notes |\n|---|---|---|---|\n| s3/upload.js | files | port | |\n| s3/download.js | files | port | |\n\n## top\n\n| Path | Context | Handling | Notes |\n|---|---|---|---|\n| S3.php | files | port | |\n| ./R10.sql | data | port | |\n| R10.sql | data | port | dup |\n');
   const result = merge(dir, { into: 'openspec/changes/survey/inventory.md', parts: ['openspec/spec-relay/work/survey/inv'] });
   assert.equal(result.ok, true, result.problems.join('\n'));
   assert.deepEqual([result.rows, result.replaced], [4, 1]);
@@ -117,7 +117,7 @@ test('a part whose header differs is a problem; a target without a table gets on
   const dir = repo();
   const work = 'openspec/spec-relay/work/survey';
   write(dir, `${work}/x.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 a | confirmed | x |\n');
-  assert.match(merge(dir, { into: 'openspec/changes/survey/inventory.md', parts: [`${work}/x.md`] }).problems[0], /header \| Item \| Verdict \| Evidence \| differs from \| Path \| Context \| Notes \|/);
+  assert.match(merge(dir, { into: 'openspec/changes/survey/inventory.md', parts: [`${work}/x.md`] }).problems[0], /header \| Item \| Verdict \| Evidence \| differs from \| Path \| Context \| Handling \| Notes \|/);
   write(dir, 'openspec/changes/survey/glossary.md', 'Nothing yet');
   assert.equal(merge(dir, { into: 'openspec/changes/survey/glossary.md', parts: [`${work}/x.md`] }).ok, true);
   assert.match(read(dir, 'openspec/changes/survey/glossary.md'), /^Nothing yet\n\n\| Item \| Verdict \| Evidence \|\n/);
@@ -125,7 +125,7 @@ test('a part whose header differs is a problem; a target without a table gets on
 
 test('paths keep every character; a translated crosscheck header is still keyed by id', () => {
   const dir = repo();
-  write(dir, 'openspec/spec-relay/work/survey/p.md', '| Path | Context | Notes |\n|---|---|---|\n| src/a_b.cs | x | |\n| src/ab.cs | x | |\n| pages/[id].tsx | x | |\n| pages/id.tsx | x | |\n| app/(shop)/page.tsx | x | |\n| app/shop/page.tsx | x | |\n| `src/c.cs` | x | |\n| src/c.cs | x | dup |\n');
+  write(dir, 'openspec/spec-relay/work/survey/p.md', '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/a_b.cs | x | port | |\n| src/ab.cs | x | port | |\n| pages/[id].tsx | x | port | |\n| pages/id.tsx | x | port | |\n| app/(shop)/page.tsx | x | port | |\n| app/shop/page.tsx | x | port | |\n| `src/c.cs` | x | port | |\n| src/c.cs | x | port | dup |\n');
   const inv = merge(dir, { into: 'openspec/changes/survey/inventory.md', parts: ['openspec/spec-relay/work/survey/p.md'] });
   assert.deepEqual([inv.ok, inv.rows, inv.replaced], [true, 7, 1]);
 
@@ -145,7 +145,7 @@ test('keys and order', () => {
 
 test('command line usage and exit codes', () => {
   const dir = repo();
-  write(dir, 'openspec/spec-relay/work/p.md', '| Path | Context | Notes |\n|---|---|---|\n| src/a | x | |\n');
+  write(dir, 'openspec/spec-relay/work/p.md', '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/a | x | port | |\n');
   assert.equal(quiet(() => main(['--into', 'openspec/changes/survey/inventory.md'])), 2);
   assert.equal(quiet(() => main(['--into', 'openspec/changes/survey/inventory.md', '--parts', 'openspec/spec-relay/work/p.md', '--root', dir])), 0);
   assert.equal(quiet(() => main(['--into', 'openspec/changes/survey/inventory.md', '--parts', 'openspec/spec-relay/work/none.md', '--root', dir])), 1);
