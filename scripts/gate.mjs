@@ -123,6 +123,32 @@ export function tableRows(text) {
   return rows;
 }
 
+// Rows of every Markdown table, each with its table's header cells (lowercase,
+// plain), so a column can be found by name.
+export function headedRows(text) {
+  const rows = [];
+  const lines = unfencedLines(stripComments(text ?? ''));
+  const cells = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^\s*\|/.test(lines[i]) || !/^\s*\|?\s*:?-{2,}/.test(lines[i + 1] ?? '')) continue;
+    const header = cells(lines[i]).map((c) => plain(c).toLowerCase());
+    for (i += 2; i < lines.length && /^\s*\|/.test(lines[i]); i += 1) rows.push({ header, cells: cells(lines[i]) });
+  }
+  return rows;
+}
+
+// The lines under the `## <heading>` that matches, up to the next `## ` heading.
+export function section(text, heading) {
+  const out = [];
+  let inside = false;
+  for (const line of unfencedLines(text ?? '')) {
+    const h2 = line.match(/^##\s+(.*)$/);
+    if (h2) { inside = heading.test(plain(h2[1]).replace(/^\d+[.)]\s*/, '')); continue; }
+    if (inside) out.push(line);
+  }
+  return out.join('\n');
+}
+
 const withoutId = (s, letter) => norm(plain(s).replace(new RegExp(`^${letter}\\d+\\s*[.:)-]?\\s*`, 'i'), ''));
 
 function commonReview(dir, problems) {
@@ -301,6 +327,28 @@ export function sourceFiles(root) {
   return out.sort();
 }
 
+// The survey's inventory rows: path, context and handling. Handling is `port`
+// (the default, also when the cell or the column is missing) or `carry`: the
+// file goes to the new system unchanged (CSS, images, fonts, script libraries,
+// report templates), copied byte for byte by a port.
+export const HANDLINGS = ['port', 'carry'];
+export function inventoryRows(text) {
+  const cleanPath = (p) => relPath(p.trim().replace(/^`(.*)`$/, '$1').trim());
+  return headedRows(text).map(({ header, cells }) => {
+    const at = (name, fallback) => { const i = header.indexOf(name); return cells[i >= 0 ? i : fallback] ?? ''; };
+    const handling = header.includes('handling') ? plain(at('handling', -1)).toLowerCase() : '';
+    // Paths keep every character (my_module, Copy (1).php, [id].php); only code marks go.
+    return { path: cleanPath(at('path', 0)), context: plain(at('context', 1)).toLowerCase(), handling: PLACEHOLDER.test(handling) ? '' : handling };
+  }).filter((r) => r.path);
+}
+
+// The row that decides a file: its own row, else the longest folder row above it.
+export function inventoryRowFor(rows, file) {
+  return rows.find((r) => r.path === file)
+    ?? rows.filter((r) => r.path.endsWith('/') && file.startsWith(r.path)).sort((a, b) => b.path.length - a.path.length)[0]
+    ?? null;
+}
+
 function checkSurvey(root, dir, boxes, problems) {
   const map = readIf(path.join(dir, 'context-map.md'), problems);
   const contexts = contextIds(map);
@@ -309,9 +357,10 @@ function checkSurvey(root, dir, boxes, problems) {
     if (!boxes.some((b) => new RegExp(`^K\\d+\\s*[.:)-]?\\s*${id}(?![\\w-])`, 'i').test(b.plain))) problems.push(`context has no review item: ${id}`);
   }
   const known = new Set([...contexts, 'excluded']);
-  // Paths keep every character (my_module, Copy (1).php, [id].php); only code marks go.
-  const rows = tableRows(readIf(path.join(dir, 'inventory.md'), problems)).map(([p = '', context = '']) => ({ path: relPath(p.trim().replace(/^`(.*)`$/, '$1').trim()), context: plain(context).toLowerCase() })).filter((r) => r.path);
+  const rows = inventoryRows(readIf(path.join(dir, 'inventory.md'), problems));
   for (const row of rows.filter((r) => !known.has(r.context))) problems.push(`inventory row "${row.path}" names an unknown context "${row.context}"`);
+  for (const row of rows.filter((r) => r.handling && !HANDLINGS.includes(r.handling))) problems.push(`inventory row "${row.path}" has the handling "${row.handling}"; use port or carry`);
+  for (const row of rows.filter((r) => r.context === 'excluded' && r.handling === 'carry')) problems.push(`inventory row "${row.path}" is excluded and carry at once; a carried file belongs to the context whose module receives it`);
   const files = sourceFiles(root);
   if (files === null) {
     problems.push(`the source root "${configValue(root, 'Source root', '.')}" in openspec/config.yaml is not a folder inside the repository`);
@@ -397,12 +446,41 @@ function checkTarget(root, dir, boxes, problems) {
     const firsts = tableRows(readIf(path.join(dir, file), problems)).map(([first = '']) => plain(first).toLowerCase());
     for (const id of contexts.filter((c) => !firsts.includes(c))) problems.push(`${file} has no ${what} row for context ${id}`);
   }
-  // One review item per module (A<n>) and per context's verification levels (E<n>).
-  for (const [letter, what] of [['A', 'module'], ['E', 'verification levels']]) {
+  checkUi(survey, dir, contexts, problems);
+  // One review item per module (A<n>), per context's verification levels (E<n>)
+  // and per context's screens (U<n>).
+  for (const [letter, what] of [['A', 'module'], ['E', 'verification levels'], ['U', 'screen policy']]) {
     for (const id of contexts) {
       if (!boxes.some((b) => new RegExp(`^${letter}\\d+\\s*[.:)-]?\\s*\\W*${id}(?![\\w-])`, 'i').test(b.plain))) problems.push(`the ${what} of context ${id} has no review item (${letter}<n> ${id})`);
     }
   }
+}
+
+// How a context's screens look in the new system, decided once in ui.md:
+// `same` (the look too), `layout` (layout, wording, order and keys; drawn by the
+// new toolkit), `new` (a new look; items, wording and transitions stay) or
+// `none` (no screens).
+export const POLICIES = ['same', 'layout', 'new', 'none'];
+
+function checkUi(survey, dir, contexts, problems) {
+  const ui = readIf(path.join(dir, 'ui.md'), problems);
+  if (ui === null) { problems.push('ui.md is missing (a context without screens gets the policy none)'); return; }
+  const screens = headedRows(section(ui, /^screens$/i));
+  if (screens.length === 0) problems.push('ui.md has no table under "## Screens"');
+  const policyAt = screens[0]?.header.indexOf('policy') ?? -1;
+  if (screens.length && policyAt < 0) problems.push('the table under "## Screens" in ui.md has no Policy column');
+  const rows = screens.map(({ header, cells }) => ({
+    context: plain(cells[Math.max(header.indexOf('context'), 0)] ?? '').toLowerCase(),
+    policy: policyAt < 0 ? '' : plain(cells[header.indexOf('policy')] ?? '').toLowerCase(),
+  }));
+  for (const id of contexts.filter((c) => !rows.some((r) => r.context === c))) problems.push(`ui.md has no screens row for context ${id}`);
+  if (policyAt >= 0) {
+    for (const row of rows.filter((r) => !POLICIES.includes(r.policy))) problems.push(`ui.md gives context ${row.context || '(blank)'} the policy "${row.policy || 'blank'}"; use same, layout, new or none`);
+  }
+  // Every carry row of the inventory needs a place in the new system.
+  const carried = tableRows(section(ui, /^carried files$/i)).map(([source = '']) => relPath(source.trim().replace(/^`(.*)`$/, '$1').trim()));
+  const carry = inventoryRows(readIf(path.join(survey, 'inventory.md'), problems)).filter((r) => r.handling === 'carry');
+  for (const row of carry.filter((r) => !carried.includes(r.path))) problems.push(`ui.md has no "## Carried files" row for the inventory's carry row "${row.path}"`);
 }
 
 export function checkReview(root, change) {
@@ -538,7 +616,48 @@ export function checkPortDone(root, change) {
     if (now === null) problems.push(`no baseline spec for ${capability}`);
     else if (now !== hash.toLowerCase()) problems.push(`the baseline of ${capability} changed after this port started (an amendment was archived); update the port to it, then record the new hash`);
   }
+  checkCarried(root, readIf(path.join(dir, 'design.md'), problems) ?? '', problems);
   return { ok: problems.length === 0, problems };
+}
+
+// The same bytes; a text file may differ only in CRLF and LF line endings.
+function sameContent(a, b) {
+  if (a.equals(b)) return true;
+  if (a.includes(0) || b.includes(0)) return false;
+  return a.toString('latin1').replace(/\r\n/g, '\n') === b.toString('latin1').replace(/\r\n/g, '\n');
+}
+
+// Each row of design.md's "## Carried files" (source | target) must be a carry
+// row of the archived survey's inventory, and the target must hold the same
+// content. A folder row (ending in /) covers its carry files; a target ending
+// in / is a folder that receives the file under its own name.
+function checkCarried(root, design, problems) {
+  const clean = (p) => relPath(p.trim().replace(/^`(.*)`$/, '$1').trim());
+  const rows = tableRows(section(design, /^carried files$/i)).map(([source = '', target = '']) => ({ source: clean(source), target: clean(target) }))
+    .filter((r) => r.source && !/^(none|-)$/i.test(r.source));
+  if (rows.length === 0) return;
+  const survey = archivedChange(root, 'survey');
+  if (!survey) { problems.push('design.md lists carried files, but there is no archived survey whose inventory marks them carry'); return; }
+  const inventory = inventoryRows(readIf(path.join(survey, 'inventory.md'), problems));
+  const files = sourceFiles(root) ?? [];
+  const inside = (rel) => rel && !rel.split('/').includes('..') && !/^[a-z]:/i.test(rel);
+  const targetRoot = relPath(cleanValue(configValue(root, 'Target root', ''))).replace(/\/$/, '');
+  for (const { source, target } of rows) {
+    if (!inside(source) || !inside(target)) { problems.push(`carried file row "${source}" -> "${target}" leaves the repository`); continue; }
+    if (targetRoot && targetRoot !== '.' && !`${target}/`.startsWith(`${targetRoot}/`)) { problems.push(`carried file target ${target} is outside the target root ${targetRoot}`); continue; }
+    const folder = source.endsWith('/');
+    const listed = folder ? files.filter((f) => f.startsWith(source)) : [source];
+    const carried = listed.filter((f) => inventoryRowFor(inventory, f)?.handling === 'carry');
+    if (!folder && carried.length === 0) { problems.push(`carried file ${source} is not a carry row in the inventory; port it, or mark it carry in a new survey`); continue; }
+    if (carried.length === 0) { problems.push(`no file under ${source} is a carry file in the inventory`); continue; }
+    for (const file of carried) {
+      const dest = folder ? `${target.replace(/\/?$/, '/')}${file.slice(source.length)}` : target.endsWith('/') ? `${target}${path.posix.basename(file)}` : target;
+      let from; let to;
+      try { from = fs.readFileSync(path.join(root, file)); } catch { problems.push(`carried file ${file} cannot be read`); continue; }
+      try { to = fs.readFileSync(path.join(root, dest)); } catch { problems.push(`carried file ${file} is missing at ${dest}`); continue; }
+      if (!sameContent(from, to)) problems.push(`carried file ${dest} differs from ${file}; a carried file is copied unchanged (port it instead if it needs an edit)`);
+    }
+  }
 }
 
 // The person's language for `next`: --lang, else the artifact language in openspec/config.yaml.

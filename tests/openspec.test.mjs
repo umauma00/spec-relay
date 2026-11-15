@@ -112,8 +112,9 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   fill(dir, 'target-design', {
     'architecture.md': '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| calc | ts/calc |\n',
     'conventions.md': '# Conventions\n',
+    'ui.md': '# UI\n\n## Screens\n| Context | Screens | Source kind | Target | Policy | Why |\n|---|---|---|---|---|---|\n| platform | all | none | none | none | |\n| calc | all | none | none | none | |\n\n## Carried files\nNone\n',
     'verification.md': '| Context | A |\n|---|---|\n| platform | yes |\n| calc | yes |\n',
-    'review.md': 'Reviewer: Uma\n\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 calc\n- [x] E1 platform: levels\n- [x] E2 calc: levels\n',
+    'review.md': 'Reviewer: Uma\n\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 calc\n- [x] E1 platform: levels\n- [x] E2 calc: levels\n- [x] U1 platform: screens\n- [x] U2 calc: screens\n- [x] U90 shared look\n',
   });
   assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
   openspec(dir, 'archive', 'target-design', '--yes');

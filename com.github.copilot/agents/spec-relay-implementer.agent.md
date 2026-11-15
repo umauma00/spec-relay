@@ -20,7 +20,8 @@ each, the tasks you ticked, and anything left as `TODO(port)`.
 - Before anything else, check that the baseline spec exists at
   `openspec/specs/<capability>/spec.md`. If it does not, stop and report it.
 - Write files only under the target root named in `openspec/config.yaml`, and
-  only inside the module of this capability's context and its tests. Use other
+  only inside the module of this capability's context and its tests, plus the
+  carried files design.md lists. Use other
   modules only through their public API or events (the archived target
   design's architecture.md), and follow its conventions.md.
   Never edit the source root, `openspec/specs/`, `openspec/spec-relay/lessons.md`
@@ -36,7 +37,9 @@ each, the tasks you ticked, and anything left as `TODO(port)`.
   in design.md. Beyond that, even when it looks like an improvement, do not:
   - add a feature, screen, field, setting or API the spec does not have;
   - change a screen's layout, labels, messages, order or look beyond what
-    design.md's Screens section says, or make it "modern";
+    design.md's Screens section says for its policy, or make it "modern";
+  - edit a carried file: copy it byte for byte (a copy command, not your edit
+    tool, so the bytes stay the same), and report it if it would need a change;
   - add or tighten input checks, error handling or retries, or add logging,
     in a way that changes what a user or caller sees;
   - fix behavior that looks wrong in the spec or the source code (report it:

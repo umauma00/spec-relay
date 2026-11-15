@@ -343,6 +343,10 @@ the domain, not the folders.
      inventory.md to the context ids it chose. You read context-map.md: the
      review needs you to know it.
    - **Glossary and capabilities**: one wave of two analysts, one file each.
+   - **Carry**: the Handling column says `carry` for files the new system
+     uses unchanged (stylesheets, images, fonts, script libraries, report
+     templates) and `port` for everything else. Ask the analysts to propose
+     carry; the person confirms it in the review (M5).
    Legacy code rarely has clean
    boundaries: propose owners for shared tables, split god classes by method,
    put technical shared parts in `platform`, and give the evidence for each
@@ -365,18 +369,22 @@ the domain, not the folders.
 ## 2. Target design: decide how the new system is built
 
 1. `node "<kit>/scripts/openspec.mjs" new change target-design --schema spec-relay-target`.
-2. Write architecture, conventions and verification from their instructions.
+2. Write architecture, conventions, ui and verification from their instructions.
    The default architecture is a modular monolith in the manner of Spring
    Modulith: one module per context, public API and events only, one owner per
    table, an automated boundary check. Ask the person about anything the code
    cannot tell you: frameworks they prefer, whether the source program can
    still be run, and which verification levels each context needs (A scenario
    tests always; B1 logic comparison, B2 screen replay, C screenshots by
-   choice). Never write a password, token or connection string into a file;
-   sign-in for B2 and C comes from environment variables the person sets.
-   Write architecture.md first (yourself or one analyst), then give
-   conventions.md and verification.md to two analysts in one wave, with the
-   person's answers in each task.
+   choice). For the screens (ui.md), ask who uses them, whether manuals,
+   training or printed forms show them, and the target UI technology, then
+   propose a policy per context (`same`, `layout`, `new`, `none`; the
+   instruction says which fits which source); the person decides, and you
+   never pick `new` yourself. Never write a password, token or connection
+   string into a file; sign-in for B2 and C comes from environment variables
+   the person sets. Write architecture.md first (yourself or one analyst),
+   then give conventions.md, ui.md and verification.md to three analysts in
+   one wave, with the person's answers in each task.
 3. Write review.md, validate, and run the review (above). While the person
    reviews the target design, start analyzing (step 3) the capabilities in
    `nextToAnalyze`: an extract change needs the archived survey, not the target
@@ -444,7 +452,9 @@ port.
    `node "<kit>/scripts/gate.mjs" baseline --capability <capability>`. Follow
    the target design; copy the source references for each requirement from the
    archived extract change's `trace.md` (and any later amendment's) into
-   design.md.
+   design.md. In design.md's Screens section, give each screen its policy from
+   ui.md, and list under Carried files the carry files this port copies;
+   `gate.mjs port-done` compares each copy with its source.
 3. Show the person the design's structure, any additions to the conventions,
    the verification plan and open risks, and start implementing after they
    agree. Propose lessons from their corrections (see Lessons).
