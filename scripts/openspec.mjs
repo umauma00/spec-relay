@@ -1,20 +1,29 @@
+#!/usr/bin/env node
 // Finds and runs the OpenSpec CLI (and other command line tools) without a shell.
 //
-// On Windows, `npm install -g @fission-ai/openspec` puts an openspec.cmd shim on
-// PATH. Node cannot start a .cmd without a shell, and a shell brings three
-// problems: cmd.exe looks in the current directory (the repository being
-// migrated) before PATH, it cannot use a UNC path as the working directory, and
-// Node 24 warns about arguments passed with shell: true. So a shim npm wrote is
-// run as `node <package>/bin/openspec.js`, and the standalone openspec.exe is
-// run directly. Any other shim (pnpm, yarn, a wrapper) runs through cmd.exe with
-// arguments checked against a safe character set. findCommand and runCommand do
-// the same for other tools (git, the Copilot CLI, toolchains) for doctor.mjs.
+// spec-relay pins OpenSpec per repository: setup.mjs installs the version the
+// kit is tested with into openspec/spec-relay/tools/ with `npm ci`, from the
+// package.json and package-lock.json in the kit's templates/openspec-tools/.
+// Every OpenSpec call of the kit, and of the agent, goes through here as
+// `node <kit>/scripts/openspec.mjs <args>` and runs
+// `node <that folder>/node_modules/@fission-ai/openspec/bin/openspec.js`. A
+// global `openspec` on PATH is never used: it may be any version, or none.
+// Running the script with node also avoids Windows' openspec.cmd shim, which
+// needs a shell (cmd.exe looks in the current directory before PATH, cannot use
+// a UNC working directory, and Node 24 warns about shell: true).
+//
+// findCommand and runCommand find and run other tools (npm, git, the Copilot
+// CLI, toolchains) the same way for setup.mjs and doctor.mjs.
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 export const OPENSPEC_VERSION = '2.0.0';
-export const INSTALL_HINT = `npm install -g @fission-ai/openspec@${OPENSPEC_VERSION}`;
+// Where setup installs OpenSpec, relative to the repository being migrated.
+export const TOOLS_DIR = 'openspec/spec-relay/tools';
+const BIN = 'node_modules/@fission-ai/openspec/bin/openspec.js';
+const SETUP_HINT = 'run the kit\'s setup.mjs again (the orchestrator does it with the values in openspec/config.yaml); it installs OpenSpec into openspec/spec-relay/tools with npm ci';
 
 // Windows environment names are case-insensitive.
 function envValue(env, name) {
@@ -49,14 +58,21 @@ export function findCommand(name, { npmScript, extraDirs = [], platform = proces
   return null;
 }
 
-// Returns { command, prefixArgs, batch? } or null when the CLI is not found.
-export function findOpenspec({ platform = process.platform, env = process.env, exists = fs.existsSync } = {}) {
-  const appData = envValue(env, 'APPDATA');
-  return findCommand('openspec', {
-    npmScript: '@fission-ai/openspec/bin/openspec.js',
-    extraDirs: [envValue(env, 'npm_config_prefix'), appData && path.win32.join(appData, 'npm')],
-    platform, env, exists,
-  });
+// The OpenSpec pinned in `root` (the repository being migrated):
+// { launch, version } when installed, { launch: null, pinned, reason } when not.
+export function findOpenspec(root, { exists = fs.existsSync, readFile = (f) => fs.readFileSync(f, 'utf8') } = {}) {
+  const tools = path.join(root, TOOLS_DIR);
+  const pinned = exists(path.join(tools, 'package.json'));
+  const script = path.join(tools, ...BIN.split('/'));
+  if (!exists(script)) {
+    const reason = pinned
+      ? `OpenSpec is pinned in ${TOOLS_DIR} but not installed there (usual right after a clone): ${SETUP_HINT}.`
+      : `this repository has no OpenSpec of its own (${TOOLS_DIR}): ${SETUP_HINT}.`;
+    return { launch: null, pinned, reason };
+  }
+  let version = null;
+  try { version = JSON.parse(readFile(path.join(tools, 'node_modules/@fission-ai/openspec/package.json'))).version || null; } catch { /* unreadable */ }
+  return { launch: { command: process.execPath, prefixArgs: [script] }, pinned, version };
 }
 
 const SAFE_BATCH_ARG = /^[A-Za-z0-9_.@=:\\/-]+$/;
@@ -83,20 +99,56 @@ export function runCommand(launch, args, options = {}, hint = '') {
   return result;
 }
 
-// Runs `openspec <args>` and returns spawnSync's result, or { notFound: true }.
-export function runOpenspec(args, options = {}, launch = findOpenspec({ env: options.env ?? process.env })) {
-  return runCommand(launch, args, options, INSTALL_HINT);
+// Runs the OpenSpec pinned in the working directory (`options.cwd`, or
+// `root` when the two differ) and returns spawnSync's result, or
+// { notInstalled: true, reason } when it is not installed there.
+export function runOpenspec(args, options = {}, root = options.cwd ?? process.cwd()) {
+  const found = findOpenspec(root);
+  if (!found.launch) return { notInstalled: true, pinned: found.pinned, reason: found.reason, status: null, stdout: '', stderr: '' };
+  return runCommand(found.launch, args, options);
 }
 
-// { ok, version } or { ok: false, reason } with a message a person can act on.
+// { ok, version } or { ok: false, notInstalled, pinned, reason } with a message a person can act on.
 export function probeOpenspec(options = {}) {
   const result = runOpenspec(['--version'], options);
-  if (result.notFound) {
-    return { ok: false, reason: `the openspec CLI was not found. Install it with "${INSTALL_HINT}" and open a new terminal so PATH is refreshed.` };
-  }
+  if (result.notInstalled) return { ok: false, notInstalled: true, pinned: result.pinned, reason: result.reason };
   if (result.error || result.status !== 0) {
     const detail = (result.error?.message || result.stderr || result.stdout || '').trim().split(/\r?\n/).slice(0, 3).join(' ');
-    return { ok: false, reason: `the openspec CLI was found but "openspec --version" failed (Node.js 22.12 or later is required; this is ${process.version}). ${detail}`.trim() };
+    return { ok: false, reason: `OpenSpec in ${TOOLS_DIR} does not run (Node.js 22.12 or later is required; this is ${process.version}). ${detail}`.trim() };
   }
   return { ok: true, version: result.stdout.trim() };
+}
+
+// npm, which setup uses to install OpenSpec. On Windows npm.cmd runs as
+// `node <dir>/node_modules/npm/bin/npm-cli.js`.
+export function findNpm(options = {}) {
+  return findCommand('npm', { npmScript: 'npm/bin/npm-cli.js', ...options });
+}
+
+function invokedDirectly() {
+  if (!process.argv[1]) return false;
+  try { return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url)); } catch { return false; }
+}
+
+// `node <kit>/scripts/openspec.mjs <args>`, run in the repository being
+// migrated: the agent's and the person's way to call OpenSpec.
+// From a subfolder, the nearest folder above with a pinned OpenSpec counts.
+export function findRoot(start) {
+  for (let dir = path.resolve(start); ; dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, TOOLS_DIR, 'package.json'))) return dir;
+    if (path.dirname(dir) === dir) return path.resolve(start);
+  }
+}
+
+if (invokedDirectly()) {
+  const result = runOpenspec(process.argv.slice(2), { stdio: 'inherit' }, findRoot(process.cwd()));
+  if (result.notInstalled) {
+    console.error(`spec-relay: ${result.reason}`);
+    process.exitCode = 1;
+  } else if (result.error) {
+    console.error(`spec-relay: ${result.error.message}`);
+    process.exitCode = 1;
+  } else {
+    process.exitCode = result.status ?? 1;
+  }
 }

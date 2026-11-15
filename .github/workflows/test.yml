@@ -18,7 +18,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: npm install -g @fission-ai/openspec@2.0.0
+      # The tests install the pinned OpenSpec into each temporary repository with
+      # npm ci. A global OpenSpec of another version must never be used.
+      - run: npm install -g @fission-ai/openspec@1.17.0
       - run: npm test
   old-node:
     # doctor.mjs must explain an old Node.js instead of stopping on a SyntaxError.

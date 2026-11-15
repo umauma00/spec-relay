@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { main, parseArgs, plan, renderConfig, CONFIG_MARKER, KIT_ROOT, STUB_MARKER } from '../scripts/setup.mjs';
-import { findOpenspec, runOpenspec } from '../scripts/openspec.mjs';
+import { findOpenspec, runOpenspec, findNpm, runCommand, OPENSPEC_VERSION } from '../scripts/openspec.mjs';
 import { tempDir, write, quiet, isolateOpenspec, crlf } from './helpers.mjs';
 
 isolateOpenspec();
@@ -149,14 +149,24 @@ test('running the script through a symlink still runs it', { skip: process.platf
   assert.match(result.stdout, /Usage:/);
 });
 
-// A stand-in for the CLI: `--version` works and everything else exits 1.
-function fakeOpenspec(version = '2.0.0') {
+// A stand-in for npm: `--version` works, and `ci` "installs" an OpenSpec that
+// answers `--version` and fails everything else. Run by absolute node, since
+// PATH holds only this folder.
+function fakeNpm(version = '2.0.0') {
   const bin = tempDir('spec-relay-bin-');
+  const openspec = `if (process.argv[2] === '--version') { console.log(${JSON.stringify(version)}); } else { process.exitCode = 1; }\n`;
+  write(bin, 'fake-npm.js', `const fs = require('fs'); const path = require('path');
+if (process.argv[2] === '--version') { console.log('10.9.0'); process.exit(0); }
+const dir = path.join(process.cwd(), 'node_modules/@fission-ai/openspec');
+fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: ${JSON.stringify(version)} }));
+fs.writeFileSync(path.join(dir, 'bin/openspec.js'), ${JSON.stringify(openspec)});
+`);
   if (process.platform === 'win32') {
-    write(bin, 'openspec.cmd', `@echo off\r\nif "%1"=="--version" (echo ${version}& exit /b 0)\r\nexit /b 1\r\n`);
+    write(bin, 'npm.cmd', `@echo off\r\n"${process.execPath}" "${path.join(bin, 'fake-npm.js')}" %*\r\n`);
   } else {
-    write(bin, 'openspec', `#!/bin/sh\n[ "$1" = "--version" ] && { echo ${version}; exit 0; }\nexit 1\n`);
-    fs.chmodSync(path.join(bin, 'openspec'), 0o755);
+    write(bin, 'npm', `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'fake-npm.js')}" "$@"\n`);
+    fs.chmodSync(path.join(bin, 'npm'), 0o755);
   }
   return bin;
 }
@@ -164,74 +174,112 @@ function fakeOpenspec(version = '2.0.0') {
 function envWithPath(first) {
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (key.toUpperCase() === 'PATH' || key === 'APPDATA' || key === 'npm_config_prefix') delete env[key];
-  // Only this folder: the real CLI often sits beside node, so node's folder stays out.
+  // Only this folder: a real npm or openspec often sits beside node, so node's folder stays out.
   env.PATH = first;
   return env;
 }
 
-test('a failed openspec init removes the files the run created, so a re-run starts over', () => {
+test('setup installs the pinned OpenSpec into the repository and runs init with it', () => {
   const dir = tempDir();
-  const result = run('setup.mjs', ['--target', dir, ...BASE, '--apply'], { env: envWithPath(fakeOpenspec()) });
+  const result = run('setup.mjs', ['--target', dir, ...BASE, '--apply'], { env: envWithPath(fakeNpm()) });
+  // The fake OpenSpec fails init, so the run is undone: files and node_modules.
   assert.equal(result.status, 1, result.stderr + result.stdout);
-  assert.match(result.stderr, /were removed/);
+  assert.match(result.stdout, /npm ci in openspec\/spec-relay\/tools \(installs OpenSpec 2\.0\.0/);
+  assert.match(result.stderr, /openspec init failed[\s\S]*were removed/);
   assert.ok(!fs.existsSync(path.join(dir, 'openspec/config.yaml')));
+  assert.ok(!fs.existsSync(path.join(dir, 'openspec/spec-relay/tools/package.json')));
+  assert.ok(!fs.existsSync(path.join(dir, 'openspec/spec-relay/tools/node_modules')));
   assert.equal(plan(parseArgs(['--target', dir, ...BASE])).runInit, true);
 });
 
-test('files 0.6.0 and OpenSpec 1.x left under .github/ stop a re-run', () => {
+test('the kit pins OpenSpec with its own package.json and lock, compared like the schemas', () => {
+  const dir = tempDir();
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
+  const tools = path.join(dir, 'openspec/spec-relay/tools');
+  for (const rel of ['package.json', 'package-lock.json', '.gitignore']) {
+    assert.equal(fs.readFileSync(path.join(tools, rel), 'utf8'), fs.readFileSync(path.join(KIT_ROOT, 'templates/openspec-tools', rel), 'utf8'), rel);
+  }
+  const pinned = JSON.parse(fs.readFileSync(path.join(tools, 'package-lock.json'), 'utf8'));
+  assert.equal(pinned.packages['node_modules/@fission-ai/openspec'].version, OPENSPEC_VERSION);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(tools, 'package.json'), 'utf8')).dependencies['@fission-ai/openspec'], OPENSPEC_VERSION);
+  assert.equal(fs.readFileSync(path.join(tools, '.gitignore'), 'utf8'), 'node_modules/\n');
+  // Not installed yet: a run without --skip-init installs it; once installed it does not.
+  assert.equal(plan(parseArgs(['--target', dir, ...BASE])).install, true);
+  write(tools, 'node_modules/@fission-ai/openspec/package.json', JSON.stringify({ version: OPENSPEC_VERSION }));
+  assert.equal(plan(parseArgs(['--target', dir, ...BASE])).install, false);
+  write(tools, 'node_modules/@fission-ai/openspec/package.json', JSON.stringify({ version: '1.17.0' }));
+  assert.equal(plan(parseArgs(['--target', dir, ...BASE])).install, true);
+  // Someone raised the version by hand: a conflict, as with a changed schema.
+  const pkg = path.join(tools, 'package.json');
+  fs.writeFileSync(pkg, fs.readFileSync(pkg, 'utf8').replace(OPENSPEC_VERSION, '2.1.0'));
+  assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])), ['openspec/spec-relay/tools/package.json']);
+});
+
+test('files 0.6.0 and OpenSpec 1.x left under .github/ are reported and keep a re-run from finishing', () => {
   const dir = tempDir();
   quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply']));
   write(dir, '.github/skills/openspec-archive-change/SKILL.md', `---\nname: openspec-archive-change\n---\n${STUB_MARKER}\n`);
   write(dir, '.github/skills/openspec-propose/SKILL.md', 'metadata:\n  generatedBy: "1.17.0"\n');
   write(dir, '.github/prompts/opsx-apply.prompt.md', 'Run openspec instructions apply\n');
   write(dir, '.github/skills/openspec-my-notes/SKILL.md', 'mine\n');
-  assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE, '--skip-init'])).sort(), [
+  const opts = parseArgs(['--target', dir, ...BASE, '--skip-init']);
+  assert.deepEqual(conflicts(opts), []);
+  assert.deepEqual(plan(opts).steps.filter((s) => s.action === 'leftover').map((s) => path.relative(dir, s.path).replace(/\\/g, '/')).sort(), [
     '.github/prompts/opsx-apply.prompt.md', '.github/skills/openspec-archive-change', '.github/skills/openspec-propose',
   ]);
+  // The rest of the run still happens (it installs the OpenSpec that `update` needs), but it does not finish.
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 2);
 });
 
 test('--target-root may not be .agents, where OpenSpec keeps its skills', () => {
   assert.throws(() => parseArgs(['--target', tempDir(), '--source-language', 'PHP', '--target-language', 'Java', '--target-root', '.agents/new']), /\.agents/);
 });
 
-test('OpenSpec 1.x stops a re-run too', () => {
-  const dir = tempDir();
-  quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply']));
-  const result = run('setup.mjs', ['--target', dir, ...BASE, '--apply'], { env: envWithPath(fakeOpenspec('1.17.0')) });
-  assert.equal(result.status, 3, result.stderr + result.stdout);
-  assert.match(result.stderr, /1\.17\.0 is too old/);
-});
-
-test('OpenSpec 1.x stops setup before anything is written', () => {
-  const dir = tempDir();
-  const result = run('setup.mjs', ['--target', dir, ...BASE, '--apply'], { env: envWithPath(fakeOpenspec('1.17.0')) });
-  assert.equal(result.status, 3, result.stderr + result.stdout);
-  assert.match(result.stderr, /1\.17\.0 is too old[\s\S]*openspec@2\.0\.0/);
-  assert.deepEqual(fs.readdirSync(dir), []);
-});
-
-test('a missing openspec CLI stops setup before anything is written', () => {
+test('a missing npm stops setup before anything is written', () => {
   const dir = tempDir();
   const result = run('setup.mjs', ['--target', dir, ...BASE, '--apply'], { env: envWithPath(tempDir()) });
   assert.equal(result.status, 3, result.stderr + result.stdout);
-  assert.match(result.stderr, /was not found/);
+  assert.match(result.stderr, /npm was not found/);
   assert.deepEqual(fs.readdirSync(dir), []);
 });
 
-test('on Windows the npm shim runs as node + openspec.js, never through a shell', () => {
-  const npm = 'C:\\Users\\Taro Yamada\\AppData\\Roaming\\npm';
-  const script = `${npm}\\node_modules\\@fission-ai\\openspec\\bin\\openspec.js`;
-  const find = (files, env) => findOpenspec({ platform: 'win32', env, exists: (file) => files.includes(file) });
-  assert.deepEqual(find([`${npm}\\openspec.cmd`, script], { Path: `.;relative\\bin;"${npm}"` }), { command: process.execPath, prefixArgs: [script] });
-  // Not on PATH (a terminal opened before the install): npm's folder under %APPDATA% is searched.
-  assert.deepEqual(find([`${npm}\\openspec.cmd`, script], { PATH: 'C:\\Windows', APPDATA: 'C:\\Users\\Taro Yamada\\AppData\\Roaming' }).prefixArgs, [script]);
-  assert.deepEqual(find(['C:\\tools\\openspec.exe'], { PATH: 'C:\\tools' }), { command: 'C:\\tools\\openspec.exe', prefixArgs: [] });
-  // A shim from another package manager runs through cmd.exe.
-  assert.equal(find(['C:\\pnpm\\openspec.cmd'], { PATH: 'C:\\pnpm', ComSpec: 'C:\\Windows\\System32\\cmd.exe' }).batch, 'C:\\pnpm\\openspec.cmd');
+test('OpenSpec runs only from the repository, as node + openspec.js', () => {
+  const dir = tempDir();
+  const none = findOpenspec(dir);
+  assert.equal(none.launch, null);
+  assert.equal(none.pinned, false);
+  assert.match(none.reason, /no OpenSpec of its own/);
+  const result = runOpenspec(['--version'], { cwd: dir });
+  assert.equal(result.notInstalled, true);
+  write(dir, 'openspec/spec-relay/tools/package.json', '{}');
+  assert.match(findOpenspec(dir).reason, /pinned in openspec\/spec-relay\/tools but not installed/);
+  const script = path.join(dir, 'openspec/spec-relay/tools/node_modules/@fission-ai/openspec/bin/openspec.js');
+  write(dir, 'openspec/spec-relay/tools/node_modules/@fission-ai/openspec/package.json', '{"version":"2.0.0"}');
+  write(dir, 'openspec/spec-relay/tools/node_modules/@fission-ai/openspec/bin/openspec.js', "console.log(process.argv.slice(2).join(' '))\n");
+  assert.deepEqual(findOpenspec(dir), { launch: { command: process.execPath, prefixArgs: [script] }, pinned: true, version: '2.0.0' });
+  assert.equal(runOpenspec(['list', '--json'], { cwd: dir }).stdout.trim(), 'list --json');
+  // The command line form, from a subfolder, with a global openspec nowhere on PATH.
+  fs.mkdirSync(path.join(dir, 'src/deep'), { recursive: true });
+  const cli = spawnSync(process.execPath, [path.join(KIT_ROOT, 'scripts/openspec.mjs'), 'status', '--change', 'a b'], { cwd: path.join(dir, 'src/deep'), encoding: 'utf8', env: envWithPath(tempDir()) });
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.equal(cli.stdout.trim(), 'status --change a b');
+  const outside = spawnSync(process.execPath, [path.join(KIT_ROOT, 'scripts/openspec.mjs'), '--version'], { cwd: tempDir(), encoding: 'utf8' });
+  assert.equal(outside.status, 1);
+  assert.match(outside.stderr, /no OpenSpec of its own/);
+});
+
+test('on Windows an npm shim runs as node + its script, never through a shell', () => {
+  const nodejs = 'C:\\Program Files\\nodejs';
+  const script = `${nodejs}\\node_modules\\npm\\bin\\npm-cli.js`;
+  const find = (files, env) => findNpm({ platform: 'win32', env, exists: (file) => files.includes(file) });
+  assert.deepEqual(find([`${nodejs}\\npm.cmd`, script], { Path: `.;relative\\bin;"${nodejs}"` }), { command: process.execPath, prefixArgs: [script] });
+  assert.deepEqual(find(['C:\\tools\\npm.exe'], { PATH: 'C:\\tools' }), { command: 'C:\\tools\\npm.exe', prefixArgs: [] });
+  // A shim from another manager runs through cmd.exe.
+  assert.equal(find(['C:\\volta\\npm.cmd'], { PATH: 'C:\\volta', ComSpec: 'C:\\Windows\\System32\\cmd.exe' }).batch, 'C:\\volta\\npm.cmd');
   // A file in the repository being migrated is never picked up.
-  assert.equal(find(['openspec.cmd', '.\\openspec.cmd'], { PATH: '.' }), null);
-  assert.equal(runOpenspec(['--version'], {}, null).notFound, true);
-  const refused = runOpenspec(['init', 'a&b'], {}, { command: 'cmd.exe', prefixArgs: [], batch: 'C:\\pnpm\\openspec.cmd' });
+  assert.equal(find(['npm.cmd', '.\\npm.cmd'], { PATH: '.' }), null);
+  assert.equal(runCommand(null, ['--version']).notFound, true);
+  const refused = runCommand({ command: 'cmd.exe', prefixArgs: [], batch: 'C:\\volta\\npm.cmd' }, ['ci', 'a&b']);
   assert.match(refused.error.message, /cannot pass/);
 });
 

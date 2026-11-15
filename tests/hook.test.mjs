@@ -89,6 +89,7 @@ test('agents may not write the source, baselines, archives, schemas, settings or
   assert.match(edit(dir, path.join(dir, 'openspec/specs/billing/invoice/spec.md')), /baseline specs change only/);
   assert.match(edit(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md'), /record of what was reviewed/);
   assert.match(edit(dir, 'openspec/schemas/spec-relay-extract/schema.yaml'), /installed by setup.mjs/);
+  assert.match(edit(dir, 'openspec/spec-relay/tools/package.json'), /pinned OpenSpec/);
   assert.match(edit(dir, 'openspec/config.yaml'), /person's settings/);
   assert.match(edit(dir, path.join(KIT, 'scripts/gate.mjs')), /part of the spec-relay kit/);
   assert.equal(edit(dir, 'ts/billing/invoice.ts'), null);

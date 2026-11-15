@@ -32,12 +32,15 @@ Most people use this kit on Windows, where your shell is PowerShell.
   your edit tool, in UTF-8.
 - Quote every path, because home folders often contain spaces:
   `node "<kit>/scripts/gate.mjs" ...`. Forward slashes work on every platform.
-- If PowerShell answers `openspec` or `npm` with "running scripts is disabled
-  on this system", the command exists: call `openspec.cmd` or `npm.cmd`
-  instead. Never change the execution policy unless the person asks.
-- After installing a tool, PATH is stale in the open terminal. The kit's
-  scripts look in npm's global folder themselves; for your own `openspec`
-  calls open a new terminal.
+- Run OpenSpec only as `node "<kit>/scripts/openspec.mjs" <args>`. It runs the
+  OpenSpec pinned in this repository (`openspec/spec-relay/tools`, installed by
+  setup). Never type a bare `openspec`, `openspec.cmd` or `npx openspec`: that
+  is whatever version is on PATH, or none. If it says OpenSpec is not installed in
+  this repository, run setup again (step 4).
+- If PowerShell answers `npm` with "running scripts is disabled on this
+  system", the command exists: call `npm.cmd` instead. Never change the
+  execution policy unless the person asks.
+- After installing a tool, PATH is stale in the open terminal; open a new one.
 - When a command fails in a way the environment can cause (a command not
   found, access denied, `EPERM` or `EBUSY`, a model or subagent error), run
   the environment check (step 0) and give the person its fixes.
@@ -99,13 +102,13 @@ stop halfway on something the machine or the host lacks.
    - A `fail` blocks: stop, and run the check again after the person fixed it.
    - A `warn` may cause trouble later. Before setup, ask whether to fix it
      first or go on. Once set up, the person has already decided on the
-     warnings that stay (a newer OpenSpec, a synchronised folder): list their
+     warnings that stay (a synchronised folder, for example): list their
      ids in one line and go on, unless one is new or changed. A `trial`
      warning needs no question: run the trial (step 6).
    - An `info` needs no answer; mention it in a line (for `telemetry`, how to
      turn it off) before setup, and not again later.
    - Never install, update or change settings to fix a check on your own:
-     ask first for installs (`npm install -g @fission-ai/openspec@2.0.0`),
+     ask first for installs (Node.js and npm, which setup uses to install OpenSpec),
      and leave the execution policy, git's global config and OpenSpec's
      settings to the person.
 2. If `openspec/config.yaml` already contains `# spec-relay: managed`, setup is
@@ -128,7 +131,7 @@ stop halfway on something the machine or the host lacks.
    overwrite, move or delete the person's files to get past it.
    Setup replaces OpenSpec's generic apply, archive and sync workflows with
    stubs that point here, because they skip the review gate. Every
-   `openspec update` restores them (the check reports `workflows` then); run
+   `node "<kit>/scripts/openspec.mjs" update` restores them (the check reports `workflows` then); run
    setup again after each update.
 5. Run the environment check again: now it also compares the schemas, the
    source root and the target language's toolchain.
@@ -189,8 +192,8 @@ not wash out these instructions.
    names `openspec/spec-relay/lessons.md` as a file to read, once it exists;
    a checker task never does, and neither does the environment trial. Never paste instructions, templates, source
    code or artifacts into a task, and never ask for artifacts back: subagents
-   return a short report. Check their work with `openspec validate`,
-   `openspec status --change`, `gate.mjs` and `merge.mjs`, and read an
+   return a short report. Check their work with `node "<kit>/scripts/openspec.mjs" validate`,
+   `node "<kit>/scripts/openspec.mjs" status --change`, `gate.mjs` and `merge.mjs`, and read an
    artifact yourself only for what you must tell or ask the person (questions,
    crosscheck rows that are not `confirmed`, the counts in your report). To
    list requirement and screen names, search for lines starting with
@@ -251,17 +254,17 @@ you assist. This gate is the point of the kit.
 2. Ask how they want to review: here in the conversation, one item at a time,
    or in the files or a pull request on their own (they tell you when done,
    and you check what they ticked). Both are fine; never pick for them.
-3. Follow the change's apply instruction (`openspec instructions apply --change
+3. Follow the change's apply instruction (`node "<kit>/scripts/openspec.mjs" instructions apply --change
    <change> --json`). Tick a box only when the person accepts that item in this
    conversation, or when they ticked it in the file themselves. Write their
    decision after `decision:` and their name after `Reviewer:`. When they ask
    for a change, edit the artifacts, untick every item you changed, validate,
    render again and ask again.
 4. When every box is ticked, run `node "<kit>/scripts/gate.mjs" review --change
-   <change>`. `openspec archive --yes` checks none of what the gate checks, so
+   <change>`. `node "<kit>/scripts/openspec.mjs" archive --yes` checks none of what the gate checks, so
    never archive while the gate fails; report the failure as When something
    stops says. Then ask whether to archive, and archive only on an explicit
-   yes: `openspec archive <change> --yes`. Extract and amend changes also need
+   yes: `node "<kit>/scripts/openspec.mjs" archive <change> --yes`. Extract and amend changes also need
    the archived survey with the capability in its list or in the plan.
 5. When the person corrects something that could recur, propose the lesson
    (below) right then, not after the review.
@@ -317,7 +320,7 @@ the same correction is never needed twice.
 Read the WHOLE source code base before splitting it, so that the split follows
 the domain, not the folders.
 
-1. `openspec new change survey --schema spec-relay-survey`.
+1. `node "<kit>/scripts/openspec.mjs" new change survey --schema spec-relay-survey`.
 2. Write inventory, context-map, glossary and capabilities (schema
    `spec-relay-survey`) in waves (see Working in parallel). Every source file
    must be in the inventory.
@@ -343,7 +346,7 @@ the domain, not the folders.
    Windows device name (`con`, `prn`, `aux`, `nul`, `com1`...), not ending in
    `-v<digits>`, and short, because the path repeats inside
    `openspec/changes/archive/` and Windows limits paths to 260 characters.
-3. Write review.md, validate (`openspec validate survey --strict`), then run
+3. Write review.md, validate (`node "<kit>/scripts/openspec.mjs" validate survey --strict`), then run
    the review (above). `gate.mjs review` also fails while a source file is
    missing from the inventory. While the person reviews, ask the questions the
    target design needs (step 2) so that it can start right after the archive.
@@ -355,7 +358,7 @@ the domain, not the folders.
 
 ## 2. Target design: decide how the new system is built
 
-1. `openspec new change target-design --schema spec-relay-target`.
+1. `node "<kit>/scripts/openspec.mjs" new change target-design --schema spec-relay-target`.
 2. Write architecture, conventions and verification from their instructions.
    The default architecture is a modular monolith in the manner of Spring
    Modulith: one module per context, public API and events only, one owner per
@@ -379,7 +382,7 @@ Capabilities go in plan order, `platform` first, only those in
 `nextToAnalyze` (see Working in parallel). Several capabilities run in the same
 waves.
 
-1. **Create the change.** `openspec new change extract-<capability> --schema
+1. **Create the change.** `node "<kit>/scripts/openspec.mjs" new change extract-<capability> --schema
    spec-relay-extract`. Use the capability path with `/` replaced by `-` as the
    change name.
 2. **Draft**: give each capability to one `spec-relay-analyst`: it writes
@@ -407,7 +410,7 @@ waves.
 4. **Questions and review.** Write questions.md from the analysts' reported
    doubts and the rows moved to questions, then review.md (names by search,
    not by reading the spec).
-5. **Validate.** `openspec validate extract-<capability> --strict`. Have the
+5. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
    analyst fix every error and warning, then check that every requirement has
    a trace entry.
 6. **Report** to the person: the number of requirements and screens, what the
@@ -429,8 +432,8 @@ port.
    first. `node "<kit>/scripts/gate.mjs" port-ready --capability <capability>` must
    pass before you create the port change (it also needs the archived survey
    and target design, and no open amendment).
-2. `openspec new change port-<capability> --schema spec-relay-port`, then write
-   proposal, design and tasks with `openspec instructions <artifact> --change
+2. `node "<kit>/scripts/openspec.mjs" new change port-<capability> --schema spec-relay-port`, then write
+   proposal, design and tasks with `node "<kit>/scripts/openspec.mjs" instructions <artifact> --change
    port-<capability> --json`. Record the baseline hash in the proposal from
    `node "<kit>/scripts/gate.mjs" baseline --capability <capability>`. Follow
    the target design; copy the source references for each requirement from the
@@ -439,7 +442,7 @@ port.
 3. Show the person the design's structure, any additions to the conventions,
    the verification plan and open risks, and start implementing after they
    agree. Propose lessons from their corrections (see Lessons).
-4. Run `openspec instructions apply --change port-<capability> --json` and work
+4. Run `node "<kit>/scripts/openspec.mjs" instructions apply --change port-<capability> --json` and work
    through tasks.md. Give groups of tasks to the `spec-relay-implementer`
    subagent, one at a time; check its report and its verification results
    before accepting the work. Keep one port active at a time: ports share the
@@ -451,7 +454,7 @@ port.
    the spec misread the source code, propose an amendment (below).
 6. When every task is done and verified, run `node "<kit>/scripts/gate.mjs"
    port-done --change port-<capability>`, report the results, and archive the
-   port change after the person agrees: `openspec archive port-<capability>
+   port change after the person agrees: `node "<kit>/scripts/openspec.mjs" archive port-<capability>
    --yes`.
 
 ## Amend: correct a baseline spec
@@ -460,7 +463,7 @@ Only when a baseline spec does not describe what the source code does (found
 by a port test, a crosscheck or a person). Changing the behavior itself, such as
 fixing a bug, is never an amendment: it is follow-up work after the migration.
 
-1. `openspec new change amend-<capability> --schema spec-relay-amend` (add
+1. `node "<kit>/scripts/openspec.mjs" new change amend-<capability> --schema spec-relay-amend` (add
    `-v<n>` for a second amendment of the same capability).
 2. Give reason, specs and trace to one `spec-relay-analyst` (schema
    `spec-relay-amend`), then the crosscheck to checkers as in step 3 (part
@@ -567,8 +570,8 @@ person asks to skip a step, a review or a check:
 
 ## Status and resuming
 
-- `openspec list --json` shows active changes; `openspec list --specs` shows
-  baseline specs; `openspec status --change <name>` shows artifact progress.
+- `node "<kit>/scripts/openspec.mjs" list --json` shows active changes; `node "<kit>/scripts/openspec.mjs" list --specs` shows
+  baseline specs; `node "<kit>/scripts/openspec.mjs" status --change <name>` shows artifact progress.
 - The project's step follows from OpenSpec: no archived survey - step 1;
   no archived target design - step 2. A capability's step: no extract change -
   not started; active extract change - step 3 or 4 (check review.md); archived
