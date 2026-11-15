@@ -6,7 +6,7 @@
 ## Source files
 | Path | Role | In scope |
 |---|---|---|
-| <!-- src/... --> | <!-- role --> | <!-- full / partial --> |
+| <!-- src/... (and the openspec/spec-relay/db/... files the plan assigns) --> | <!-- role --> | <!-- full / partial --> |
 
 ## Entry points
 - <!-- path:symbol - how callers reach it -->

@@ -509,7 +509,7 @@ function checkDatabases(root, dir, boxes, problems) {
 }
 
 // After the survey is archived, specs and ports rest on the definitions it
-// reviewed. A survey from kit 0.8.0 or earlier has no database.md: nothing to compare.
+// reviewed. A survey from kit 0.9.0 or earlier has no database.md: nothing to compare.
 export function checkDatabaseDrift(root, problems) {
   const survey = archivedChange(root, 'survey');
   if (!survey) return;
@@ -969,7 +969,7 @@ const NEXT = {
       ? 'The survey (the map of contexts and the capability list) is not reviewed and archived yet. I prepare it; its review is yours, and this step waits for it.'
       : 'The target design is not reviewed and archived yet. I prepare it; its review is yours, and implementation waits for it.'),
     guard: (list) => `Files outside the subagents' assignments changed (${list}). Decide: undo the change, or keep it. The results of this wave are not used until you decide.`,
-    dbDrift: 'The database definitions (openspec/spec-relay/db/) changed after the survey was reviewed. If you exported them again on purpose, the survey is run again (survey-v2) and you review what changed; if not, restore the files from git.',
+    dbDrift: 'The database definitions (openspec/spec-relay/db/) changed after the survey was reviewed. If you exported them again on purpose, the survey is run again (survey-v2) and you review what changed; after its archive, the orchestrator copies the capability paths of the new definitions into plan.md and runs gate.mjs coverage. If not, restore the files from git.',
     dbUtf16: (list) => `Some database definitions are saved as UTF-16 (${list}). Export them again as UTF-8, or convert them as docs/DATABASE.md shows.`,
   },
   ja: {
@@ -983,7 +983,7 @@ const NEXT = {
       ? '調査（コンテキストの地図と capability の一覧）がまだレビュー・archive されていません。AI が用意するので、そのレビューをお願いします。この工程はそれを待ちます。'
       : '移行先の設計がまだレビュー・archive されていません。AI が用意するので、そのレビューをお願いします。実装はそれを待ちます。'),
     guard: (list) => `割り当て外のファイルが変わりました（${list}）。元に戻すか、そのまま受け入れるかを決めてください。決まるまで、この波の結果は使いません。`,
-    dbDrift: 'DB の定義（openspec/spec-relay/db/）が、調査のレビューのあとで変わりました。意図して取り直したのなら調査をやり直し（survey-v2）、変わったところをレビューしてください。意図しない変更なら git で元に戻してください。',
+    dbDrift: 'DB の定義（openspec/spec-relay/db/）が、調査のレビューのあとで変わりました。意図して取り直したのなら調査をやり直し（survey-v2）、変わったところをレビューしてください。その archive のあと、オーケストレーターが新しい定義の capability を plan.md に写し、gate.mjs coverage で確かめます。意図しない変更なら git で元に戻してください。',
     dbUtf16: (list) => `DB の定義ファイルが UTF-16 で保存されています（${list}）。UTF-8 で出し直すか、docs/DATABASE.md の手順で変換してください。`,
   },
 };

@@ -16,7 +16,9 @@ artifacts:
         and a one-line role. Mark files that are only partly in scope. It must
         hold every file `openspec/spec-relay/plan.md` assigns to this
         capability (the indented items under it): `gate.mjs review` lists each
-        one that is missing, and each listed path with no file on disk. When an
+        one that is missing, and each listed path with no file on disk. That
+        includes the database definition files under `openspec/spec-relay/db/`
+        the plan assigns: give each one (or its folder) a row here too. When an
         assigned file belongs to another capability, report it instead of
         leaving it out; the orchestrator moves it in the plan.
       - **Entry points**: Public functions, endpoints, commands, jobs or screens
@@ -28,7 +30,8 @@ artifacts:
         database.md): procedures and functions it calls, views it reads,
         triggers on the tables it writes (they run without being called),
         constraints and defaults that change or reject its data, and jobs that
-        act on the same tables. "None" when it uses no database.
+        act on the same tables. "None" when it uses no database. This table
+        names objects; the files that define them are rows of Source files.
       - **Out of scope**: Nearby code that belongs to another capability.
 
       Write every path relative to the repository root with forward slashes

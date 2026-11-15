@@ -659,7 +659,7 @@ test('definitions that change after the survey stop extract reviews and ports un
   assert.match(next.person.join(), /調査をやり直し（survey-v2）/);
   assert.deepEqual(next.agent, []);
   assert.match(checkPortReady(dir, 'calc').problems.join(), /database definitions changed after the survey/);
-  // A survey from kit 0.8.0 has no database.md: nothing to compare.
+  // A survey from kit 0.9.0 or earlier has no database.md: nothing to compare.
   fs.rmSync(path.join(dir, 'openspec/changes/archive/2026-11-01-survey/database.md'));
   assert.equal(checkReview(dir, 'extract-calc').ok, true);
 });

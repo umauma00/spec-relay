@@ -181,9 +181,9 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 
 1. `openspec/schemas/spec-relay-*` を削除してから、導入スクリプトをもう一度実行します（スキーマが新しい版と違うと表示して止まるためです）。
 2. 調査がまだ archive されていなければ、オーケストレーターに `database.md` を書いてもらい、レビューに D の項目を足します。データベースを使っていなければ、`## Databases` の下に None と書くだけです。
-3. 0.9.0 以前に archive した調査には `database.md` がないので、gate はデータベースの確認をしません。ストアドやトリガーにロジックがあるシステムなら、調査をやり直して（`survey-v2`）定義を取り込むことを勧めます。移行先の設計をまだ archive していなければ、そのあとで `data.md` を足します。
+3. 0.9.0 以前に archive した調査には `database.md` がないので、gate はデータベースの確認をしません。ストアドやトリガーにロジックがあるシステムなら、調査をやり直して（`survey-v2`）定義を取り込むことを勧めます。archive 済みの調査のあとで `openspec/spec-relay/db/` に定義を置くと、調査に記録した定義と違うため gate が止まるので、置くのは調査のやり直しの中で行います。移行先の設計をまだ archive していなければ、そのあとで `data.md` を足します。
 4. 進行中の target-design には `data.md` を足します（ないと gate と進捗の表示が先へ進みません）。調査がデータベースを使わないと記録しているか、0.9.0 以前の調査なら、None と書くだけです。
-5. `openspec/spec-relay/db/` の定義は元ファイルと同じく、計画（plan.md）のどれかの capability の下に書きます（`` - `openspec/spec-relay/db/sales/` ``）。`gate.mjs coverage` が確かめます。
+5. `openspec/spec-relay/db/` の定義は元ファイルと同じく、計画（plan.md）のどれかの capability の下に書きます（`` - `openspec/spec-relay/db/sales/` ``）。`gate.mjs coverage` が確かめます。定義を置くのは 2 か 3 の調査の中だけです（調査の archive のあとに置くと gate が止まります）。
 
 ## 0.8.0 から更新するとき
 

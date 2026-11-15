@@ -403,6 +403,16 @@ the domain, not the folders.
    has no file, or an analyzed capability's source map lacks one of its files,
    and it lists the capabilities not analyzed yet. Run it also after the last
    extract is archived.
+5. **When the database definitions change later.** A gate that reports
+   "database definitions changed after the survey" stops extract and amend
+   reviews, port-ready and port-done. Ask the person whether they exported
+   again on purpose. If not, they restore `openspec/spec-relay/db/` from git.
+   If so, run the survey again as `survey-v2` (its inventory, capabilities and
+   database.md cover the new definitions, and the person reviews what
+   changed); after it is archived, copy the capability paths of the new or
+   moved definition files into `openspec/spec-relay/plan.md` and run
+   `gate.mjs coverage`. Files under `openspec/spec-relay/db/` are placed only
+   during a survey: one added after the archive is drift too.
 
 ## 2. Target design: decide how the new system is built
 
