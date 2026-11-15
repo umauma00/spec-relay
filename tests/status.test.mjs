@@ -42,7 +42,9 @@ function repo({ plan = PLAN, review = '- [x] R1 a\n- [ ] R2 b\n- [ ] Q1 c decisi
   write(dir, `${EXTRACT}/.openspec.yaml`, 'schema: spec-relay-extract\n');
   if (artifacts) {
     write(dir, `${EXTRACT}/specs/billing/invoice/spec.md`, SPEC);
-    for (const file of ['source-map.md', 'trace.md']) write(dir, `${EXTRACT}/${file}`, '# x\n');
+    write(dir, 'src/invoice.php', '<?php\n');
+    write(dir, `${EXTRACT}/source-map.md`, '| Path | Role | In scope |\n|---|---|---|\n| src/invoice.php | invoice | full |\n');
+    write(dir, `${EXTRACT}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| a | src/invoice.php:a:1 | none |\n| b | src/invoice.php:b:2 | none |\n');
     write(dir, `${EXTRACT}/screens.md`, '# Screens\nNone\n');
     write(dir, `${EXTRACT}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 a | confirmed | x |\n| R2 b | confirmed | x |\n');
     write(dir, `${EXTRACT}/questions.md`, '- Q1. c\n');

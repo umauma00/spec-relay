@@ -13,6 +13,8 @@ const QUESTIONS = '# Questions\n\n## Suspected bugs\n- Q1. Overflow wraps - keep
 const GOOD = 'Reviewer: Uma\n\n## 1. Requirements\n- [x] R1 Add two numbers\n- [x] R2 Reject text\n\n## 2. Questions\n- [x] Q1 Overflow: decision: keep\n';
 
 const CROSSCHECK = '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/calc.php:3 |\n| R2 Reject text | confirmed | src/calc.php:9 |\n';
+const SOURCE_MAP = '# Source map\n\n## Source files\n| Path | Role | In scope |\n|---|---|---|\n| `src/calc.php` | calculator | full |\n';
+const TRACE = '| Requirement | Source | Existing tests |\n|---|---|---|\n| Add two numbers | src/calc.php:add:3-5 | none |\n| R2 Reject text | `src/calc.php:add:9` | none |\n';
 
 // The archived survey that lists the capability the fixtures review.
 function surveyed(dir, caps = ['calc']) {
@@ -20,9 +22,12 @@ function surveyed(dir, caps = ['calc']) {
   return dir;
 }
 
-function repo(review, { questions = QUESTIONS, screens = '# Screens\n\nNone\n', crosscheck = CROSSCHECK } = {}) {
+function repo(review, { questions = QUESTIONS, screens = '# Screens\n\nNone\n', crosscheck = CROSSCHECK, sourceMap = SOURCE_MAP, trace = TRACE } = {}) {
   const dir = surveyed(tempDir());
+  write(dir, 'src/calc.php', '<?php\n');
   write(dir, `${CHANGE}/specs/calc/spec.md`, SPEC);
+  if (sourceMap !== null) write(dir, `${CHANGE}/source-map.md`, sourceMap);
+  if (trace !== null) write(dir, `${CHANGE}/trace.md`, trace);
   write(dir, `${CHANGE}/questions.md`, questions);
   if (screens !== null) write(dir, `${CHANGE}/screens.md`, screens);
   if (crosscheck !== null) write(dir, `${CHANGE}/crosscheck.md`, crosscheck);
@@ -100,7 +105,7 @@ test('port-done needs at least one task and every task done', () => {
 
 test('review items must match requirement names exactly, once each', () => {
   const spec = SPEC.replace('Reject text', 'Add two numbers twice');
-  const dir = repo(GOOD.replace('R2 Reject text', 'R2 Add two numbers twice'), { crosscheck: CROSSCHECK.replace('R2 Reject text', 'R2 Add two numbers twice') });
+  const dir = repo(GOOD.replace('R2 Reject text', 'R2 Add two numbers twice'), { crosscheck: CROSSCHECK.replace('R2 Reject text', 'R2 Add two numbers twice'), trace: TRACE.replace('R2 Reject text', 'R2 Add two numbers twice') });
   write(dir, `${CHANGE}/specs/calc/spec.md`, spec);
   assert.equal(checkReview(dir, 'extract-calc').ok, true);
   write(dir, `${CHANGE}/review.md`, GOOD.replace('- [x] R1 Add two numbers\n', '').replace('R2 Reject text', 'R2 Add two numbers twice'));
@@ -196,7 +201,7 @@ test('screens need review items and crosscheck rows; crosscheck verdicts must be
 });
 
 const SURVEY = 'openspec/changes/survey';
-function survey({ inventory, review } = {}) {
+function survey({ inventory, review, capabilities } = {}) {
   const dir = tempDir();
   write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only; only openspec/ and the target root may change): .\n  Target root (new implementation): ts\n');
   write(dir, `${SURVEY}/.openspec.yaml`, 'schema: spec-relay-survey\n');
@@ -209,7 +214,7 @@ function survey({ inventory, review } = {}) {
   write(dir, '.agents/skills/.openspec-target', 'github-copilot\n');
   write(dir, `${SURVEY}/context-map.md`, '## Contexts\n\n### Context: platform\n- x\n\n### Context: billing\n- y\n');
   write(dir, `${SURVEY}/inventory.md`, inventory ?? '| Path | Context | Notes |\n|---|---|---|\n| src/ | billing | |\n| src/common/db.php | platform | |\n| vendor/ | excluded | library |\n');
-  write(dir, `${SURVEY}/capabilities.md`, '# Capabilities\n\n### platform\n1. `platform/db` DB\n\n### billing\n1. `billing/invoice` 請求書\n   - src/billing\n');
+  write(dir, `${SURVEY}/capabilities.md`, capabilities ?? '# Capabilities\n\n### platform\n1. `platform/db` DB\n   - `src/common/db.php`\n\n### billing\n1. `billing/invoice` 請求書\n   - `src/billing/`\n');
   write(dir, `${SURVEY}/review.md`, review ?? 'Reviewer: Uma\n\n- [x] K1 platform: 共通基盤\n- [x] K2 billing: 請求\n- [x] M1 map\n- [x] C1 coverage\n');
   return dir;
 }
@@ -256,6 +261,8 @@ test('the amend gate: a reason, review items for the delta, crosscheck except fo
   write(dir, `${A}/.openspec.yaml`, 'schema: spec-relay-amend\n');
   write(dir, `${A}/specs/calc/spec.md`, '## MODIFIED Requirements\n\n### Requirement: Add two numbers\nThe system SHALL truncate.\n\n## REMOVED Requirements\n\n### Requirement: Reject text\n**Reason**: not in the code\n');
   write(dir, `${A}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | x |\n');
+  write(dir, 'src/calc.php', '<?php\n');
+  write(dir, `${A}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Add two numbers | src/calc.php:add:3 | none |\n| Reject text | removed | |\n');
   write(dir, `${A}/review.md`, 'Reviewer: Uma\n- [x] R1 Add two numbers\n- [x] R2 Reject text\n- [x] I1 impact\n');
   assert.match(checkReview(dir, 'amend-calc').problems.join(), /reason.md gives no reason/);
   write(dir, `${A}/reason.md`, '# Reason\n\n## What the source code does\nTruncates (src/calc.php:3).\n');
@@ -305,7 +312,10 @@ test('screens.md needs readable screen headings or only None', () => {
 });
 
 test('inventory paths keep their characters; a bad source root fails', () => {
-  const dir = survey({ inventory: '| Path | Context | Notes |\n|---|---|---|\n| `src/my_module/file_a.php` | billing | |\n| src/Copy (1).php | billing | |\n| src/[id].php | billing | |\n| src/billing/ | billing | |\n| src/common/ | platform | |\n| vendor/ | excluded | |\n' });
+  const dir = survey({
+    inventory: '| Path | Context | Notes |\n|---|---|---|\n| `src/my_module/file_a.php` | billing | |\n| src/Copy (1).php | billing | |\n| src/[id].php | billing | |\n| src/billing/ | billing | |\n| src/common/ | platform | |\n| vendor/ | excluded | |\n',
+    capabilities: '### platform\n1. `platform/db`\n   - `src/common/`\n\n### billing\n1. `billing/invoice`\n   - `src/` and the odd names under it\n',
+  });
   for (const f of ['src/my_module/file_a.php', 'src/Copy (1).php', 'src/[id].php']) write(dir, f, 'x');
   assert.deepEqual(checkReview(dir, 'survey'), { ok: true, problems: [] });
   for (const root of ['srcc', '../legacy', 'C:\\\\work\\\\legacy']) {
@@ -444,6 +454,8 @@ test('an extract or amend review needs the archived survey, a listed capability 
   write(amend, `${A}/specs/calc/spec.md`, '## MODIFIED Requirements\n\n### Requirement: Add two numbers\nThe system SHALL truncate.\n');
   write(amend, `${A}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | x |\n');
   write(amend, `${A}/review.md`, 'Reviewer: Uma\n- [x] R1 Add two numbers\n');
+  write(amend, `${A}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Add two numbers | src/calc.php:add:3 | none |\n');
+  write(amend, 'src/calc.php', '<?php\n');
   assert.match(checkReview(amend, 'amend-calc').problems.join(), /no baseline spec at openspec\/specs\/calc\/spec.md to amend/);
   write(amend, 'openspec/specs/calc/spec.md', SPEC);
   assert.deepEqual(checkReview(amend, 'amend-calc'), { ok: true, problems: [] });

@@ -55,6 +55,9 @@ artifacts:
       implements it (path:symbol:lines) and existing tests. For REMOVED
       requirements write "removed". Ports read this file together with the
       extract change's trace.md; this file wins for the requirements it lists.
+      `gate.mjs review` fails while a MODIFIED or ADDED requirement has no
+      row, a row names no `path:symbol` or `path:lines`, or a path does not
+      exist.
     requires:
       - specs
 

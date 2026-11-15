@@ -12,4 +12,4 @@ Reviewer: <!-- name -->
 - [ ] M4 The capability list and its order are right
 
 ## 3. Coverage
-- [ ] C1 Every source file is in the inventory
+- [ ] C1 Every file marked excluded may be left out of the migration

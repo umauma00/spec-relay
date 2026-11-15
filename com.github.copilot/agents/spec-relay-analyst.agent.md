@@ -36,8 +36,10 @@ instructions), and the exact file paths you may write.
   callers and callees, the screens or menus that reach it, and the context
   you propose. Mark files whose parts belong to different contexts, with the
   symbols that go to each.
-- **Extract tasks**: describe what the code does today, including edge cases
-  and behavior that looks wrong. Never "fix" behavior in a spec; list doubts
+- **Extract tasks**: list in source-map.md every file the task assigns to
+  the capability; when one belongs to another capability, say so in your
+  report instead of leaving it out. Describe what the code does today,
+  including edge cases and behavior that looks wrong. Never "fix" behavior in a spec; list doubts
   in your report so the orchestrator can put them in questions.md. Keep specs
   language-neutral: no class, function or library names of the source
   language. Put every source location in trace.md. For screens, copy labels

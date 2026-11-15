@@ -7,6 +7,8 @@
 //   node gate.mjs port-ready --capability <capability>     before creating a port change
 //   node gate.mjs port-done --change port-<capability>     before archiving a port change
 //   node gate.mjs baseline --capability <capability>       the baseline hash a port records
+//   node gate.mjs coverage                                 every kept source file has a capability in the plan, and
+//                                                          every analyzed capability's source map holds its files
 //   node gate.mjs guard --save <name>                      before a wave: snapshot the hashes of the files no
 //                                                          subagent may write (active review.md and questions.md,
 //                                                          plan.md, lessons.md, openspec/specs/, openspec/config.yaml,
@@ -26,6 +28,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkSurveyCoverage, checkSourceMap, checkTrace, checkCoverage } from './coverage.mjs';
 
 // Same shapes OpenSpec 2.0.0 (and 1.17.0) counts as tasks and requirements, so the gate never
 // sees fewer items than `openspec instructions apply` or `openspec archive` do.
@@ -189,8 +192,10 @@ function specRequirements(dir, problems) {
   return found;
 }
 
-function checkExtract(dir, boxes, problems) {
+function checkExtract(root, dir, boxes, problems) {
   const requirements = specRequirements(dir, problems);
+  for (const capability of specCapabilities(dir)) checkSourceMap(root, dir, capability, problems);
+  checkTrace(root, dir, requirements.map((r) => r.name), problems);
   for (const { name, where } of requirements) problems.push(...requireItems(boxes, 'R', [name], 'requirement', where));
   const screensText = readIf(path.join(dir, 'screens.md'), problems);
   if (screensText === null) problems.push('screens.md is missing (write "None" when the capability has no screens)');
@@ -218,7 +223,7 @@ function checkExtract(dir, boxes, problems) {
   }
 }
 
-function checkAmend(dir, boxes, problems) {
+function checkAmend(root, dir, boxes, problems) {
   const reason = readIf(path.join(dir, 'reason.md'), problems);
   const said = stripComments(reason ?? '').replace(/^#.*$/gm, '').replace(/^\s*(?:[-*+]|\d+[.)])\s*(?:(?:MODIFIED|ADDED|REMOVED)\s*\/?\s*)*:?\s*$/gim, '').trim();
   if (reason === null || !said) problems.push('reason.md gives no reason');
@@ -235,7 +240,9 @@ function checkAmend(dir, boxes, problems) {
       if (r && inRemoved) removed.add(r[1]);
     }
   }
-  checkCrosscheck(dir, requirements.map((r) => r.name).filter((n) => !removed.has(n)), [], problems);
+  const kept = requirements.map((r) => r.name).filter((n) => !removed.has(n));
+  checkTrace(root, dir, kept, problems);
+  checkCrosscheck(dir, kept, [], problems);
 }
 
 const CONTEXT = /^###\s*Context:\s*([a-z0-9]+(?:-[a-z0-9]+)*)\s*$/;
@@ -319,6 +326,7 @@ function checkSurvey(root, dir, boxes, problems) {
   const uncovered = (files ?? []).filter((file) => !rows.some((r) => r.path === file || (r.path.endsWith('/') && file.startsWith(r.path))));
   for (const file of uncovered.slice(0, 20)) problems.push(`source file not in the inventory: ${file}`);
   if (uncovered.length > 20) problems.push(`...and ${uncovered.length - 20} more source files not in the inventory`);
+  checkSurveyCoverage(root, dir, rows, problems);
 
   const caps = capabilityList(readIf(path.join(dir, 'capabilities.md'), problems));
   if (caps.length === 0) problems.push('capabilities.md lists no capability ("1. `billing/invoice` ...")');
@@ -412,8 +420,8 @@ export function checkReview(root, change) {
   const boxes = commonReview(dir, problems);
   if (boxes === null) return { ok: false, problems: ['review.md is missing'] };
   const schema = changeSchema(dir);
-  if (schema === 'spec-relay-extract') { checkSurveyed(root, change, dir, 'extract', problems); checkExtract(dir, boxes, problems); }
-  else if (schema === 'spec-relay-amend') { checkSurveyed(root, change, dir, 'amend', problems); checkAmend(dir, boxes, problems); }
+  if (schema === 'spec-relay-extract') { checkSurveyed(root, change, dir, 'extract', problems); checkExtract(root, dir, boxes, problems); }
+  else if (schema === 'spec-relay-amend') { checkSurveyed(root, change, dir, 'amend', problems); checkAmend(root, dir, boxes, problems); }
   else if (schema === 'spec-relay-survey') checkSurvey(root, dir, boxes, problems);
   else if (schema === 'spec-relay-target') checkTarget(root, dir, boxes, problems);
   else problems.push(`schema ${schema} has no review gate`);
@@ -624,6 +632,7 @@ export function main(argv) {
   if (command === 'review' && opts.change) result = checkReview(opts.root, opts.change);
   else if (command === 'port-ready' && opts.capability) result = checkPortReady(opts.root, opts.capability);
   else if (command === 'port-done' && opts.change) result = checkPortDone(opts.root, opts.change);
+  else if (command === 'coverage' && !opts.change && !opts.capability) result = checkCoverage(opts.root);
   else if (command === 'guard' && opts.save !== undefined && opts.compare === undefined) result = guardSave(opts.root, opts.save);
   else if (command === 'guard' && opts.compare !== undefined && opts.save === undefined) result = guardCompare(opts.root, opts.compare);
   else if (command === 'guard' && opts.save === undefined && opts.compare === undefined) result = guardHash(opts.root);
@@ -640,7 +649,7 @@ export function main(argv) {
 }
 
 function usage() {
-  console.error('Usage: node gate.mjs review --change NAME | port-ready --capability PATH | port-done --change NAME | baseline --capability PATH | guard [--save NAME | --compare NAME] [--root DIR] [--lang ja|en]');
+  console.error('Usage: node gate.mjs review --change NAME | port-ready --capability PATH | port-done --change NAME | baseline --capability PATH | coverage | guard [--save NAME | --compare NAME] [--root DIR] [--lang ja|en]');
   return 2;
 }
 
