@@ -155,7 +155,11 @@ test('running the script through a symlink still runs it', { skip: process.platf
 function fakeNpm(version = '2.0.0') {
   const bin = tempDir('spec-relay-bin-');
   const openspec = `if (process.argv[2] === '--version') { console.log(${JSON.stringify(version)}); } else { process.exitCode = 1; }\n`;
-  write(bin, 'fake-npm.js', `const fs = require('fs'); const path = require('path');
+  // On Windows the kit prefers an npm.cmd that has node_modules/npm/bin/npm-cli.js
+  // beside it (as a real npm install does), and also looks in node's own folder,
+  // so the fake is laid out the same way to come first.
+  const script = process.platform === 'win32' ? 'node_modules/npm/bin/npm-cli.js' : 'fake-npm.js';
+  write(bin, script, `const fs = require('fs'); const path = require('path');
 if (process.argv[2] === '--version') { console.log('10.9.0'); process.exit(0); }
 const dir = path.join(process.cwd(), 'node_modules/@fission-ai/openspec');
 fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
@@ -163,7 +167,7 @@ fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: ${JSO
 fs.writeFileSync(path.join(dir, 'bin/openspec.js'), ${JSON.stringify(openspec)});
 `);
   if (process.platform === 'win32') {
-    write(bin, 'npm.cmd', `@echo off\r\n"${process.execPath}" "${path.join(bin, 'fake-npm.js')}" %*\r\n`);
+    write(bin, 'npm.cmd', `@echo off\r\n"${process.execPath}" "${path.join(bin, script)}" %*\r\n`);
   } else {
     write(bin, 'npm', `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'fake-npm.js')}" "$@"\n`);
     fs.chmodSync(path.join(bin, 'npm'), 0o755);
@@ -249,7 +253,8 @@ test('--target-root may not be .agents, where OpenSpec keeps its skills', () => 
   assert.throws(() => parseArgs(['--target', tempDir(), '--source-language', 'PHP', '--target-language', 'Java', '--target-root', '.agents/new']), /\.agents/);
 });
 
-test('a missing npm stops setup before anything is written', () => {
+// On Windows node's own folder always holds npm, so npm cannot be taken away there.
+test('a missing npm stops setup before anything is written', { skip: process.platform === 'win32' && 'npm sits in node\'s folder' }, () => {
   const dir = tempDir();
   const result = run('setup.mjs', ['--target', dir, ...BASE, '--apply'], { env: envWithPath(tempDir()) });
   assert.equal(result.status, 3, result.stderr + result.stdout);
