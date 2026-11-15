@@ -247,7 +247,8 @@ test('the target-design gate needs a module and verification levels for every co
   write(dir, `${T}/ui.md`, UI);
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n');
   write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
-  // The survey found no database, so data.md may be left out.
+  assert.deepEqual(checkReview(dir, 'target-design').problems, ['architecture.md has no module row for context billing', 'data.md is missing (write "None" when the survey found no database)']);
+  write(dir, `${T}/data.md`, '# Data\n\n## Schema policy\nNone\n');
   assert.deepEqual(checkReview(dir, 'target-design').problems, ['architecture.md has no module row for context billing']);
   write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A1 platform\n- [x] E1 platform\n');
   assert.match(checkReview(dir, 'target-design').problems.join(), /module of context billing has no review item/);
@@ -641,7 +642,7 @@ test('definitions that change after the survey stop extract reviews and ports un
   assert.match(next.person.join(), /調査をやり直し（survey-v2）/);
   assert.deepEqual(next.agent, []);
   assert.match(checkPortReady(dir, 'calc').problems.join(), /database definitions changed after the survey/);
-  // A survey from kit 0.7.0 has no database.md: nothing to compare.
+  // A survey from kit 0.8.0 has no database.md: nothing to compare.
   fs.rmSync(path.join(dir, 'openspec/changes/archive/2026-11-01-survey/database.md'));
   assert.equal(checkReview(dir, 'extract-calc').ok, true);
 });
@@ -718,6 +719,7 @@ test('the target-design gate needs ui.md: a row and a valid policy per context, 
   fs.renameSync(path.join(dir, SURVEY), path.join(dir, 'openspec/changes/archive/2026-11-01-survey'));
   const T = 'openspec/changes/target-design';
   write(dir, `${T}/.openspec.yaml`, 'schema: spec-relay-target\n');
+  write(dir, `${T}/data.md`, '# Data\n\n## Schema policy\nNone\n');
   write(dir, `${T}/review.md`, `Reviewer: Uma\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform\n- [x] E2 billing\n${UI_BOXES}`);
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| billing | ts/billing |\n');
   write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
@@ -810,6 +812,7 @@ test('ui.md carried files must be carry rows placed inside the target root', () 
   fs.renameSync(path.join(dir, SURVEY), path.join(dir, 'openspec/changes/archive/2026-11-01-survey'));
   const T = 'openspec/changes/target-design';
   write(dir, `${T}/.openspec.yaml`, 'schema: spec-relay-target\n');
+  write(dir, `${T}/data.md`, '# Data\n\n## Schema policy\nNone\n');
   write(dir, `${T}/review.md`, `Reviewer: Uma\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform\n- [x] E2 billing\n${UI_BOXES}`);
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| billing | ts/billing |\n');
   write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
@@ -826,4 +829,30 @@ test('ui.md carried files must be carry rows placed inside the target root', () 
   assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] }, 'the target root compares without case, as Windows does');
   write(dir, `${T}/ui.md`, UI.replace(/## Carried files\n[\s\S]*$/, ''));
   assert.match(checkReview(dir, 'target-design').problems.join(), /no "## Carried files" section, but the inventory marks files carry/);
+});
+
+test('database definitions are never carried, and section headings may be numbered', () => {
+  const dir = databaseSurvey();
+  write(dir, `${SURVEY}/inventory.md`, DB_INVENTORY.replace('| billing | port | trg_Audit', '| billing | carry | trg_Audit'));
+  assert.match(checkReview(dir, 'survey').problems.join(), /carries database definitions; they are port/);
+  write(dir, `${SURVEY}/inventory.md`, DB_INVENTORY);
+  const text = fs.readFileSync(path.join(dir, `${SURVEY}/database.md`), 'utf8');
+  write(dir, `${SURVEY}/database.md`, text.replace('## Databases', '## 1 Databases'));
+  assert.deepEqual(checkReview(dir, 'survey'), { ok: true, problems: [] });
+  write(dir, `${SURVEY}/database.md`, text.replace(/- legacy:[^\n]*/, '<!-- what could not be read -->'));
+  assert.match(checkReview(dir, 'survey').problems.join(), /database legacy has no definitions; say under ## Missing definitions/);
+});
+
+test('a test database given as a fenced command block counts', () => {
+  const dir = databaseSurvey();
+  fs.mkdirSync(path.join(dir, 'openspec/changes/archive'));
+  fs.renameSync(path.join(dir, SURVEY), path.join(dir, 'openspec/changes/archive/2026-11-01-survey'));
+  const T = 'openspec/changes/target-design';
+  write(dir, `${T}/.openspec.yaml`, 'schema: spec-relay-target\n');
+  write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| billing | ts/billing |\n');
+  write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
+  write(dir, `${T}/ui.md`, UI);
+  write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform\n- [x] E2 billing\n' + UI_BOXES + '- [x] D0 policy\n- [x] D1 procedure: keep\n- [x] D2 trigger: keep\n- [x] D90 e\n- [x] D91 m\n- [x] D92 s\n');
+  write(dir, `${T}/data.md`, '# Data\n\n## Schema policy\nkeep\n\n## Database logic\n| Kind | Handling | Reason |\n|---|---|---|\n| procedure | keep | |\n| trigger | keep | |\n\n## Data access mapping\n| Topic | Source behavior | Target rule |\n|---|---|---|\n| Character set | cp932 | same |\n\n## Schema changes\nno migrations\n\n## Test database\n```powershell\nsqllocaldb create spec-relay\n```\n');
+  assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
 });

@@ -148,7 +148,7 @@ export function section(text, heading) {
   let found = false;
   for (const line of unfencedLines(stripComments(text ?? ''))) {
     const h2 = line.match(/^##\s+(.*?)(?:\s+#+)?\s*$/);
-    if (h2) { inside = heading.test(plain(h2[1].trim().replace(/^\d+[.)]\s*/, ''))); found ||= inside; continue; }
+    if (h2) { inside = heading.test(plain(h2[1].trim()).replace(/^\d+[.)]?\s+/, '')); found ||= inside; continue; }
     if (inside) out.push(line);
   }
   return found ? out.join('\n') : null;
@@ -422,10 +422,31 @@ const recordedDbHash = (text) => stripComments(sectionNamed(text, 'Snapshot') ??
 
 // The rows of the first table in the text as objects keyed by the lowercase header cells.
 function firstTable(text) {
-  const all = headedRows(text);
-  if (all.length === 0) return { header: [], rows: [] };
-  const { header } = all[0];
-  return { header, rows: all.filter((r) => r.header === header).map((r) => Object.fromEntries(header.map((h, n) => [h, r.cells[n] ?? '']))) };
+  const lines = unfencedLines(stripComments(text ?? ''));
+  const cells = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^\s*\|/.test(lines[i]) || !/^\s*\|?\s*:?-{2,}/.test(lines[i + 1] ?? '')) continue;
+    const header = cells(lines[i]).map((c) => norm(c));
+    const rows = [];
+    for (i += 2; i < lines.length && /^\s*\|/.test(lines[i]); i += 1) {
+      const row = cells(lines[i]);
+      rows.push(Object.fromEntries(header.map((h, n) => [h, row[n] ?? ''])));
+    }
+    return { header, rows };
+  }
+  return { header: [], rows: [] };
+}
+
+// A section's text with comments dropped but fenced blocks kept, or '' when missing.
+function rawSection(text, title) {
+  const out = [];
+  let inside = false;
+  for (const line of stripComments(text ?? '').split(/\r?\n/)) {
+    const h2 = line.match(/^##\s+(.*?)(?:\s+#+)?\s*$/);
+    if (h2) { inside = norm(h2[1]).replace(/^\d+[.)]?\s+/, '') === norm(title); continue; }
+    if (inside) out.push(line);
+  }
+  return out.join('\n');
 }
 
 // The databases database.md lists under ## Databases: [] when it says None, or null when unreadable.
@@ -459,7 +480,8 @@ function checkDatabases(root, dir, boxes, problems) {
       if (p.split('/').includes('..') || path.isAbsolute(p) || !fs.existsSync(path.join(root, p))) problems.push(`database ${db.name}: the definitions path ${p} does not exist in the repository`);
     }
   }
-  if (missing.length && isNone(sectionNamed(text, 'Missing definitions') ?? 'none')) {
+  const missingText = sectionNamed(text, 'Missing definitions') ?? '';
+  if (missing.length && (isNone(missingText) || !plain(missingText))) {
     problems.push(`database ${missing.join(', ')} has no definitions; say under ## Missing definitions what is missing and why`);
   }
   if (!hasId(boxes, 'D90')) problems.push('review.md has no D90 item for the missing definitions');
@@ -479,7 +501,7 @@ function checkDatabases(root, dir, boxes, problems) {
 }
 
 // After the survey is archived, specs and ports rest on the definitions it
-// reviewed. A survey from kit 0.7.0 or earlier has no database.md: nothing to compare.
+// reviewed. A survey from kit 0.8.0 or earlier has no database.md: nothing to compare.
 export function checkDatabaseDrift(root, problems) {
   const survey = archivedChange(root, 'survey');
   if (!survey) return;
@@ -496,11 +518,11 @@ export function checkDatabaseDrift(root, problems) {
 function checkData(survey, dir, boxes, problems) {
   const dbText = readIf(path.join(survey, 'database.md'), problems);
   if (dbText === null) return;
-  if (!(listedDatabases(dbText) ?? []).length) return;
   const data = readIf(path.join(dir, 'data.md'), problems);
-  if (data === null) { problems.push('data.md is missing (the survey\'s database.md lists databases)'); return; }
+  if (data === null) { problems.push('data.md is missing (write "None" when the survey found no database)'); return; }
+  if (!(listedDatabases(dbText) ?? []).length) return;
   for (const title of ['Schema policy', 'Database logic', 'Data access mapping', 'Schema changes', 'Test database']) {
-    const body = stripComments(sectionNamed(data, title) ?? '').trim();
+    const body = rawSection(data, title).trim();
     if (!body || PLACEHOLDER.test(plain(body))) problems.push(`data.md has no "## ${title}" section, or it is empty (keep the template's English headings)`);
   }
   for (const [topic = '', , rule = ''] of tableRows(sectionNamed(data, 'Data access mapping') ?? '')) {
@@ -561,6 +583,7 @@ function checkSurvey(root, dir, boxes, problems) {
   const rows = inventoryRows(inventoryText);
   for (const row of rows.filter((r) => !known.has(r.context))) problems.push(`inventory row "${row.path}" names an unknown context "${row.context}"`);
   for (const row of rows.filter((r) => r.handling && !HANDLINGS.includes(r.handling))) problems.push(`inventory row "${row.path}" has the handling "${row.handling}"; use port or carry`);
+  for (const row of rows.filter((r) => r.handling === 'carry' && (r.path === `${DATABASE_DIR}/` || r.path.startsWith(`${DATABASE_DIR}/`)))) problems.push(`inventory row "${row.path}" carries database definitions; they are port (data.md decides what stays in the database)`);
   for (const row of rows.filter((r) => r.context === 'excluded' && r.handling === 'carry')) problems.push(`inventory row "${row.path}" is excluded and carry at once; a carried file belongs to the context whose module receives it`);
   const files = sourceFiles(root);
   if (files === null) {

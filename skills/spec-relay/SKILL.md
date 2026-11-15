@@ -391,7 +391,7 @@ the domain, not the folders.
 ## 2. Target design: decide how the new system is built
 
 1. `node "<kit>/scripts/openspec.mjs" new change target-design --schema spec-relay-target`.
-2. Write architecture, conventions, ui and verification from their instructions.
+2. Write architecture, conventions, ui, verification and data from their instructions.
    The default architecture is a modular monolith in the manner of Spring
    Modulith: one module per context, public API and events only, one owner per
    table, an automated boundary check. Ask the person about anything the code
