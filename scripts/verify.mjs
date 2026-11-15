@@ -60,14 +60,17 @@ export const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 const GRACE_MS = 2000;
 const running = new Set();
 
+// The PowerShell script that runs a command and exits with its status.
+export const windowsScript = (command) => `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ${command}; $ok = $?; if ($LASTEXITCODE) { exit $LASTEXITCODE }; if (-not $ok) { exit 1 }`;
+
 // Runs one command line in the target root and resolves to
 // { exitCode, timedOut, seconds, output } (only the last part of the output).
 export function runCommand(command, cwd, { timeoutMs, platform = process.platform, exec = spawn } = {}) {
   // UTF-8 output, so the printed tail of a failure is readable on a Japanese
-  // (CP932) console too; the command itself is the last statement, so its
-  // status is the run's.
+  // (CP932) console too. `-Command` alone exits 1 for any failure, so the exit
+  // code of a program is passed on, and a failed cmdlet exits 1.
   const [file, args, extra] = platform === 'win32'
-    ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ${command}`], {}]
+    ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', windowsScript(command)], {}]
     : ['/bin/sh', ['-c', command], { detached: true }];
   const started = Date.now();
   return new Promise((resolve) => {
