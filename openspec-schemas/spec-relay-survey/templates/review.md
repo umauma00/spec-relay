@@ -13,4 +13,4 @@ Reviewer: <!-- name -->
 - [ ] M5 The files marked carry may go to the new system unchanged
 
 ## 3. Coverage
-- [ ] C1 Every source file is in the inventory
+- [ ] C1 Every file marked excluded may be left out of the migration

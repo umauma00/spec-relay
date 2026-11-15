@@ -2,8 +2,8 @@
 
 ### platform
 1. `platform/auth` <!-- name -->
-   - <!-- source folders or files -->
+   - `<!-- src/common/auth/ -->`
 
 ### <!-- context id -->
 1. `<!-- context -->/<!-- capability -->` <!-- name -->
-   - <!-- source folders or files -->
+   - `<!-- source folder ending in / , or a file -->`
