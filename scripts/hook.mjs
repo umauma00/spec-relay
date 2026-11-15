@@ -10,7 +10,8 @@
 //     extract or amend change, or from a subagent;
 //   - file edits under the source root (with source root ".", everything outside
 //     openspec/ and the target root), under openspec/specs/, openspec/changes/archive/,
-//     openspec/schemas/, openspec/spec-relay/tools/ (the pinned OpenSpec), of openspec/config.yaml, and inside the kit itself;
+//     openspec/schemas/, openspec/spec-relay/tools/ (the pinned OpenSpec), openspec/spec-relay/db/ (the
+//     exported database definitions), of openspec/config.yaml, and inside the kit itself;
 //   - subagent edits of review.md, questions.md, the plan and the lessons;
 //   - shell commands that mention the "Hook enforcement" setting.
 // Shell commands that write files some other way are not parsed; the wave guard
@@ -103,6 +104,7 @@ export function protectedPath(root, file, { subagent = false, pluginRoot = KIT_R
     ['openspec/changes/archive', 'archived changes are the record of what was reviewed'],
     ['openspec/schemas', 'the kit\'s schemas are installed by setup.mjs'],
     ['openspec/spec-relay/tools', 'the pinned OpenSpec is installed by setup.mjs'],
+    ['openspec/spec-relay/db', 'the database definitions are exported from the database by the person and are read-only like the source code'],
   ]) if (under(rel, dir)) return why;
   if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions)\.md$/i.test(rel) || [PLAN, LESSONS].some((p) => fold(p) === fold(rel)))) {
     return 'only the orchestrator writes review.md, questions.md, the plan and the lessons';

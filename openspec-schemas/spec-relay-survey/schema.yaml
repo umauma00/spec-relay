@@ -14,6 +14,12 @@ artifacts:
       subagents that each write their rows to a part file, and merge the parts
       with the kit's `merge.mjs` (see the spec-relay skill).
 
+      The exported database definitions under `openspec/spec-relay/db/` (see
+      database.md) are source code too: give every file there a row, or a
+      folder row, and a context, like any other source file. A file that holds
+      objects of several contexts (one dump of a whole database) names its main
+      context and lists the objects that go to each other context in Notes.
+
       One table row per file or folder:
       - **Path**: repository-relative, forward slashes. A path ending in `/`
         covers every file below it. A more specific row wins over a folder row,
@@ -37,7 +43,8 @@ artifacts:
       each boundary; the person decides.
 
       Find boundaries from evidence, strongest first:
-      - Data ownership: which code WRITES which tables, files or queues.
+      - Data ownership: which code WRITES which tables, files or queues,
+        including the stored procedures, triggers and jobs in the database.
       - Business language: where the same word means different things, or a
         group of words is used together (see glossary.md).
       - Transactions and consistency: what must change together.
@@ -98,6 +105,48 @@ artifacts:
     requires:
       - context-map
 
+  - id: database
+    generates: database.md
+    description: The databases the system uses, where their definitions come from, and the logic inside them
+    template: database.md
+    instruction: |
+      Legacy systems often keep logic in the database: stored procedures,
+      triggers, views, functions, constraints and defaults, scheduled jobs. It
+      is behavior to migrate like the code, so record each database and where
+      its definitions can be read. Keep the template's English headings and
+      table headers: `gate.mjs review` reads them.
+
+      Sections:
+      - **Databases**: table of database (a short name), product and version,
+        how the code reaches it (the NAME of the connection setting, such as
+        `connectionStrings/Sales` in Web.config; never the connection string),
+        and definitions: the backticked paths that hold its definitions, either
+        files in the repository (`.sql`, `.dbml`, `.edmx`, typed DataSet
+        `.xsd`, migrations) or the folder the person exported to
+        (`openspec/spec-relay/db/<database>/`), or `none` when they could not
+        be obtained. When the system uses no database, write only "None" under
+        this heading and under the others.
+      - **Logic in the database**: table of kind, count, contexts and notes.
+        The kind is one of `view`, `procedure`, `function`, `trigger`,
+        `constraint` (check constraints, defaults, computed columns),
+        `sequence`, `job` and `other` (synonyms, linked servers, assemblies...).
+        One row per kind that exists. In notes, name the objects that write
+        tables of more than one context (they belong in the context map's
+        shared data) and triggers that write other tables.
+      - **Missing definitions**: what could not be read and why (encrypted
+        procedures, another database or server, no access), or "None". Each
+        item becomes a question in the extract changes that need it.
+      - **Snapshot**: `sha256: <hash>` as `node "<kit>/scripts/gate.mjs"
+        db-hash` prints it, or "none" when `openspec/spec-relay/db/` holds no
+        file. Later gates compare it, so that specs rest on the definitions
+        the person reviewed.
+
+      Never connect to a database yourself, and never write a password, token
+      or connection string into any file. The person exports the definitions
+      (see the kit's docs/DATABASE.md).
+    requires:
+      - context-map
+
   - id: review
     generates: review.md
     description: Human review checklist of the context map; the change may be archived only when every box is ticked by the reviewer
@@ -112,12 +161,17 @@ artifacts:
         order.
       - Under `## 3. Coverage`, one checkbox that every source file is in the
         inventory (`gate.mjs review` also checks this).
+      - Under `## 4. Databases`, one checkbox per database in database.md's
+        table, `- [ ] D<n> <database>: definitions and the logic in it`, and
+        one that the missing definitions are understood. Leave the heading
+        empty when database.md says None.
       Do not tick any box. Only the reviewer decides; see the apply instruction.
     requires:
       - inventory
       - context-map
       - glossary
       - capabilities
+      - database
 
 apply:
   requires: [ review ]

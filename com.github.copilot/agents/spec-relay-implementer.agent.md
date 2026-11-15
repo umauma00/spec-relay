@@ -42,7 +42,11 @@ each, the tasks you ticked, and anything left as `TODO(port)`.
   - fix behavior that looks wrong in the spec or the source code (report it:
     it is follow-up work after the migration);
   - add a library or framework that conventions.md and design.md do not name;
-  - refactor, rename or reformat code outside this capability's module.
+  - refactor, rename or reformat code outside this capability's module;
+  - change the database schema or a database object (procedure, trigger,
+    view...), let the data access library create or change the schema, or
+    connect to any database other than the test database of the target
+    design's data.md.
   If the target language cannot do what the spec says and design.md does not
   settle how, stop and report it instead of choosing an alternative.
 - When the source code and the spec disagree, stop and report it instead of

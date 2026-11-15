@@ -94,6 +94,62 @@ artifacts:
     requires:
       - architecture
 
+  - id: data
+    generates: data.md
+    description: How the new system uses the database - schema policy, logic in the database, dialect and ORM rules, test database
+    template: data.md
+    instruction: |
+      Decide once how every port uses the databases of the archived survey's
+      database.md (`openspec/changes/archive/*-survey*/database.md`, the newest
+      one). When it says None, write only "None" under the first heading.
+      Keep the template's English headings and table headers, and the words
+      `keep` and `move`: `gate.mjs review` reads them. Ask the person; the
+      code cannot tell you how the switch to the new system will happen.
+
+      The migration keeps behavior, so the default keeps the database as it is.
+      - **Schema policy**: `keep` (the default: the new code reads and writes
+        the same tables, columns and types; no data migration) or `same
+        structure on <product>` (another product with the same tables; data
+        migration and the dialect rows below then matter, and the data
+        migration is a separate task you name here). Redesigning the schema is
+        follow-up work after the migration, never part of it. Also write how
+        old and new run during the switch: all at once, or side by side on the
+        same database (then nothing may change the schema, and logic in the
+        database stays there, because the old system still relies on it).
+      - **Database logic**: table of kind (every kind in database.md's Logic in
+        the database), handling and reason. Handling is `keep` (stays in the
+        database; the module calls or relies on it) or `move` (re-implemented
+        in the module that owns the table). Defaults: keep triggers,
+        constraints, sequences and views, because they act on every writer,
+        including the old system and manual SQL; keep procedures and functions
+        unless the product changes; jobs become batch capabilities, and their
+        schedule moves only when the person says so.
+      - **Exceptions**: table of object, handling and reason, for objects
+        handled unlike their kind. "None" when there are none.
+      - **Data access mapping**: table of topic, source behavior and target
+        rule, for differences between the old and new data access that change
+        results: trailing spaces in comparisons, empty string and NULL, order
+        of rows without ORDER BY, collation (case, full-width and half-width,
+        kana), date and time precision and time zone, numbers and rounding in
+        SQL, keys and numbering (identity, sequences), transactions, isolation
+        and locks, character set, and ORM behavior (lazy loading, batching,
+        caching, generated SQL). Read the source code and definitions for what
+        the old system relies on.
+      - **Schema changes**: the data access library and the exact setting
+        that stops it from creating or changing the schema (for example
+        Hibernate `spring.jpa.hibernate.ddl-auto=validate`, no EF Core
+        migrations, no `prisma migrate`). Nobody changes the schema or the
+        database objects during the migration.
+      - **Test database**: how tests get a database built from the
+        definitions (product and edition, how the definitions are loaded),
+        as one-line commands that run in PowerShell on Windows. Prefer what
+        runs on Windows 11 without a paid licence (SQL Server Express or
+        LocalDB, the product's own installer); use a container only when the
+        person chooses it. Names of environment variables only, never a
+        connection string or password.
+    requires:
+      - architecture
+
   - id: review
     generates: review.md
     description: Human review checklist of the target design
@@ -107,11 +163,17 @@ artifacts:
       - Under `## 2. Conventions`: one checkbox per section of conventions.md.
       - Under `## 3. Verification`: one checkbox per context's levels, and one
         for sign-in and recorded data.
+      - Under `## 4. Data`: one checkbox for the schema policy, one per kind in
+        data.md's Database logic (`- [ ] D<n> <kind>: <handling>`), and one
+        each for the exceptions, the data access mapping, and the schema
+        changes with the test database. Leave the heading empty when data.md
+        says None.
       Do not tick any box. Only the reviewer decides.
     requires:
       - architecture
       - conventions
       - verification
+      - data
 
 apply:
   requires: [ review ]

@@ -17,3 +17,10 @@ Reviewer: <!-- name -->
 ## 3. Verification
 - [ ] E1 <!-- context -->: levels
 - [ ] E90 Sign-in and recorded data
+
+## 4. Data
+- [ ] D0 The schema policy
+- [ ] D1 <!-- kind -->: <!-- keep / move -->
+- [ ] D90 The exceptions
+- [ ] D91 The data access mapping
+- [ ] D92 The schema changes and the test database

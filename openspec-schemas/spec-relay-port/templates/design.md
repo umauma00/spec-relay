@@ -9,6 +9,11 @@
 |---|---|---|
 | <!-- --> | <!-- --> | <!-- --> |
 
+## Data access
+| Table or object (source-map.md) | Handling (data.md) | How the module reaches it |
+|---|---|---|
+| <!-- --> | <!-- keep / move --> | <!-- --> |
+
 ## Verification
 | Level | Covers |
 |---|---|

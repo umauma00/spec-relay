@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { checkReview, checkPortReady, checkPortDone, baselineHash, archivedChange, sourceFiles, main, nextSteps, language } from '../scripts/gate.mjs';
+import { checkReview, checkPortReady, checkPortDone, baselineHash, archivedChange, sourceFiles, databaseHash, main, nextSteps, language } from '../scripts/gate.mjs';
 import { quiet } from './helpers.mjs';
 import { tempDir, write } from './helpers.mjs';
 
@@ -196,7 +196,8 @@ test('screens need review items and crosscheck rows; crosscheck verdicts must be
 });
 
 const SURVEY = 'openspec/changes/survey';
-function survey({ inventory, review } = {}) {
+const NO_DATABASE = '# Databases\n\n## Databases\nNone\n\n## Logic in the database\nNone\n\n## Missing definitions\nNone\n\n## Snapshot\nsha256: none\n';
+function survey({ inventory, review, database } = {}) {
   const dir = tempDir();
   write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only; only openspec/ and the target root may change): .\n  Target root (new implementation): ts\n');
   write(dir, `${SURVEY}/.openspec.yaml`, 'schema: spec-relay-survey\n');
@@ -211,6 +212,7 @@ function survey({ inventory, review } = {}) {
   write(dir, `${SURVEY}/inventory.md`, inventory ?? '| Path | Context | Notes |\n|---|---|---|\n| src/ | billing | |\n| src/common/db.php | platform | |\n| vendor/ | excluded | library |\n');
   write(dir, `${SURVEY}/capabilities.md`, '# Capabilities\n\n### platform\n1. `platform/db` DB\n\n### billing\n1. `billing/invoice` 請求書\n   - src/billing\n');
   write(dir, `${SURVEY}/review.md`, review ?? 'Reviewer: Uma\n\n- [x] K1 platform: 共通基盤\n- [x] K2 billing: 請求\n- [x] M1 map\n- [x] C1 coverage\n');
+  write(dir, `${SURVEY}/database.md`, database ?? NO_DATABASE);
   return dir;
 }
 
@@ -241,6 +243,8 @@ test('the target-design gate needs a module and verification levels for every co
   write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform: levels\n- [x] E2 `billing`: levels\n');
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n');
   write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
+  assert.deepEqual(checkReview(dir, 'target-design').problems, ['architecture.md has no module row for context billing', 'data.md is missing (write "None" when the survey found no database)']);
+  write(dir, `${T}/data.md`, '# Data\n\n## Schema policy\nNone\n');
   assert.deepEqual(checkReview(dir, 'target-design').problems, ['architecture.md has no module row for context billing']);
   write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A1 platform\n- [x] E1 platform\n');
   assert.match(checkReview(dir, 'target-design').problems.join(), /module of context billing has no review item/);
@@ -488,4 +492,139 @@ test('plan capabilities come from the capability list only, and no capability ma
   write(v, 'openspec/changes/extract-billing-api-v2/specs/billing/api-v2/spec.md', SPEC);
   write(v, 'openspec/changes/extract-billing-api-v2/review.md', GOOD);
   assert.match(checkReview(v, 'extract-billing-api-v2').problems.join(), /capability billing\/api-v2 ends like a rerun suffix/);
+});
+
+const DB = 'openspec/spec-relay/db';
+const WITH_DATABASE = (hash) => `# Databases
+
+## Databases
+| Database | Product and version | Connection setting | Definitions |
+|---|---|---|---|
+| sales | SQL Server 2012 | Web.config Sales | \`${DB}/sales/\` |
+| legacy | Access 97 | odbc Legacy | none |
+
+## Logic in the database
+| Kind | Count | Contexts | Notes |
+|---|---|---|---|
+| procedure | 12 | billing | |
+| trigger | 3 | billing, platform | trg_Audit writes platform's log |
+
+## Missing definitions
+- legacy: the file is lost; its queries are read from the code.
+
+## Snapshot
+sha256: ${hash}
+`;
+const DB_REVIEW = 'Reviewer: Uma\n\n- [x] K1 platform\n- [x] K2 billing\n- [x] M1 map\n- [x] C1 coverage\n- [x] D1 sales: definitions and the logic in it\n- [x] D2 legacy: definitions\n- [x] D90 missing\n';
+const DB_INVENTORY = '| Path | Context | Notes |\n|---|---|---|\n| src/ | billing | |\n| src/common/db.php | platform | |\n| vendor/ | excluded | library |\n| openspec/spec-relay/db/sales/ | billing | trg_Audit goes to platform |\n';
+
+function databaseSurvey() {
+  const dir = survey({ inventory: DB_INVENTORY, review: DB_REVIEW });
+  write(dir, `${DB}/sales/dbo/Procedures/usp_Close.sql`, 'CREATE PROCEDURE usp_Close AS SELECT 1\r\nGO\r\n');
+  write(dir, `${DB}/sales/dbo/Triggers/trg_Audit.sql`, '﻿CREATE TRIGGER trg_Audit ON Orders AFTER UPDATE AS INSERT INTO Log VALUES (1)\n');
+  write(dir, `${DB}/sales/desktop.ini`, '[x]');
+  write(dir, `${SURVEY}/database.md`, WITH_DATABASE(databaseHash(dir)));
+  return dir;
+}
+
+test('the survey counts exported database definitions as source files and checks database.md', () => {
+  const dir = databaseSurvey();
+  assert.deepEqual(sourceFiles(dir).filter((f) => f.startsWith(DB)), [`${DB}/sales/dbo/Procedures/usp_Close.sql`, `${DB}/sales/dbo/Triggers/trg_Audit.sql`]);
+  assert.deepEqual(checkReview(dir, 'survey'), { ok: true, problems: [] });
+
+  // Every definition file needs an inventory row, like the code.
+  write(dir, `${SURVEY}/inventory.md`, DB_INVENTORY.replace(/\| openspec[^\n]*\n/, ''));
+  assert.match(checkReview(dir, 'survey').problems.join('\n'), /source file not in the inventory: openspec\/spec-relay\/db\/sales\/dbo\/Procedures\/usp_Close.sql/);
+  write(dir, `${SURVEY}/inventory.md`, DB_INVENTORY);
+
+  // A review item per database, real paths, known kinds, a reason for missing definitions.
+  write(dir, `${SURVEY}/review.md`, DB_REVIEW.replace(/- \[x\] D2[^\n]*\n/, ''));
+  assert.deepEqual(checkReview(dir, 'survey').problems, ['database has no review item: legacy (D<n> legacy)']);
+  write(dir, `${SURVEY}/review.md`, DB_REVIEW);
+  const text = fs.readFileSync(path.join(dir, `${SURVEY}/database.md`), 'utf8');
+  write(dir, `${SURVEY}/database.md`, text.replace(`\`${DB}/sales/\``, '`db/sales.sql`').replace('| trigger |', '| triggers |').replace(/- legacy:[^\n]*/, 'None'));
+  assert.deepEqual(checkReview(dir, 'survey').problems, [
+    'database sales: the definitions path db/sales.sql does not exist in the repository',
+    'database legacy has no definitions; say under ## Missing definitions what is missing and why',
+    'database.md: unknown kind "triggers" under ## Logic in the database (use view, procedure, function, trigger, constraint, sequence, job, other)',
+  ]);
+  write(dir, `${SURVEY}/database.md`, text);
+
+  // The recorded hash follows the files; line endings do not count.
+  write(dir, `${DB}/sales/dbo/Procedures/usp_Close.sql`, 'CREATE PROCEDURE usp_Close AS SELECT 1\nGO\n');
+  assert.equal(checkReview(dir, 'survey').ok, true);
+  write(dir, `${DB}/sales/dbo/Procedures/usp_Close.sql`, 'CREATE PROCEDURE usp_Close AS SELECT 2\nGO\n');
+  assert.match(checkReview(dir, 'survey').problems.join(), /differ from the hash database.md records/);
+  write(dir, `${SURVEY}/database.md`, text.replace(/sha256: \w+/, 'sha256: none'));
+  assert.match(checkReview(dir, 'survey').problems.join(), /records no snapshot hash/);
+});
+
+test('database.md says None only when no definitions were exported', () => {
+  const dir = survey({ database: '# Databases\n\n## Databases\n<!-- none yet -->\n' });
+  assert.match(checkReview(dir, 'survey').problems.join(), /lists no database in the ## Databases table/);
+  write(dir, `${SURVEY}/database.md`, NO_DATABASE);
+  assert.equal(checkReview(dir, 'survey').ok, true);
+  write(dir, `${DB}/x/schema.sql`, 'CREATE TABLE t (a int);\n');
+  write(dir, `${SURVEY}/inventory.md`, '| Path | Context | Notes |\n|---|---|---|\n| src/ | billing | |\n| vendor/ | excluded | |\n| openspec/spec-relay/db/ | billing | |\n');
+  assert.deepEqual(checkReview(dir, 'survey').problems, [`database.md says the system uses no database, but ${DB}/ holds 1 file`]);
+  fs.rmSync(path.join(dir, `${SURVEY}/database.md`));
+  assert.match(checkReview(dir, 'survey').problems.join(), /database.md is missing/);
+});
+
+test('UTF-16 definitions are the person\'s to convert, and db-hash reports them', () => {
+  const dir = databaseSurvey();
+  fs.writeFileSync(path.join(dir, `${DB}/sales/dbo/Procedures/usp_Close.sql`), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('CREATE', 'utf16le')]));
+  write(dir, `${SURVEY}/database.md`, WITH_DATABASE(databaseHash(dir)));
+  const result = checkReview(dir, 'survey');
+  assert.deepEqual(result.problems, [`database definition is UTF-16: ${DB}/sales/dbo/Procedures/usp_Close.sql`]);
+  const next = nextSteps('review', result, 'ja');
+  assert.match(next.person.join(), /UTF-16 で保存されています（openspec\/spec-relay\/db\/sales\/dbo\/Procedures\/usp_Close.sql）/);
+  assert.deepEqual(next.agent, []);
+  let out = '';
+  const log = console.log; console.log = (s) => { out += s; };
+  try { assert.equal(main(['db-hash', '--root', dir]), 1); } finally { console.log = log; }
+  const printed = JSON.parse(out);
+  assert.equal(printed.files, 2);
+  assert.equal(printed.sha256, databaseHash(dir));
+  assert.match(printed.next.person.join(), /UTF-16/);
+});
+
+test('the target design decides the handling of every kind of database logic', () => {
+  const dir = databaseSurvey();
+  fs.mkdirSync(path.join(dir, 'openspec/changes/archive'));
+  fs.renameSync(path.join(dir, SURVEY), path.join(dir, 'openspec/changes/archive/2026-11-01-survey'));
+  const T = 'openspec/changes/target-design';
+  const REVIEW = 'Reviewer: Uma\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform\n- [x] E2 billing\n- [x] D0 schema policy\n- [x] D1 procedure: keep\n- [x] D2 trigger: keep\n';
+  const DATA = '# Data\n\n## Schema policy\nkeep; old and new side by side\n\n## Database logic\n| Kind | Handling | Reason |\n|---|---|---|\n| procedure | keep | |\n| trigger | keep (acts on every writer) | |\n\n## Exceptions\nNone\n\n## Data access mapping\n| Topic | Source behavior | Target rule |\n|---|---|---|\n| Trailing spaces | ignored | rtrim |\n\n## Schema changes\nddl-auto=validate\n\n## Test database\nLocalDB\n';
+  write(dir, `${T}/.openspec.yaml`, 'schema: spec-relay-target\n');
+  write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| billing | ts/billing |\n');
+  write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
+  write(dir, `${T}/review.md`, REVIEW);
+  write(dir, `${T}/data.md`, DATA);
+  assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
+  write(dir, `${T}/data.md`, DATA.replace('| trigger | keep (acts on every writer) | |\n', '| procedure | rewrite | |\n').replace(/## Test database\nLocalDB\n/, ''));
+  write(dir, `${T}/review.md`, REVIEW.replace(/- \[x\] D2[^\n]*\n/, ''));
+  assert.deepEqual(checkReview(dir, 'target-design').problems, [
+    'data.md has no "## Test database" section, or it is empty (keep the template\'s English headings)',
+    'data.md: the handling of procedure is "rewrite"; write keep or move, and list objects handled the other way under ## Exceptions',
+    'data.md has no row for trigger under ## Database logic (the survey\'s database.md lists it)',
+    'the handling of trigger has no review item (D<n> trigger)',
+  ]);
+});
+
+test('definitions that change after the survey stop extract reviews and ports until the survey is redone', () => {
+  const dir = repo(GOOD);
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md', '1. `calc`\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/database.md', NO_DATABASE);
+  assert.equal(checkReview(dir, 'extract-calc').ok, true);
+  write(dir, `${DB}/sales/t.sql`, 'CREATE TABLE t (a int);\n');
+  const result = checkReview(dir, 'extract-calc');
+  assert.deepEqual(result.problems, [`database definitions changed after the survey: ${DB}/ no longer matches the hash in the archived survey's database.md (none recorded, ${databaseHash(dir).slice(0, 12)} now)`]);
+  const next = nextSteps('review', result, 'ja');
+  assert.match(next.person.join(), /調査をやり直し（survey-v2）/);
+  assert.deepEqual(next.agent, []);
+  assert.match(checkPortReady(dir, 'calc').problems.join(), /database definitions changed after the survey/);
+  // A survey from kit 0.7.0 has no database.md: nothing to compare.
+  fs.rmSync(path.join(dir, 'openspec/changes/archive/2026-11-01-survey/database.md'));
+  assert.equal(checkReview(dir, 'extract-calc').ok, true);
 });

@@ -13,3 +13,7 @@ Reviewer: <!-- name -->
 
 ## 3. Coverage
 - [ ] C1 Every source file is in the inventory
+
+## 4. Databases
+- [ ] D1 <!-- database -->: definitions and the logic in it
+- [ ] D90 The missing definitions are understood

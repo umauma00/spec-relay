@@ -28,7 +28,11 @@ reference and decide:
   or the branch looks unreachable). Say what would settle it.
 
 Be strict: a scenario value you did not trace through the code is not
-confirmed.
+confirmed. Database definitions (under `openspec/spec-relay/db/` or `.sql`
+files in the repository) count as source code: when a requirement writes a
+table, read the triggers, constraints and defaults on that table too, and
+mark the requirement `mismatch` when one of them changes the result the text
+states.
 
 Write your verdict file in UTF-8 with your edit tool, as one Markdown table:
 `| Item | Verdict | Evidence |`, then one row per item in spec order and then

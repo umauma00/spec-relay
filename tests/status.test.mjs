@@ -271,9 +271,9 @@ test('the survey and the target design come before any capability', () => {
   write(dir, 'openspec/changes/survey/.openspec.yaml', 'schema: spec-relay-survey\n');
   write(dir, 'openspec/changes/survey/inventory.md', '# i\n');
   let report = status(dir);
-  assert.deepEqual(report.todoList.map((i) => i.title).slice(1), ['Survey: map the bounded contexts [writing artifacts 1/5]', 'Target design: modules, conventions, verification']);
+  assert.deepEqual(report.todoList.map((i) => i.title).slice(1), ['Survey: map the bounded contexts [writing artifacts 1/6]', 'Target design: modules, conventions, verification']);
   assert.deepEqual(statuses(report), ['not-started', 'in-progress', 'not-started']);
-  for (const f of ['context-map.md', 'glossary.md', 'capabilities.md']) write(dir, `openspec/changes/survey/${f}`, '# x\n');
+  for (const f of ['context-map.md', 'glossary.md', 'capabilities.md', 'database.md']) write(dir, `openspec/changes/survey/${f}`, '# x\n');
   write(dir, 'openspec/changes/survey/review.md', 'Reviewer: Uma\n- [ ] K1 billing\n');
   report = status(dir);
   assert.equal(report.todoList[1].title, 'Survey: map the bounded contexts [waiting for review 0/1]');

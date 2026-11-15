@@ -35,12 +35,16 @@ instructions), and the exact file paths you may write.
   tables and files it writes and reads, the business words it uses, its
   callers and callees, the screens or menus that reach it, and the context
   you propose. Mark files whose parts belong to different contexts, with the
-  symbols that go to each.
+  symbols that go to each. Database definitions (`openspec/spec-relay/db/`,
+  `.sql` files) are source files like the rest: for each object, the tables it
+  writes and reads, and for a trigger, the table it fires on.
 - **Extract tasks**: describe what the code does today, including edge cases
   and behavior that looks wrong. Never "fix" behavior in a spec; list doubts
   in your report so the orchestrator can put them in questions.md. Keep specs
   language-neutral: no class, function or library names of the source
-  language. Put every source location in trace.md. For screens, copy labels
+  language. What triggers, constraints, defaults and procedures do to the data
+  is behavior of the capability: specify it, and trace it to the definition
+  file. Put every source location in trace.md. For screens, copy labels
   and messages exactly from templates, resource files and string literals.
 - Cite repository-relative paths (with forward slashes, also on Windows) and
   symbols for every claim. Say "not found" rather than guessing.
