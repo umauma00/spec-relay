@@ -128,6 +128,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
     'screens.md': '# Screens\r\n\r\nNone\r\n',
     'trace.md': '# Trace\r\n\r\n| Requirement | Source | Existing tests |\r\n|---|---|---|\r\n| Add two numbers | src/calc.py:add:1-2 | none |\r\n',
     'crosscheck.md': '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/calc.py:2 |\n',
+    'coverage.md': '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/calc.py:(file)` | covered R1 | 1-2 the whole adder |\n',
     'questions.md': '﻿# Questions\r\n',
     'review.md': review(' '),
   });

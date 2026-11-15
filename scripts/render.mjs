@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkboxes, questionIds, tableRows, changeSchema, archivedChange } from './gate.mjs';
+import { ledgerSummary } from './sites.mjs';
 
 // ---------------------------------------------------------------- labels
 
@@ -49,6 +50,11 @@ const LABELS = {
     keysOn: '1 文字キーで移動する', keysList: 'キーの一覧', keys: [['j', 'k', '次／前の項目'], ['n', 'p', '次／前の未確認'], ['o', '', '元コードを開閉'], ['u', '', '未確認のみ表示']],
     generated: '生成', archived: 'archive 済み',
     note: 'この画面は表示用です。正は Markdown のファイルで、判断は review.md に記録します。ファイルを直したら作り直してください。',
+    ledger: '抜けの確認', ledgerTitle: '抜けの確認（箇所台帳）',
+    ledgerFacts: (s) => `箇所 ${s.sites}（${s.files} ファイル）・要件や画面あり ${s.counts.covered}・動作なし ${s.counts['no-behavior']}・別の capability ${s.counts.other}・質問 ${s.counts.question}`,
+    ledgerOpen: (n) => `判定がない、または gap の箇所が ${n} 件あります。gate はまだ通りません。`,
+    ledgerQuestions: '質問に回した箇所', ledgerUnmarked: '「動作なし」としたが、目印（DB 書き込み・例外など）がある箇所。念のため目を通してください',
+    ledgerAll: '台帳のすべての行',
   },
   en: {
     kinds: { 'spec-relay-extract': 'Extract review', 'spec-relay-survey': 'Survey review', 'spec-relay-target': 'Target design review', 'spec-relay-amend': 'Amend review', 'spec-relay-port': 'Port' },
@@ -73,6 +79,11 @@ const LABELS = {
     keysOn: 'Single-key shortcuts', keysList: 'Key list', keys: [['j', 'k', 'next / previous item'], ['n', 'p', 'next / previous open item'], ['o', '', 'fold or unfold the source'], ['u', '', 'open items only']],
     generated: 'Generated', archived: 'archived',
     note: 'This page is a view. The Markdown files are the source of truth and decisions go into review.md. Render again after changing them.',
+    ledger: 'Omission check', ledgerTitle: 'Omission check (site ledger)',
+    ledgerFacts: (s) => `${s.sites} sites in ${s.files} files: ${s.counts.covered} covered, ${s.counts['no-behavior']} no behavior, ${s.counts.other} other capability, ${s.counts.question} questions`,
+    ledgerOpen: (n) => `${n} sites have no verdict or are gaps; the gate does not pass yet.`,
+    ledgerQuestions: 'Sites moved to questions', ledgerUnmarked: 'Sites judged "no behavior" that hold markers (a database write, an error...). Glance over them',
+    ledgerAll: 'Every row of the ledger',
   },
 };
 
@@ -710,10 +721,11 @@ ${cautionsHtml(notes)}${body.html}
     }
   });
 
+  const ledger = schema === 'spec-relay-extract' ? ledgerSummary(root, dir) : null;
   const named = reviewer && !/^<.*>$/.test(reviewer);
   const brief = `<header class="brief">
 ${purpose.trim() ? `<div class="purpose"><span class="label">${escapeHtml(L.purpose)}</span>${markdown(purpose)}</div>` : ''}
-<dl class="facts"><dt>${escapeHtml(L.reviewer)}</dt><dd><span class="sign${named ? '' : ' is-blank'}">${named ? inline(reviewer) : escapeHtml(L.notNamed)}</span></dd><dt>${escapeHtml(L.scope)}</dt><dd>${shown.map((g) => `${escapeHtml(g.title)} ${g.items.length}`).join('・')}</dd></dl>
+<dl class="facts"><dt>${escapeHtml(L.reviewer)}</dt><dd><span class="sign${named ? '' : ' is-blank'}">${named ? inline(reviewer) : escapeHtml(L.notNamed)}</span></dd><dt>${escapeHtml(L.scope)}</dt><dd>${shown.map((g) => `${escapeHtml(g.title)} ${g.items.length}`).join('・')}</dd>${ledger ? `<dt>${escapeHtml(L.ledger)}</dt><dd><a href="#doc-coverage-md">${escapeHtml(L.ledgerFacts(ledger))}</a></dd>` : ''}</dl>
 <ol class="howto">${L.howto.map((step) => `<li>${step}</li>`).join('')}</ol>
 </header>`;
 
@@ -725,9 +737,25 @@ ${purpose.trim() ? `<div class="purpose"><span class="label">${escapeHtml(L.purp
     if (rel === 'review.md' || (rel === 'screens.md' && screens.length)) continue;
     let text = readText(file) ?? '';
     if (rel === 'context-map.md' && contexts.length) text = withoutSection(text, /^##\s+Contexts\s*$/i);
+    if (rel === 'coverage.md' && ledger) {
+      docs.push({ id: 'doc-coverage-md', title: L.ledgerTitle, html: ledgerHtml(ledger, text, L) });
+      continue;
+    }
     docs.push({ id: `doc-${rel.replace(/[^\w-]/g, '-')}`, title: rel.replace(/\.md$/, ''), html: `<div class="doc">${markdown(text, { headingOffset: 2 })}</div>` });
   }
   return { groups: shown, docs, brief };
+}
+
+// The omission check as the reviewer needs it: the counts, what is still open,
+// the sites that became questions, and the "no behavior" sites that hold
+// markers. Every row stays one click away.
+function ledgerHtml(sum, text, L) {
+  const list = (rows) => `<ul>${rows.map((r) => `<li><code>${escapeHtml(r.site)}</code>${r.question ? ` → ${escapeHtml(r.question)}` : ''}${r.markers ? ` <span class="mono">[${escapeHtml(r.markers)}]</span>` : ''}${r.evidence ? ` — ${inline(r.evidence)}` : ''}</li>`).join('')}</ul>`;
+  return `<div class="doc"><p>${escapeHtml(L.ledgerFacts(sum))}</p>
+${sum.open.length ? `<p class="caution">${escapeHtml(L.ledgerOpen(sum.open.length))}</p>` : ''}
+${sum.questions.length ? `<h3>${escapeHtml(L.ledgerQuestions)}</h3>${list(sum.questions)}` : ''}
+${sum.unmarked.length ? `<h3>${escapeHtml(L.ledgerUnmarked)}</h3>${list(sum.unmarked)}` : ''}
+<details><summary>${escapeHtml(L.ledgerAll)}</summary>${markdown(text, { headingOffset: 2 })}</details></div>`;
 }
 
 function withoutSection(text, heading) {

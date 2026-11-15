@@ -28,7 +28,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkSurveyCoverage, checkSourceMap, checkTrace, checkAmendSourceMap, checkCoverage } from './coverage.mjs';
+import { checkSurveyCoverage, checkSourceMap, checkTrace, checkAmendSourceMap, checkCoverage, assignment } from './coverage.mjs';
+import { checkLedger } from './sites.mjs';
 
 // Same shapes OpenSpec 2.0.0 (and 1.17.0) counts as tasks and requirements, so the gate never
 // sees fewer items than `openspec instructions apply` or `openspec archive` do.
@@ -215,6 +216,7 @@ function checkExtract(root, dir, boxes, problems) {
   }
   const asked = new Set((questions === null ? [] : questionIds(questions)).filter((id) => qItems.has(id)));
   checkCrosscheck(dir, requirements.map((r) => r.name), screens, problems, asked);
+  checkLedger(root, dir, { requirements: requirements.map((r) => r.name), screens, asked, capabilities: [...assignment(root).map.keys()], own: specCapabilities(dir)[0] ?? '' }, problems);
   for (const id of questions === null ? [] : questionIds(questions)) {
     const item = qItems.get(id);
     if (!item) { problems.push(`question has no review item: ${id}`); continue; }

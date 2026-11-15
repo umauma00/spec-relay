@@ -1,6 +1,6 @@
 ---
 name: spec-relay-checker
-description: Independently check the requirements and screens of one spec-relay extract or amend change against the source code, before the human review. Reads code; writes only its own verdict file.
+description: Independently check the requirements and screens of one spec-relay extract or amend change against the source code, or search a group of its sites for behavior the specs left out, before the human review. Reads code; writes only its own verdict file.
 tools: ["read", "search", "edit", "view", "grep", "glob"]
 user-invocable: false
 disable-model-invocation: false
@@ -39,6 +39,34 @@ task gives them. Write a `|` inside a cell as `\|`. Never write any other file.
 Then return a short report and nothing else: the verdict file's path, the
 number of rows per verdict, every row that is not `confirmed` (copied from the
 file), and how many source files you read.
+
+## Omission check (a group of sites)
+
+When the task gives you a sites file (`.../sites/<nn>.md`) instead of items,
+you search for what the specs left out. Read the change's specs and screens.md,
+then, for every site in the sites file, read its lines in the source code
+yourself, every one of them, and decide what a user or caller could notice:
+results, errors and messages, writes (database, files, mail, session),
+redirects, calls to other systems, rounding, defaults, the current time. The
+markers in the sites file point at lines that usually matter; account for
+each marker line, but do not stop at them.
+- `covered R<n>, S<n>`: every effect of the site is in these requirements'
+  scenarios or these screens (R and S numbered as the task gives them).
+- `no behavior`: nothing to notice. Say why in the evidence.
+- `other capability <path>`: the task names that capability as the owner of
+  this part of the file.
+- `gap`: an effect no requirement or screen describes. Say what the code does,
+  with path:line, so an analyst can write the requirement.
+- `unclear` is not a verdict here: when the code does not settle it (dead
+  code, configuration, a branch that looks unreachable), write `gap` and say so
+  in the evidence; the orchestrator turns it into a question.
+Be strict: a site whose error branch, extra write or special case has no
+scenario is a `gap`, even when its main path is covered.
+
+Write your verdict file as one Markdown table, `| Site | Verdict | Evidence |`,
+one row per site of the sites file in its order, with the site id copied
+exactly (backticks included). Return the file's path, the number of rows per
+verdict, every `gap` row, and how many source files you read.
 
 A task that starts with `spec-relay environment trial` is the orchestrator's
 setup check of the host, not migration work. Do exactly what it says: write

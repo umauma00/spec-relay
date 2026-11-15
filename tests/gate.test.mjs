@@ -28,6 +28,7 @@ function repo(review, { questions = QUESTIONS, screens = '# Screens\n\nNone\n', 
   write(dir, `${CHANGE}/specs/calc/spec.md`, SPEC);
   if (sourceMap !== null) write(dir, `${CHANGE}/source-map.md`, sourceMap);
   if (trace !== null) write(dir, `${CHANGE}/trace.md`, trace);
+  write(dir, `${CHANGE}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n');
   write(dir, `${CHANGE}/questions.md`, questions);
   if (screens !== null) write(dir, `${CHANGE}/screens.md`, screens);
   if (crosscheck !== null) write(dir, `${CHANGE}/crosscheck.md`, crosscheck);

@@ -148,6 +148,52 @@ artifacts:
     requires:
       - trace
 
+  - id: coverage
+    generates: coverage.md
+    description: The omission check - every site of the source map's files, and the requirement or screen that covers it
+    template: coverage.md
+    instruction: |
+      An INDEPENDENT search for behavior the specs left out. The crosscheck
+      confirms what the specs say; this finds what they do not say. Without
+      it, a branch, an error case or a write that no requirement mentions is
+      never ported, because the implementer adds nothing the spec lacks.
+
+      `node "<kit>/scripts/sites.mjs" --change <change>` lists the sites of the
+      files in source-map.md: methods, functions, constructors, properties
+      with a body, constants, stored procedures, and the code of a file that
+      runs outside any function (one site per file in a language it does not
+      read, such as an .aspx page). It writes them in groups to
+      `openspec/spec-relay/work/<change>/sites/<nn>.md`, each site with its
+      lines and its markers (lines with words that usually mean an effect:
+      db-write, db-read, transaction, error, exit, redirect, mail, file,
+      session, input, config, time, rounding, external). Give each group to a
+      `spec-relay-checker` with the specs and screens.md; it writes
+      `openspec/spec-relay/work/<change>/coverage/<nn>.md`, merged into this
+      file by the kit's `merge.mjs`.
+
+      One table row per site, with the site id exactly as listed:
+      `| Site | Verdict | Evidence |`. The verdict is one of:
+      - `covered R<n>, S<n>`: every observable effect of the site (results,
+        errors, writes, messages, every marker line) is in these
+        requirements' scenarios or these screens.
+      - `no behavior`: the site has no effect a user or caller could notice
+        (a plain getter, a constructor that only stores its arguments, a
+        log line nobody reads). Say why in the evidence.
+      - `other capability <path>`: the site belongs to another capability of
+        the plan (a god class split by method).
+      - `question Q<n>`: the person must decide (dead code, a branch that
+        looks unreachable, behavior that may be a bug).
+      - `gap`: the site does something no requirement or screen covers.
+      Resolve every `gap`: an analyst adds the requirement it needs (with its
+      trace), a checker checks the new requirement and that site again, or the
+      orchestrator moves it to questions.md and writes `question Q<n>`.
+      `gate.mjs review` scans the files again and fails while a site has no
+      row, a row names a site the scanner does not find, a verdict is blank or
+      `gap`, or names a requirement, screen, question or capability that does
+      not exist.
+    requires:
+      - trace
+
   - id: questions
     generates: questions.md
     description: Ambiguities, suspected bugs and assumptions that need a human decision
@@ -164,9 +210,11 @@ artifacts:
 
       Give each item an id (Q1, Q2, ...), the related requirement and the
       source reference. Write "None" under a heading with no items.
-      Include every crosscheck row that was resolved as `question Q<n>`.
+      Include every crosscheck row and coverage row that was resolved as
+      `question Q<n>`.
     requires:
       - crosscheck
+      - coverage
 
   - id: review
     generates: review.md
@@ -191,6 +239,7 @@ artifacts:
       - screens
       - trace
       - crosscheck
+      - coverage
       - questions
 
 apply:
