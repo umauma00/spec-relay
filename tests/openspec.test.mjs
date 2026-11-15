@@ -100,7 +100,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
     'inventory.md': '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | calc | port | |\n',
     'context-map.md': '## Contexts\n\n### Context: platform\n- generic\n\n### Context: calc\n- core\n',
     'glossary.md': '# Glossary\n',
-    'capabilities.md': '# Capabilities\n\n### calc\n1. `calc/add` 足し算\n',
+    'capabilities.md': '# Capabilities\n\n### calc\n1. `calc/add` 足し算\n   - `src/`\n',
     'review.md': 'Reviewer: Uma\n\n- [x] K1 platform\n- [x] K2 calc\n- [x] C1 inventory\n',
   });
   assert.deepEqual(checkReview(dir, 'survey'), { ok: true, problems: [] });
@@ -124,10 +124,10 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   openspec(dir, 'new', 'change', 'extract-calc-add', '--schema', 'spec-relay-extract');
   const review = (box) => crlf(`﻿# Review\n\nReviewer: Uma\n\n## 1. Requirements\n- [${box}] R1 Add two numbers\n`);
   fill(dir, 'extract-calc-add', {
-    'source-map.md': '# Source map\n',
+    'source-map.md': '# Source map\n\n| Path | Role | In scope |\n|---|---|---|\n| src/calc.py | adds | full |\n',
     'specs/calc/add/spec.md': crlf(SPEC),
     'screens.md': '# Screens\r\n\r\nNone\r\n',
-    'trace.md': '# Trace\r\n',
+    'trace.md': '# Trace\r\n\r\n| Requirement | Source | Existing tests |\r\n|---|---|---|\r\n| Add two numbers | src/calc.py:add:1-2 | none |\r\n',
     'crosscheck.md': '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/calc.py:2 |\n',
     'questions.md': '﻿# Questions\r\n',
     'review.md': review(' '),
@@ -167,7 +167,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   fill(dir, 'amend-calc-add', {
     'reason.md': '# Reason\n\nThe code truncates (src/calc.py:2).\n',
     'specs/calc/add/spec.md': '## MODIFIED Requirements\n\n### Requirement: Add two numbers\nThe system SHALL return the sum of its two inputs, truncated.\n\n#### Scenario: Positive numbers\n- **GIVEN** the inputs 1 and 2.5\n- **WHEN** the sum is requested\n- **THEN** the result is 3\n',
-    'trace.md': '# Trace\n',
+    'trace.md': '# Trace\n\n| Requirement | Source | Existing tests |\n|---|---|---|\n| Add two numbers | src/calc.py:add:2 | none |\n',
     'crosscheck.md': '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/calc.py:2 |\n',
     'impact.md': '# Impact\n',
     'review.md': 'Reviewer: Uma\n\n- [x] R1 Add two numbers\n- [x] I1 impact\n',

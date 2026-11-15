@@ -18,6 +18,7 @@ const PLAN = `# Plan
 
 ### 請求
 2. \`billing/invoice\` 請求書
+   - \`src/invoice.php\`
 3. \`billing/payment\` 入金
 
 ## Follow-up
@@ -37,12 +38,15 @@ function repo({ plan = PLAN, review = '- [x] R1 a\n- [ ] R2 b\n- [ ] Q1 c decisi
   write(dir, 'openspec/changes/archive/2026-11-02-port-common-base/tasks.md', '- [x] 1.1 done\n');
   // The survey and the target design are done.
   write(dir, 'openspec/changes/archive/2026-10-30-survey/context-map.md', '### Context: billing\n');
+  write(dir, 'openspec/changes/archive/2026-10-30-survey/capabilities.md', '### billing\n1. `billing/invoice`\n   - `src/`\n');
   write(dir, 'openspec/changes/archive/2026-10-31-target-design/architecture.md', '# a\n');
   // billing/invoice: analyzed, under review.
   write(dir, `${EXTRACT}/.openspec.yaml`, 'schema: spec-relay-extract\n');
   if (artifacts) {
     write(dir, `${EXTRACT}/specs/billing/invoice/spec.md`, SPEC);
-    for (const file of ['source-map.md', 'trace.md']) write(dir, `${EXTRACT}/${file}`, '# x\n');
+    write(dir, 'src/invoice.php', '<?php\n');
+    write(dir, `${EXTRACT}/source-map.md`, '| Path | Role | In scope |\n|---|---|---|\n| src/invoice.php | invoice | full |\n');
+    write(dir, `${EXTRACT}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| a | src/invoice.php:a:1 | none |\n| b | src/invoice.php:b:2 | none |\n');
     write(dir, `${EXTRACT}/screens.md`, '# Screens\nNone\n');
     write(dir, `${EXTRACT}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 a | confirmed | x |\n| R2 b | confirmed | x |\n');
     write(dir, `${EXTRACT}/questions.md`, '- Q1. c\n');

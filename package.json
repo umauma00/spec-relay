@@ -1,6 +1,6 @@
 {
   "name": "spec-relay",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "description": "Spec-driven language migration kit for GitHub Copilot, built on OpenSpec.",
   "type": "module",
