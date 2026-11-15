@@ -199,7 +199,9 @@ artifacts:
       `openspec/spec-relay/work/<change>/sites/<nn>.md`, each site with its
       lines and its markers (lines with words that usually mean an effect:
       db-write, db-read, transaction, error, exit, redirect, mail, file,
-      session, input, config, time, rounding, external). Give each group to a
+      session, input, config, time, rounding, external; also `long` for a line
+      over 2000 characters the scanner did not read, `annotation` for PHP
+      docblock annotations, `large` for a file over 32 MB). Give each group to a
       `spec-relay-checker` with the specs and screens.md; it writes
       `openspec/spec-relay/work/<change>/coverage/<nn>.md`, merged into this
       file by the kit's `merge.mjs`.

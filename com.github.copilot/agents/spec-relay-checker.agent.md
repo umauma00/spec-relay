@@ -63,13 +63,13 @@ each marker line, but do not stop at them.
   HTML outside functions, top-level statements, field values, attributes and
   annotations (validation rules such as [Required] or [Range], routes,
   authorization, transactions; in PHP also docblock annotations such as
-  `@Route(...)` or `@ORM\Column`), behavior switches (`declare(strict_types=1)`,
+  `@Route(...)` or `@ORM\Column`, marked `annotation`), behavior switches (`declare(strict_types=1)`,
   `Option Compare Text`, `SET ANSI_NULLS OFF`), code the scanner did not recognize. Its
   Lines cell lists those lines (`2, 4-5`): judge every one of them, reading
   the lines around them as far as you need. `binary` means a file that is not text (an Office or
   database file): judge it from what the file is, or write `gap` when it
   may hold logic (macros, queries). `unreadable` means the file could not be
-  read: write `gap` and say so. `too large` means a file over 32 MB that the
+  read: write `gap` and say so. `too large` (marker `large`) means a file over 32 MB that the
   scanner did not read: open it in parts, or write `gap` and say so. A `long` marker is a line over 2000
   characters (minified code, embedded data) that the scanner did not read:
   read it yourself.

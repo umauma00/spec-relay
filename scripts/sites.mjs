@@ -883,6 +883,9 @@ export function scanFile(root, file) {
 // The kept source files a change's source map names (a folder row stands for
 // the files below it), in path order. Files the survey marks `carry` are not
 // scanned: a port copies them unchanged and port-done compares the copy.
+// Server pages the scanner reads as text: never skipped as carry.
+const SERVER_PAGE = /\.(aspx|ascx|ashx|asmx|asax|master|asp|jsp|jspx|cshtml|vbhtml|razor)$/i;
+
 export function changeFiles(root, dir) {
   return sourceMapFiles(root, dir).files;
 }
@@ -901,7 +904,7 @@ export function sourceMapFiles(root, dir) {
   const handled = handledRows(text);
   const kept = all.filter((file) => listed.some((p) => covers(p, file)) && contextOf(inventory, file) !== 'excluded');
   // Server-side code under a carry row is still scanned: carry is for CSS, images, fonts and libraries.
-  const carried = (file) => inventoryRowFor(handled, file)?.handling === 'carry' && !['csharp', 'java', 'vb', 'php', 'sql'].includes(languageOf(file));
+  const carried = (file) => inventoryRowFor(handled, file)?.handling === 'carry' && !['csharp', 'java', 'vb', 'php', 'sql'].includes(languageOf(file)) && !SERVER_PAGE.test(file);
   const files = kept.filter((file) => !carried(file));
   const unscanned = listed.filter((p) => !kept.some((file) => covers(p, file)) && fs.existsSync(path.join(root, p)));
   return { files, unscanned, carried: kept.length - files.length };

@@ -630,12 +630,14 @@ test('fourth review: the ledger reads only Site tables, rejects placeholder evid
   ]);
   // Server-side code under a carry folder is still scanned; a lone mark is no evidence.
   write(dir, 'src/assets/upload.php', '<?php\nmove_uploaded_file($a, $b);\n');
+  write(dir, 'src/assets/Upload.ashx', '<%@ WebHandler Language="C#" Class="U" %>\n');
   write(dir, `${S}/inventory.md`, '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | port | |\n| src/site.css | billing | carry | |\n| src/assets/ | billing | carry | |\n| src/lib/ | excluded | | |\n');
   write(dir, `${C}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/God.cs | all | full |\n| src/site.css | look | full |\n| src/assets/ | assets | full |\n');
   write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/God.cs:God.Purge` | covered R1 | x |\n| `src/God.cs:God.Keep` | no behavior | — |\n');
   const again = [];
   checkLedger(dir, path.join(dir, C), { requirements: ['R'], screens: [], asked: new Set(), assignment: new Map([['billing/a', ['src/']]]), own: 'billing/a' }, again);
   assert.deepEqual(again, [
+    'site has no row in coverage.md: src/assets/Upload.ashx:(file)',
     'site has no row in coverage.md: src/assets/upload.php:(file)',
     'coverage of src/God.cs:God.Keep is "no behavior" with no evidence; say why in the Evidence cell',
   ]);
