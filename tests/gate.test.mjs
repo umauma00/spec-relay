@@ -89,7 +89,8 @@ test('port-done needs at least one task and every task done', () => {
   write(dir, 'openspec/specs/calc/spec.md', SPEC);
   const hash = baselineHash(dir, 'calc');
   write(dir, 'openspec/changes/port-calc/proposal.md', `## Baseline\n- \`calc\` sha256:${hash}\n`);
-  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  // What is left is the evidence of the port (tests/port.test.mjs).
+  assert.deepEqual(checkPortDone(dir, 'port-calc').problems.filter((p) => /not done|no tasks|baseline/.test(p)), []);
   // A CRLF checkout of the same baseline has the same hash.
   write(dir, 'openspec/specs/calc/spec.md', SPEC.replace(/\n/g, '\r\n'));
   assert.equal(baselineHash(dir, 'calc'), hash);

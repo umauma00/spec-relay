@@ -28,7 +28,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkboxes, readIf, capabilitySegments, checkReview, baseName, archivedChange, baselineHash, configValue, cleanValue, language } from './gate.mjs';
+import { checkboxes, readIf, capabilitySegments, checkReview, checkPortDone, baseName, archivedChange, baselineHash, configValue, cleanValue, language } from './gate.mjs';
 
 export { language };
 
@@ -64,7 +64,8 @@ const WORDS = {
     designing: 'writing the design',
     waitingDesign: (of) => `tasks 0/${of}; starts once the person agrees to the design`,
     tasks: (n, of) => `tasks ${n}/${of}`,
-    waitingPortArchive: 'all tasks done; waiting for agreement to archive',
+    waitingPortArchive: 'all tasks done and checked; waiting for agreement to archive',
+    checkingPort: 'all tasks done; running the tests and the crosscheck',
     person: 'decided by the person',
     current: 'you are here', done: 'done', notStarted: '-', notInPlan: 'not in the plan',
     problems: 'Problems',
@@ -85,7 +86,8 @@ const WORDS = {
     designing: '設計中',
     waitingDesign: (of) => `タスク 0/${of}・設計の合意後に着手`,
     tasks: (n, of) => `タスク ${n}/${of}`,
-    waitingPortArchive: '全タスク完了・完了の確認待ち',
+    waitingPortArchive: '全タスク完了・確認済み・完了の確認待ち',
+    checkingPort: '全タスク完了・テストと照合の確認中',
     person: '人が判断します',
     current: 'いまここ', done: '完了', notStarted: '-', notInPlan: '計画にない',
     problems: '問題',
@@ -143,7 +145,8 @@ export const STEPS = [
       if (c.port) {
         if (!c.port.tasks || c.port.tasks.total === 0) return { status: 'in-progress', detail: ['designing'] };
         const { done, total } = c.port.tasks;
-        if (total > 0 && done === total) return { status: 'not-started', waiting: true, detail: ['waitingPortArchive'] };
+        // Done tasks are not a done port: port-done also needs the verify run and the crosscheck.
+        if (total > 0 && done === total) return c.port.gate ? { status: 'not-started', waiting: true, detail: ['waitingPortArchive'] } : { status: 'in-progress', detail: ['checkingPort'] };
         if (done === 0) return { status: 'not-started', waiting: true, detail: ['waitingDesign', total] };
         return { status: 'in-progress', detail: ['tasks', done, total] };
       }
@@ -323,6 +326,7 @@ export function collect(root) {
     if (active.includes(`port-${key}`)) {
       const tasks = read(root, path.join(changes, activeDir.get(`port-${key}`), 'tasks.md'), problems);
       c.port = { tasks: tasks === null ? null : counts(tasks) };
+      if (c.port.tasks && c.port.tasks.total > 0 && c.port.tasks.done === c.port.tasks.total) c.port.gate = checkPortDone(root, activeDir.get(`port-${key}`)).ok;
     }
     if (c.extractArchived && !c.baseline && !c.extract) {
       problems.push(`extract-${key} is archived, but there is no baseline spec at openspec/specs/${parts.join('/')}/spec.md`);

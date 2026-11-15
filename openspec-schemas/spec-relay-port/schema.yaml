@@ -18,6 +18,12 @@ artifacts:
       - **Order**: Why these capabilities now; what they depend on that is
         already ported or still in the source language.
       - **Out of scope**: Anything left for a later port.
+      - **Follow-up**: Empty at first. When the port ends with a `TODO(port)`
+        that cannot be finished in it, and the person agrees to leave it for
+        later, one list item per target file: `` - `<target file>` - what is
+        left (agreed by <name>) ``. `gate.mjs port-done` fails on every
+        `TODO(port)` in a file not listed here or in an archived port's
+        Follow-up.
       - **Baseline**: one line per capability, `` `<capability>` sha256:<hash> ``,
         with the hash printed by `node "<kit>/scripts/gate.mjs" baseline
         --capability <capability>`. `gate.mjs port-done` fails when the
@@ -49,8 +55,16 @@ artifacts:
         ask the person.
       - **Screens**: For each screen in the extract change's screens.md, the
         target page or form and how labels, layout and messages are kept.
-      - **Verification**: The levels verification.md sets for this context (A
-        always; B1, B2, C as chosen) and what each covers here.
+      - **Verification**: A table `| Level | Covers | Command |`, one row for
+        A and one for each of B1, B2 and C that verification.md chose for this
+        context, with what it covers here. Command is the one-line command
+        that runs the level in the target root (PowerShell on Windows); for A
+        leave it empty to use conventions.md's Test command. Add a
+        `Boundary check` row with a command only when conventions.md's does
+        not fit this port. The kit's
+        `verify.mjs` runs these commands and the boundary check and records the
+        result; `gate.mjs port-done` fails without a passing run on the
+        current code.
       - **Source references**: For each requirement, the source locations from
         the archived extract change's trace.md
         (`openspec/changes/archive/*-extract-<capability>/trace.md`), and from
@@ -76,14 +90,57 @@ artifacts:
       - Every implementation task names the requirement(s) it implements, the
         target file, the source reference to read, and how it is verified.
       - Verification comes from the spec scenarios: each scenario becomes a test
-        in the target language, landed in the same group as its code. Add tasks
-        for the other levels design.md names: B1 record source outputs and
-        compare, B2 replay, C screenshot comparison.
+        in the target language, landed in the same group as its code. Each such
+        test carries the tag
+        `spec-relay: <capability> | <requirement name> | <scenario name>` in a
+        comment or its test name, with the names exactly as in the baseline
+        spec; `gate.mjs port-done` fails for a scenario without a tagged test.
+        Add tasks for the other levels design.md names: B1 record source
+        outputs and compare, B2 replay, C screenshot comparison.
       - The last group runs the boundary check from conventions.md.
       - Order by dependency. A final group may only run integration checks and
         compare results with the source program when it can run.
+      - Do not add tasks for the verify run or the crosscheck: they follow the
+        tasks (see crosscheck).
     requires:
       - design
+
+  - id: crosscheck
+    generates: crosscheck.md
+    description: An independent AI check of the new code against the source code, per requirement and screen
+    template: crosscheck.md
+    instruction: |
+      Written after every task is done and the kit's `verify.mjs` passed. Give
+      this to `spec-relay-checker` subagents (port check): they receive the
+      baseline spec, the archived extract change's screens.md and trace.md
+      (and any later amendment's trace.md), this change's design.md, the
+      archived target design's conventions.md and the target module's folder,
+      never the implementer's reports, tasks.md or the lessons. For a large
+      capability, several checkers take groups of items, each writes a part
+      file, and the kit's `merge.mjs` merges them (see the spec-relay skill).
+
+      For each requirement and each screen, the checker reads the source code
+      the trace cites and the new code side by side, and the tests tagged for
+      its scenarios, and decides:
+      - `confirmed`: the new code does what the source code does, for every
+        scenario and for the inputs the scenarios do not show (rounding, null
+        and empty values, encodings, dates, ordering, errors, as listed in
+        conventions.md's Language mapping), and the tagged tests check the
+        scenario's values. A difference design.md's Decisions settled with
+        the person counts as confirmed; cite the decision.
+      - `mismatch`: the new code or its test does something else. Evidence:
+        both locations and what each does.
+      - `unclear`: the code does not settle it. Say what would.
+
+      One table row per requirement (`R<n> <name>`, in baseline spec order) and
+      per screen (`S<n> <name>`, in screens.md order). Then resolve every row
+      that is not `confirmed`: the implementer fixes the code or the test and a
+      checker checks that row again; when the source code and the baseline
+      spec disagree, stop and ask the person (an amendment if the spec misread
+      the code). `gate.mjs port-done` fails while any row is missing,
+      `mismatch` or `unclear`.
+    requires:
+      - tasks
 
 apply:
   requires: [ tasks ]
@@ -96,8 +153,13 @@ apply:
       and ask the person instead of choosing.
     - Mark a task done only after its verification passes; report the command
       and its result.
-    - Write tests from the spec scenarios before or with the code they check.
+    - Write tests from the spec scenarios before or with the code they check,
+      each tagged `spec-relay: <capability> | <requirement> | <scenario>`.
     - Write only inside this context's module and its tests; keep the module
       boundaries of architecture.md, and run the boundary check.
     - Leave a `TODO(port)` comment for anything unresolved and list it in your
-      report.
+      report. The port is not done while one is left, unless the person agrees
+      to leave it as follow-up work.
+    - When every task is done: run the kit's `verify.mjs`, then the crosscheck
+      artifact, fix what it finds, run `verify.mjs` again, then
+      `gate.mjs port-done`.

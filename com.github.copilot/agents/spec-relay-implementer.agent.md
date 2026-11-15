@@ -25,7 +25,8 @@ each, the tasks you ticked, and anything left as `TODO(port)`.
   design's architecture.md), and follow its conventions.md.
   Never edit the source root, `openspec/specs/`, `openspec/spec-relay/lessons.md`
   or the change's artifacts other than ticking the tasks you completed in
-  tasks.md.
+  tasks.md. Never write the change's `verify.json` or `crosscheck.md`: the
+  kit's scripts and the checker write those.
 - When the task names `openspec/spec-relay/lessons.md`, read it first and
   follow its `## Implementation` lines (the other sections are about writing
   specs). The baseline spec and design.md still win over a lesson; report a
@@ -48,8 +49,15 @@ each, the tasks you ticked, and anything left as `TODO(port)`.
 - When the source code and the spec disagree, stop and report it instead of
   choosing.
 - Write the tests that come from the spec scenarios together with the code,
-  and the comparison tests design.md asks for (B1, B2, C). Tick a task only
-  after its verification passes, and run the boundary check before you report.
+  and the comparison tests design.md asks for (B1, B2, C). Give each scenario
+  test the tag `spec-relay: <capability> | <requirement name> | <scenario
+  name>` in a comment or its test name, with the names exactly as in the
+  baseline spec (`// spec-relay: billing/invoice | Issue an invoice | Month end
+  closing`). Never weaken, skip or delete a test to make it pass. Tick a task
+  only after its verification passes, and run the boundary check before you
+  report.
+- When a task gives you crosscheck rows to fix, fix the code or the test so it
+  does what the source code does, and report what you changed per row.
 - Never write a password, token or connection string into a file; sign-in
   for comparisons comes from the environment variables verification.md names.
 

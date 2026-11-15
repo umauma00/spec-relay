@@ -5,7 +5,9 @@
 //   node gate.mjs review --change <change>                 before archiving a reviewed change
 //                                                          (survey, target-design, extract-*, amend-*)
 //   node gate.mjs port-ready --capability <capability>     before creating a port change
-//   node gate.mjs port-done --change port-<capability>     before archiving a port change
+//   node gate.mjs port-done --change port-<capability>     before archiving a port change (tasks, baseline, the
+//                                                          verify.mjs run on the current code, a tagged test per
+//                                                          scenario, no TODO(port) left, the port crosscheck)
 //   node gate.mjs baseline --capability <capability>       the baseline hash a port records
 //   node gate.mjs guard --save <name>                      before a wave: snapshot the hashes of the files no
 //                                                          subagent may write (active review.md and questions.md,
@@ -432,8 +434,9 @@ export function baselineHash(root, capability) {
 
 export const capabilitySegments = (capability) => capability.split(/[\\/]+/).filter((part) => part && part !== '.');
 
-// The files subagents must never write: every active change's review.md and
-// questions.md, the plan, the lessons, the baseline specs, the config and the
+// The files subagents must never write: every active change's review.md,
+// questions.md, crosscheck.md (merge.mjs writes it from the checkers' part
+// files) and verify.json (verify.mjs writes it), the plan, the lessons, the baseline specs, the config and the
 // source files.
 // The orchestrator saves a snapshot of their hashes before a wave and compares
 // after it. Git cannot show a tick in an untracked or already modified
@@ -444,7 +447,7 @@ export function guardFiles(root, warnings = []) {
   const files = [];
   try {
     for (const e of fs.readdirSync(changes, { withFileTypes: true })) {
-      if (e.isDirectory() && e.name !== 'archive') files.push(path.join(changes, e.name, 'review.md'), path.join(changes, e.name, 'questions.md'));
+      if (e.isDirectory() && e.name !== 'archive') files.push(...['review.md', 'questions.md', 'crosscheck.md', VERIFY_RECEIPT].map((f) => path.join(changes, e.name, f)));
     }
   } catch { /* no changes yet */ }
   files.push(path.join(root, PLAN), path.join(root, LESSONS), ...walk(path.join(root, 'openspec/specs')), path.join(root, 'openspec/config.yaml'));
@@ -518,6 +521,238 @@ export function checkPortReady(root, capability) {
   return { ok: problems.length === 0, problems };
 }
 
+// The newest archived target design's file, or null.
+function targetDesignFile(root, name, problems) {
+  const dir = archivedChange(root, 'target-design');
+  return dir ? readIf(path.join(dir, name), problems) : null;
+}
+
+// The heading row and the body rows of every Markdown table in the text.
+function tablesWithHeader(text) {
+  const tables = [];
+  const lines = unfencedLines(stripComments(text ?? ''));
+  const cells = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^\s*\|/.test(lines[i]) || !/^\s*\|?\s*:?-{2,}/.test(lines[i + 1] ?? '')) continue;
+    const table = { header: cells(lines[i]).map((c) => plain(c).toLowerCase()), rows: [] };
+    for (i += 2; i < lines.length && /^\s*\|/.test(lines[i]); i += 1) table.rows.push(cells(lines[i]));
+    tables.push(table);
+  }
+  return tables;
+}
+
+// A command written in a table cell, without code marks.
+const commandOf = (cell = '') => cell.replace(/<br\s*\/?>/gi, ' ').replace(/\\\|/g, '|').trim().replace(/^`+([\s\S]*?)`+$/, '$1').trim();
+
+// The commands of conventions.md (## Commands: | Purpose | Command |), by purpose.
+export function conventionCommands(text) {
+  const out = {};
+  for (const table of tablesWithHeader(text)) {
+    if (table.header.length < 2 || !/purpose|用途|目的/.test(table.header[0])) continue;
+    for (const [purpose = '', command = ''] of table.rows) {
+      const p = plain(purpose).toLowerCase();
+      const key = /boundary|境界/.test(p) ? 'boundary' : /^(test|テスト)/.test(p) ? 'test' : null;
+      if (key && commandOf(command) && !out[key]) out[key] = commandOf(command);
+    }
+  }
+  return out;
+}
+
+export const LEVELS = ['B1', 'B2', 'C'];
+const YES = /^(yes|y|true|はい|要|必要|✓|✔|○|◯)/i;
+
+// The comparison levels (B1, B2, C) verification.md chose for a context, or null
+// when it has no row for the context.
+export function chosenLevels(text, context) {
+  for (const table of tablesWithHeader(text)) {
+    const columns = LEVELS.map((level) => table.header.findIndex((h) => new RegExp(`^${level}\\b`, 'i').test(h)));
+    const row = table.rows.find(([first = '']) => plain(first).toLowerCase() === context);
+    if (row) return LEVELS.filter((level, i) => columns[i] >= 0 && YES.test(plain(row[columns[i]] ?? '')));
+  }
+  return null;
+}
+
+// The Verification table of a port's design.md (| Level | Covers | Command |):
+// the command of each level that names one (A, B1, B2, C, and `boundary` for a
+// Boundary check row, which replaces the conventions' command for this port).
+export function designCommands(text) {
+  const out = {};
+  for (const table of tablesWithHeader(text)) {
+    if (!/^level|^方式|^比べ方/.test(table.header[0] ?? '')) continue;
+    const at = table.header.findIndex((h) => /^command|^コマンド/.test(h));
+    for (const row of table.rows) {
+      const first = plain(row[0] ?? '');
+      const level = /^(boundary|境界)/i.test(first) ? 'boundary' : first.match(/^(A|B1|B2|C)\b/i)?.[1]?.toUpperCase();
+      if (level && at >= 0 && commandOf(row[at]) && !out[level]) out[level] = commandOf(row[at]);
+    }
+  }
+  return out;
+}
+
+// What a port's verify run must run, in order: the scenario tests (level A),
+// the boundary check, then each comparison level verification.md chose for the
+// capability's context. Each entry is { level, command } or { level, problem }.
+export function verifyPlan(root, change, capability = portCapability(root, change)) {
+  const problems = [];
+  const dir = path.join(root, 'openspec/changes', change);
+  if (!capability) return { runs: [], levels: [], problems: ['proposal.md records no baseline hash for this change\'s own capability; add it with gate.mjs baseline'] };
+  const context = capability.split('/')[0];
+  const conventions = targetDesignFile(root, 'conventions.md', problems);
+  const verification = targetDesignFile(root, 'verification.md', problems);
+  if (conventions === null) problems.push('no archived target design with conventions.md');
+  const commands = conventionCommands(conventions);
+  const design = designCommands(readIf(path.join(dir, 'design.md'), problems) ?? '');
+  const levels = chosenLevels(verification, context);
+  if (verification !== null && levels === null) problems.push(`verification.md of the archived target design has no row for context ${context}`);
+  const runs = [];
+  const add = (level, command, missing) => (command ? runs.push({ level, command }) : problems.push(missing));
+  add('A', design.A ?? commands.test, 'conventions.md of the archived target design names no Test command (## Commands)');
+  add('boundary', design.boundary ?? commands.boundary, 'conventions.md of the archived target design names no Boundary check command (## Commands)');
+  for (const level of levels ?? []) add(level, design[level], `verification.md chose ${level} for context ${context}, but design.md's Verification table gives it no command (| ${level} | covers | command |)`);
+  return { runs, levels: levels ?? [], problems };
+}
+
+const HEAVY_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', '.gradle', '.pytest_cache', '.mypy_cache', '.tox', 'bin', 'obj', 'target', 'build', 'dist', 'out', 'coverage', '.next', '.idea', '.vs']);
+
+// The files under the target root, as paths from the repository root, or null
+// when openspec/config.yaml names no target root inside the repository. In a
+// git repository these are the files git tracks or would track (build output
+// git ignores does not count); otherwise every file outside the usual build and
+// tool folders. openspec/ and the source root never count.
+export function targetFiles(root) {
+  const target = relPath(cleanValue(configValue(root, 'Target root', ''))).replace(/\/$/, '');
+  const source = relPath(cleanValue(configValue(root, 'Source root', '.'))).replace(/\/$/, '');
+  const base = path.resolve(root);
+  const dir = path.resolve(base, target || '.');
+  const rel = path.relative(base, dir);
+  if (!target || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  try { if (!fs.statSync(dir).isDirectory()) return []; } catch { return []; }
+  const prefix = rel ? `${rel.split(path.sep).join('/')}/` : '';
+  const skip = (file) => file === '.git' || file.startsWith('.git/') || file === 'openspec' || file.startsWith('openspec/')
+    || (source && source !== '.' && source !== target && (file === source || file.startsWith(`${source}/`)));
+  const git = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', prefix || '.'], { cwd: base, encoding: 'buffer', windowsHide: true, maxBuffer: Infinity });
+  if (git.status === 0 && git.stdout) {
+    const top = spawnSync('git', ['rev-parse', '--show-cdup'], { cwd: base, encoding: 'utf8', windowsHide: true });
+    if (top.status === 0 && top.stdout.trim() === '') {
+      const listed = git.stdout.toString('utf8').split('\0').filter(Boolean);
+      return [...new Set(listed.filter((f) => !skip(f) && fs.existsSync(path.join(base, f))))].sort();
+    }
+  }
+  const out = [];
+  const visit = (dirRel) => {
+    let entries = [];
+    try { entries = fs.readdirSync(path.join(base, dirRel), { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const child = dirRel ? `${dirRel}/${e.name}` : e.name;
+      if (skip(child)) continue;
+      if (e.isDirectory()) { if (!HEAVY_DIRS.has(e.name)) visit(child); } else if (e.isFile()) out.push(child);
+    }
+  };
+  visit(prefix.replace(/\/$/, ''));
+  return out.sort();
+}
+
+// A text file's content with CRLF read as LF (so a Windows checkout hashes the
+// same), or null for a binary or very large file.
+function textOf(file) {
+  let buffer;
+  try { buffer = fs.readFileSync(file); } catch { return null; }
+  if (buffer.length > 4 * 1024 * 1024 || buffer.includes(0)) return null;
+  return buffer.toString('utf8').replace(/^﻿/, '');
+}
+
+// One hash over every target file (path and content), as verify.mjs records it.
+export function targetHash(root, files = targetFiles(root)) {
+  const hash = crypto.createHash('sha256');
+  for (const f of files ?? []) {
+    const text = textOf(path.join(root, f));
+    const content = text === null ? (() => { try { return fs.readFileSync(path.join(root, f)); } catch { return Buffer.alloc(0); } })() : Buffer.from(text.replace(/\r\n?/g, '\n'));
+    hash.update(`${f}\0${crypto.createHash('sha256').update(content).digest('hex')}\n`);
+  }
+  return hash.digest('hex');
+}
+
+// Every scenario of a spec, with the requirement it belongs to.
+export function scenarioList(text) {
+  const out = [];
+  let requirement = null;
+  for (const line of unfencedLines(text ?? '')) {
+    const r = line.match(REQUIREMENT);
+    if (r) { requirement = r[1]; continue; }
+    if (/^#{1,3}\s/.test(line)) { requirement = null; continue; }
+    const s = line.match(/^####\s*Scenario:\s*(.+?)\s*$/i);
+    if (s && requirement) out.push({ requirement, scenario: s[1] });
+  }
+  return out;
+}
+
+const squash = (s) => s.replace(/\s+/g, ' ').trim().toLowerCase();
+// A test names the scenario it checks with a comment or test name holding
+// `spec-relay: <capability> | <requirement> | <scenario>`. What may follow the
+// scenario name on the line: the quote that ends a test name string (and
+// anything after it), or comment closers only.
+const TAG = /spec-relay:\s*([^|\r\n]+?)\s*\|\s*([^|\r\n]+?)\s*\|\s*([^\r\n]+)$/i;
+const CLOSERS = /^(?:\s*["'`]|[\s)\]};,*/#>-]*$)/;
+
+// The `spec-relay:` scenario tags and `TODO(port)` marks in the target files.
+export function scanTarget(root, files = targetFiles(root)) {
+  const tags = [];
+  const todos = [];
+  for (const f of files ?? []) {
+    const text = textOf(path.join(root, f));
+    if (text === null || (!text.includes('spec-relay:') && !text.includes('TODO(port'))) continue;
+    text.split(/\r?\n/).forEach((line, i) => {
+      const at = line.search(/spec-relay:/i);
+      const m = at >= 0 ? line.slice(at).match(TAG) : null;
+      if (m) tags.push({ file: f, line: i + 1, capability: squash(m[1]), requirement: squash(m[2]), rest: squash(m[3]) });
+      if (line.includes('TODO(port')) todos.push({ file: f, line: i + 1, text: line.trim().slice(0, 120) });
+    });
+  }
+  return { tags, todos };
+}
+
+const tagMatches = (tag, capability, { requirement, scenario }) => tag.capability === squash(capability)
+  && tag.requirement === squash(requirement) && tag.rest.startsWith(squash(scenario))
+  && CLOSERS.test(tag.rest.slice(squash(scenario).length));
+
+// The target files a port's proposal.md, or an archived port's, lists under
+// `## Follow-up`: the person agreed to leave their TODO(port) for later.
+export function followUpFiles(root, dir) {
+  const files = new Set();
+  const proposals = [path.join(dir, 'proposal.md')];
+  try {
+    const archive = path.join(root, 'openspec/changes/archive');
+    for (const e of fs.readdirSync(archive)) if (/^\d{4}-\d{2}-\d{2}-port-/.test(e)) proposals.push(path.join(archive, e, 'proposal.md'));
+  } catch { /* nothing archived */ }
+  for (const file of proposals) {
+    let inFollowUp = false;
+    for (const line of unfencedLines(stripComments(readIf(file, []) ?? ''))) {
+      const h2 = line.match(/^##\s+(.*)$/);
+      if (h2) { inFollowUp = /^(follow-?up|後の作業|残す作業)/i.test(h2[1].trim()); continue; }
+      if (!inFollowUp) continue;
+      for (const m of line.matchAll(/`([^`]+)`/g)) files.add(relPath(m[1].trim()).replace(/:\d+$/, ''));
+    }
+  }
+  return files;
+}
+
+export const VERIFY_RECEIPT = 'verify.json';
+
+// The baseline records of a port's proposal.md, and the one of its own
+// capability (the change name without port- and -v<n>).
+function baselineRecords(proposal, change) {
+  const recorded = [...stripComments(proposal).matchAll(/`([^`]+)`\s*sha256:\s*([0-9a-f]{64})/gi)];
+  const own = baseName(change).replace(/^port-/, '');
+  return { recorded, own, ownRecord: recorded.find(([, capability]) => capabilitySegments(capability).join('-') === own) };
+}
+
+// The capability path a port change implements, from its proposal, or null.
+export function portCapability(root, change) {
+  const proposal = readIf(path.join(root, 'openspec/changes', change, 'proposal.md'), []) ?? '';
+  const { ownRecord } = baselineRecords(proposal, change);
+  return ownRecord ? capabilitySegments(ownRecord[1]).join('/') : null;
+}
+
 export function checkPortDone(root, change) {
   const dir = path.join(root, 'openspec/changes', change);
   const problems = [];
@@ -527,10 +762,9 @@ export function checkPortDone(root, change) {
   problems.push(...boxes.filter((b) => !b.done).map((b) => `not done: ${b.body}`));
   if (boxes.length === 0) problems.push('tasks.md has no tasks');
   const proposal = readIf(path.join(dir, 'proposal.md'), problems) ?? '';
-  const recorded = [...stripComments(proposal).matchAll(/`([^`]+)`\s*sha256:\s*([0-9a-f]{64})/gi)];
+  const { recorded, own, ownRecord } = baselineRecords(proposal, change);
   if (recorded.length === 0) problems.push('proposal.md records no baseline hash ("- `<capability>` sha256:<hash>" under ## Baseline; get it with gate.mjs baseline)');
-  const own = baseName(change).replace(/^port-/, '');
-  if (recorded.length && !recorded.some(([, capability]) => capabilitySegments(capability).join('-') === own)) {
+  if (recorded.length && !ownRecord) {
     problems.push(`proposal.md records no baseline hash for this change's own capability (${own.replace(/-/g, '/')} or similar); add it with gate.mjs baseline`);
   }
   for (const [, capability, hash] of recorded) {
@@ -538,7 +772,63 @@ export function checkPortDone(root, change) {
     if (now === null) problems.push(`no baseline spec for ${capability}`);
     else if (now !== hash.toLowerCase()) problems.push(`the baseline of ${capability} changed after this port started (an amendment was archived); update the port to it, then record the new hash`);
   }
-  return { ok: problems.length === 0, problems };
+  const capability = ownRecord ? capabilitySegments(ownRecord[1]).join('/') : null;
+  const evidence = capability ? checkPortEvidence(root, change, dir, capability, problems) : {};
+  return { ok: problems.length === 0, problems, ...evidence };
+}
+
+// What proves the port behaves like the source: a passing verify run on the
+// code as it is now, a test for every baseline scenario, no unaccepted
+// TODO(port), and an independent crosscheck of every requirement and screen.
+function checkPortEvidence(root, change, dir, capability, problems) {
+  const spec = readIf(path.join(root, 'openspec/specs', ...capability.split('/'), 'spec.md'), problems) ?? '';
+  const files = targetFiles(root);
+  if (files === null) problems.push('openspec/config.yaml names no target root inside the repository ("Target root ...:")');
+
+  // 1. The verify run.
+  const plan = verifyPlan(root, change, capability);
+  problems.push(...plan.problems);
+  const receiptText = readIf(path.join(dir, VERIFY_RECEIPT), problems);
+  let receipt = null;
+  if (receiptText === null) problems.push(`no ${VERIFY_RECEIPT}: run the tests with verify.mjs --change ${change}`);
+  else {
+    try { receipt = JSON.parse(receiptText); } catch { problems.push(`${VERIFY_RECEIPT} is not valid JSON: run verify.mjs --change ${change} again`); }
+  }
+  if (receipt) {
+    const runs = Array.isArray(receipt.runs) ? receipt.runs : [];
+    for (const { level, command } of plan.runs) {
+      const run = runs.find((r) => r.level === level);
+      if (!run) problems.push(`the last verify run did not run ${level === 'boundary' ? 'the boundary check' : `level ${level}`}: run verify.mjs --change ${change} again`);
+      else if (run.command !== command) problems.push(`the ${level === 'boundary' ? 'boundary check' : `level ${level}`} command changed since the last verify run: run verify.mjs --change ${change} again`);
+      else if (run.exitCode !== 0) problems.push(`${level === 'boundary' ? 'the boundary check' : `level ${level}`} failed in the last verify run (${run.timedOut ? 'timed out' : `exit code ${run.exitCode}`}): fix it, then run verify.mjs --change ${change} again`);
+    }
+    if (files !== null && receipt.target?.sha256 !== targetHash(root, files)) problems.push(`the target code changed after the last verify run: run verify.mjs --change ${change} again`);
+  }
+
+  // 2. A test for every scenario, and no tag naming a scenario the baseline lacks.
+  const { tags, todos } = scanTarget(root, files ?? []);
+  const scenarios = scenarioList(spec);
+  for (const s of scenarios) {
+    if (!tags.some((tag) => tagMatches(tag, capability, s))) problems.push(`no test is tagged for scenario "${s.scenario}" of requirement "${s.requirement}" (spec-relay: ${capability} | ${s.requirement} | ${s.scenario})`);
+  }
+  for (const tag of tags.filter((t) => t.capability === squash(capability))) {
+    if (!scenarios.some((s) => tagMatches(tag, capability, s))) problems.push(`${tag.file}:${tag.line} is tagged for a scenario the baseline of ${capability} does not have; rename the tag or the test`);
+  }
+
+  // 3. TODO(port) left in the target code.
+  const accepted = followUpFiles(root, dir);
+  const open = todos.filter((t) => !accepted.has(t.file));
+  for (const t of open.slice(0, 20)) problems.push(`TODO(port) left at ${t.file}:${t.line}: ${t.text}`);
+  if (open.length > 20) problems.push(`...and ${open.length - 20} more TODO(port)`);
+
+  // 4. The independent crosscheck of the port.
+  const extract = archivedChange(root, `extract-${capability.split('/').join('-')}`);
+  const screens = extract ? screenNames(readIf(path.join(extract, 'screens.md'), problems)) : [];
+  checkCrosscheck(dir, requirementNames(spec), screens, problems);
+
+  // `compared`: the source program ran (B1, B2 or C); `inferred`: only tests from
+  // the spec, which an AI wrote from reading the code.
+  return { levels: ['A', ...plan.levels], equivalence: plan.levels.length ? 'compared' : 'inferred' };
 }
 
 // The person's language for `next`: --lang, else the artifact language in openspec/config.yaml.
@@ -557,7 +847,9 @@ const NEXT = {
     reviewer: 'review.md has no reviewer name ("Reviewer:"). Tell me the name to record.',
     decision: (list) => `These questions have no decision yet: ${list}. Decide what the new system should do.`,
     archive: 'Everything is reviewed. Answer whether this change may be archived (that makes it final).',
-    portArchive: 'Every task is done and checked. Answer whether the port may be archived.',
+    portArchive: 'Every task is done, the tests and the boundary check pass on the code as it is, and the independent crosscheck confirmed every requirement and screen. Answer whether the port may be archived.',
+    inferred: 'Only level A ran: tests from the spec, which an AI wrote from reading the source code. The source program was not run, so that the new code behaves the same is inferred from the code, not compared.',
+    compared: (levels) => `The source program was compared as well (${levels}).`,
     activeReview: (name) => `${name} is still under review. Finish that review first.`,
     foundation: (name) => (name === 'survey'
       ? 'The survey (the map of contexts and the capability list) is not reviewed and archived yet. I prepare it; its review is yours, and this step waits for it.'
@@ -569,7 +861,9 @@ const NEXT = {
     reviewer: 'review.md に承認者の名前（Reviewer:）がありません。記録する名前を教えてください。',
     decision: (list) => `判断がまだの質問があります（${list}）。新しいシステムでどうするかを決めてください。`,
     archive: 'すべてレビュー済みです。この change を archive（確定）してよいかを答えてください。',
-    portArchive: 'すべてのタスクが完了し、確認も済みました。実装を archive してよいかを答えてください。',
+    portArchive: 'すべてのタスクが完了し、今のコードでテストと境界チェックが通り、別の AI による照合ですべての要件と画面が確認できました。実装を archive してよいかを答えてください。',
+    inferred: '比べ方は A（仕様のシナリオから作ったテスト）だけです。仕様は AI が元コードを読んで書いたもので、元のプログラムは動かしていません。同じ動きであることは、比べた結果ではなくコードを読んだうえでの推定です。',
+    compared: (levels) => `元のプログラムとの比較（${levels}）も通りました。`,
     activeReview: (name) => `${name} のレビューがまだ終わっていません。先にそのレビューを終えてください。`,
     foundation: (name) => (name === 'survey'
       ? '調査（コンテキストの地図と capability の一覧）がまだレビュー・archive されていません。AI が用意するので、そのレビューをお願いします。この工程はそれを待ちます。'
@@ -604,7 +898,11 @@ export function nextSteps(command, result, lang = 'en') {
   for (const name of foundation) person.push(words.foundation(name));
   agent = problems.filter((p) => !/^(not ticked: |review\.md names no reviewer|question has no recorded decision: |(?:extract|amend) change \S+ is still active|no archived (?:survey|target-design) change)/.test(p));
   if (result.ok && command === 'review') person.push(words.archive);
-  if (result.ok && command === 'port-done') person.push(words.portArchive);
+  if (result.ok && command === 'port-done') {
+    person.push(words.portArchive);
+    const levels = (result.levels ?? []).filter((level) => level !== 'A');
+    person.push(result.equivalence === 'compared' ? words.compared(levels.join(', ')) : words.inferred);
+  }
   return { person, agent };
 }
 

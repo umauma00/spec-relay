@@ -11,7 +11,8 @@
 //   - file edits under the source root (with source root ".", everything outside
 //     openspec/ and the target root), under openspec/specs/, openspec/changes/archive/,
 //     openspec/schemas/, openspec/spec-relay/tools/ (the pinned OpenSpec), of openspec/config.yaml, and inside the kit itself;
-//   - subagent edits of review.md, questions.md, the plan and the lessons;
+//   - any agent edit of a change's verify.json (verify.mjs writes it);
+//   - subagent edits of review.md, questions.md, crosscheck.md, the plan and the lessons;
 //   - shell commands that mention the "Hook enforcement" setting.
 // Shell commands that write files some other way are not parsed; the wave guard
 // (gate.mjs guard) still finds those changes afterwards.
@@ -104,8 +105,9 @@ export function protectedPath(root, file, { subagent = false, pluginRoot = KIT_R
     ['openspec/schemas', 'the kit\'s schemas are installed by setup.mjs'],
     ['openspec/spec-relay/tools', 'the pinned OpenSpec is installed by setup.mjs'],
   ]) if (under(rel, dir)) return why;
-  if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions)\.md$/i.test(rel) || [PLAN, LESSONS].some((p) => fold(p) === fold(rel)))) {
-    return 'only the orchestrator writes review.md, questions.md, the plan and the lessons';
+  if (/^openspec\/changes\/[^/]+\/verify\.json$/i.test(rel)) return 'only verify.mjs writes verify.json, the record of the last verify run; run it again instead';
+  if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions|crosscheck)\.md$/i.test(rel) || [PLAN, LESSONS].some((p) => fold(p) === fold(rel)))) {
+    return 'only the orchestrator writes review.md, questions.md, crosscheck.md, the plan and the lessons';
   }
   if (source === '.') {
     if (!under(rel, 'openspec') && !(target !== '.' && under(rel, target))) return 'with the source root ".", agents change only openspec/ and the target root';
