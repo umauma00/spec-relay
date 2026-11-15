@@ -146,7 +146,7 @@ export function section(text, heading) {
   let found = false;
   for (const line of unfencedLines(stripComments(text ?? ''))) {
     const h2 = line.match(/^##\s+(.*?)(?:\s+#+)?\s*$/);
-    if (h2) { inside = heading.test(plain(h2[1]).replace(/^\d+[.)]\s*/, '')); found ||= inside; continue; }
+    if (h2) { inside = heading.test(plain(h2[1].trim().replace(/^\d+[.)]\s*/, ''))); found ||= inside; continue; }
     if (inside) out.push(line);
   }
   return found ? out.join('\n') : null;
@@ -155,7 +155,7 @@ export function section(text, heading) {
 // The index of the first header cell that matches, or -1.
 export const column = (header, pattern) => header.findIndex((cell) => pattern.test(cell));
 // Table cells that say there is nothing: None, なし, -, N/A, or blank.
-const NOTHING = /^(none|なし|無し|-|n\/a|—)?\.?$/i;
+const NOTHING = /^(?:(?:none|なし|無し|n\/a)\.?|-|—|)$/i;
 const HANDLING_COLUMN = /^(handling|扱い)(?![a-z0-9_])/i;
 const POLICY_COLUMN = /^(policy|方針)(?![a-z0-9_])/i;
 
@@ -309,7 +309,7 @@ export function sourceFiles(root) {
   try { if (!fs.statSync(sourceDir).isDirectory()) return null; } catch { return null; }
   const prefix = rel ? `${rel.split(path.sep).join('/')}/` : '';
   const skip = (file) => file === '.git' || file.startsWith('.git/') || file === 'openspec' || file.startsWith('openspec/')
-    || (target && (file === target || file.startsWith(`${target}/`)))
+    || (target && target !== '.' && (file.toLowerCase() === target.toLowerCase() || file.toLowerCase().startsWith(`${target.toLowerCase()}/`)))
     || /^\.agents\/skills\/(openspec-|\.openspec-target$)/.test(file);
 
   const git = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', prefix || '.'], { cwd: base, encoding: 'buffer', windowsHide: true, maxBuffer: Infinity });
@@ -370,7 +370,8 @@ function checkSurvey(root, dir, boxes, problems) {
   const known = new Set([...contexts, 'excluded']);
   const inventoryText = readIf(path.join(dir, 'inventory.md'), problems);
   const tables = headedRows(inventoryText);
-  if (tables.some(({ header }) => column(header, HANDLING_COLUMN) < 0)) problems.push('inventory.md has a table without the Handling column (| Path | Context | Handling | Notes |)');
+  const noHandling = tables.find(({ header }) => column(header, /^(path|パス)(?![a-z0-9_])/i) >= 0 && column(header, HANDLING_COLUMN) < 0);
+  if (noHandling) problems.push(`inventory.md has a table without the Handling column (| ${noHandling.header.join(' | ')} |); use | Path | Context | Handling | Notes |`);
   const rows = inventoryRows(inventoryText);
   for (const row of rows.filter((r) => !known.has(r.context))) problems.push(`inventory row "${row.path}" names an unknown context "${row.context}"`);
   for (const row of rows.filter((r) => r.handling && !HANDLINGS.includes(r.handling))) problems.push(`inventory row "${row.path}" has the handling "${row.handling}"; use port or carry`);
@@ -509,7 +510,9 @@ function checkUi(root, survey, dir, contexts, problems) {
 function carriedRows(text) {
   const body = section(text, /^carried files\b/i);
   if (body === null) return null;
-  return tableRows(body).map(([source = '', target = '']) => ({ source: cleanPath(source), target: cleanPath(target) }))
+  // Only the first table: a later one ("Not copied | Why") is not a placement.
+  const rows = headedRows(body);
+  return rows.filter((r) => r.header === rows[0].header).map(({ cells: [source = '', target = ''] }) => ({ source: cleanPath(source), target: cleanPath(target) }))
     .filter((r) => !NOTHING.test(r.source));
 }
 
@@ -709,7 +712,7 @@ function checkCarried(root, design, problems) {
       const place = placeOf(file);
       if (!place) { problems.push(`carried file ${file} has no place in the archived ui.md's carried files`); continue; }
       if (destOf(place, file).toLowerCase() !== dest.toLowerCase()) { problems.push(`carried file ${file} goes to ${dest}, but ui.md places it at ${destOf(place, file)}`); continue; }
-      if (sources.has(dest.toLowerCase())) { problems.push(`carried file ${file} would be copied onto the source file ${dest}`); continue; }
+      if (dest.toLowerCase() === file.toLowerCase() || (sources.has(dest.toLowerCase()) && inventoryRowFor(inventory, dest))) { problems.push(`carried file ${file} would be copied onto the source file ${dest}`); continue; }
       let from; let to;
       try { from = fs.readFileSync(path.join(root, file)); } catch { problems.push(`carried file ${file} cannot be read`); continue; }
       try { to = fs.readFileSync(path.join(root, dest)); } catch (error) {

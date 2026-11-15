@@ -572,6 +572,17 @@ test('port-done compares carried files with their source, placed where ui.md say
   assert.match(problems, /public\/logo.png goes to web\/static, but ui.md places it at web\/static\/logo.png/);
   design('| None | |\n');
   assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  // Only the first table is read; "## 1) " numbering counts too.
+  design('| public/logo.png | web/static/ |\n\n| Not copied | Why |\n|---|---|\n| public/css/print.css | ported |\n', '## 1) Carried files');
+  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  design('| . | web/ |\n');
+  assert.match(checkPortDone(dir, 'port-calc').problems.join(), /"\." is a folder; end it with \/|not a carry row/);
+  // A target root written in another case still keeps the copies out of the source files.
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only; only openspec/ and the target root may change): .\n  Target root (new implementation): Web\n');
+  design('| public/css/ | web/static/css/ |\n| public/logo.png | web/static/ |\n');
+  write(dir, 'web/static/css/site.css', 'body{color:red}\n');
+  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only; only openspec/ and the target root may change): .\n  Target root (new implementation): web\n');
   // A renamed or missing section cannot skip the check while ui.md carries files.
   design('| public/css/ | web/static/css/ |\n', '## 引き継ぐファイル');
   assert.match(checkPortDone(dir, 'port-calc').problems.join(), /design.md has no "## Carried files" section/);
@@ -582,6 +593,8 @@ test('port-done compares carried files with their source, placed where ui.md say
 test('the survey needs the Handling column; translated headers are read by name', () => {
   const old = survey({ inventory: '| Path | Context | Notes |\n|---|---|---|\n| src/ | billing | |\n| src/common/db.php | platform | |\n| vendor/ | excluded | |\n' });
   assert.match(checkReview(old, 'survey').problems.join(), /without the Handling column/);
+  const summary = survey({ inventory: '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | port | |\n| src/common/db.php | platform | port | |\n| vendor/ | excluded | | |\n\n| Context | Files |\n|---|---|\n| billing | 1 |\n' });
+  assert.deepEqual(checkReview(summary, 'survey'), { ok: true, problems: [] }, 'a summary table without a Path column is not an inventory table');
   const ja = survey({ inventory: '| パス | コンテキスト | 扱い（port / carry） | メモ |\n|---|---|---|---|\n| src/ | billing | carry | |\n| src/common/db.php | platform | port | |\n| vendor/ | excluded | | |\n' });
   assert.deepEqual(checkReview(ja, 'survey'), { ok: true, problems: [] });
   assert.equal(inventoryRows('| パス | コンテキスト | 扱い（port / carry） |\n|---|---|---|\n| src/ | billing | carry |\n')[0].handling, 'carry');
