@@ -125,6 +125,42 @@ export function tableRows(text) {
   return rows;
 }
 
+// Rows of every Markdown table, each with its table's header cells (lowercase,
+// plain), so a column can be found by name.
+export function headedRows(text) {
+  const rows = [];
+  const lines = unfencedLines(stripComments(text ?? ''));
+  const cells = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^\s*\|/.test(lines[i]) || !/^\s*\|?\s*:?-{2,}/.test(lines[i + 1] ?? '')) continue;
+    const header = cells(lines[i]).map((c) => plain(c).toLowerCase());
+    for (i += 2; i < lines.length && /^\s*\|/.test(lines[i]); i += 1) rows.push({ header, cells: cells(lines[i]) });
+  }
+  return rows;
+}
+
+// The lines under the `## <heading>` that matches, up to the next `## ` heading.
+// null when no such heading. Comments are dropped first, so a "## " line inside a
+// comment ends nothing; a closing "##" and a leading number are ignored.
+export function section(text, heading) {
+  const out = [];
+  let inside = false;
+  let found = false;
+  for (const line of unfencedLines(stripComments(text ?? ''))) {
+    const h2 = line.match(/^##\s+(.*?)(?:\s+#+)?\s*$/);
+    if (h2) { inside = heading.test(plain(h2[1].trim().replace(/^\d+[.)]\s*/, ''))); found ||= inside; continue; }
+    if (inside) out.push(line);
+  }
+  return found ? out.join('\n') : null;
+}
+
+// The index of the first header cell that matches, or -1.
+export const column = (header, pattern) => header.findIndex((cell) => pattern.test(cell));
+// Table cells that say there is nothing: None, なし, -, N/A, or blank.
+const NOTHING = /^(?:(?:none|なし|無し|n\/a)\.?|-|—|)$/i;
+const HANDLING_COLUMN = /^(handling|扱い)(?![a-z0-9_])/i;
+const POLICY_COLUMN = /^(policy|方針)(?![a-z0-9_])/i;
+
 const withoutId = (s, letter) => norm(plain(s).replace(new RegExp(`^${letter}\\d+\\s*[.:)-]?\\s*`, 'i'), ''));
 
 function commonReview(dir, problems) {
@@ -281,7 +317,7 @@ function repositoryFiles(root) {
   try { if (!fs.statSync(sourceDir).isDirectory()) return null; } catch { return null; }
   const prefix = rel ? `${rel.split(path.sep).join('/')}/` : '';
   const skip = (file) => file === '.git' || file.startsWith('.git/') || file === 'openspec' || file.startsWith('openspec/')
-    || (target && (file === target || file.startsWith(`${target}/`)))
+    || (target && target !== '.' && (file.toLowerCase() === target.toLowerCase() || file.toLowerCase().startsWith(`${target.toLowerCase()}/`)))
     || /^\.agents\/skills\/(openspec-|\.openspec-target$)/.test(file);
 
   const git = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', prefix || '.'], { cwd: base, encoding: 'buffer', windowsHide: true, maxBuffer: Infinity });
@@ -372,16 +408,7 @@ export function databaseHash(root) {
 }
 
 // The body of the `## <title>` section (up to the next `##` heading), or null.
-export function section(text, title) {
-  let inside = false; let found = false;
-  const out = [];
-  for (const line of unfencedLines(text ?? '')) {
-    const h2 = line.match(/^##\s+(.*?)\s*$/);
-    if (h2) { inside = norm(h2[1]).replace(/^\d+[.)]?\s*/, '') === norm(title); found ||= inside; continue; }
-    if (inside) out.push(line);
-  }
-  return found ? out.join('\n') : null;
-}
+const sectionNamed = (text, title) => section(text, new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
 
 const isNone = (text) => /^(none|なし|該当なし)[.。]?$/i.test(plain(stripComments(text ?? '').replace(/^#.*$/gm, '')));
 // The review boxes `<letter><n> <name>` or `<letter><n> <name>: <note>` for this name.
@@ -391,30 +418,21 @@ const itemsFor = (boxes, letter, name) => boxes.filter((b) => new RegExp(`^${let
 const itemNote = (box) => norm(box.plain.split(/[:：]/).slice(1).join(':'));
 const hasId = (boxes, id) => boxes.some((b) => new RegExp(`^${id}\\b`, 'i').test(b.plain));
 // The snapshot hash in `## Snapshot` (or anywhere when that heading is gone).
-const recordedDbHash = (text) => stripComments(section(text, 'Snapshot') ?? text ?? '').match(/sha-?256[^0-9a-f\n]*([0-9a-f]{64})(?![0-9a-f])/i)?.[1].toLowerCase() ?? null;
+const recordedDbHash = (text) => stripComments(sectionNamed(text, 'Snapshot') ?? text ?? '').match(/sha-?256[^0-9a-f\n]*([0-9a-f]{64})(?![0-9a-f])/i)?.[1].toLowerCase() ?? null;
 
 // The rows of the first table in the text as objects keyed by the lowercase header cells.
-function headedRows(text) {
-  const lines = unfencedLines(stripComments(text ?? ''));
-  const cells = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
-  for (let i = 0; i < lines.length; i += 1) {
-    if (!/^\s*\|/.test(lines[i]) || !/^\s*\|?\s*:?-{2,}/.test(lines[i + 1] ?? '')) continue;
-    const header = cells(lines[i]).map((c) => norm(c));
-    const rows = [];
-    for (i += 2; i < lines.length && /^\s*\|/.test(lines[i]); i += 1) {
-      const row = cells(lines[i]);
-      rows.push(Object.fromEntries(header.map((h, n) => [h, row[n] ?? ''])));
-    }
-    return { header, rows };
-  }
-  return { header: [], rows: [] };
+function firstTable(text) {
+  const all = headedRows(text);
+  if (all.length === 0) return { header: [], rows: [] };
+  const { header } = all[0];
+  return { header, rows: all.filter((r) => r.header === header).map((r) => Object.fromEntries(header.map((h, n) => [h, r.cells[n] ?? '']))) };
 }
 
 // The databases database.md lists under ## Databases: [] when it says None, or null when unreadable.
 function listedDatabases(text) {
-  const body = section(text, 'Databases');
+  const body = sectionNamed(text, 'Databases');
   if (body === null) return null;
-  return headedRows(body).rows.map((row) => ({ ...row, name: plain(row.database ?? Object.values(row)[0] ?? '') })).filter((row) => row.name);
+  return firstTable(body).rows.map((row) => ({ ...row, name: plain(row.database ?? Object.values(row)[0] ?? '') })).filter((row) => row.name);
 }
 
 function checkDatabases(root, dir, boxes, problems) {
@@ -424,7 +442,7 @@ function checkDatabases(root, dir, boxes, problems) {
   const databases = listedDatabases(text);
   if (databases === null) { problems.push('database.md has no "## Databases" section (keep the template\'s English headings)'); return; }
   if (databases.length === 0) {
-    if (!isNone(section(text, 'Databases'))) problems.push('database.md lists no database in the ## Databases table; write only "None" there when the system uses none');
+    if (!isNone(sectionNamed(text, 'Databases'))) problems.push('database.md lists no database in the ## Databases table; write only "None" there when the system uses none');
     else if (files.length) problems.push(`database.md says the system uses no database, but ${DATABASE_DIR}/ holds ${files.length} file${files.length === 1 ? '' : 's'}`);
     return;
   }
@@ -441,11 +459,11 @@ function checkDatabases(root, dir, boxes, problems) {
       if (p.split('/').includes('..') || path.isAbsolute(p) || !fs.existsSync(path.join(root, p))) problems.push(`database ${db.name}: the definitions path ${p} does not exist in the repository`);
     }
   }
-  if (missing.length && isNone(section(text, 'Missing definitions') ?? 'none')) {
+  if (missing.length && isNone(sectionNamed(text, 'Missing definitions') ?? 'none')) {
     problems.push(`database ${missing.join(', ')} has no definitions; say under ## Missing definitions what is missing and why`);
   }
   if (!hasId(boxes, 'D90')) problems.push('review.md has no D90 item for the missing definitions');
-  const logic = section(text, 'Logic in the database');
+  const logic = sectionNamed(text, 'Logic in the database');
   if (logic === null) problems.push('database.md has no "## Logic in the database" section');
   for (const [kind = ''] of tableRows(logic ?? '')) {
     if (plain(kind) && !DB_KINDS.includes(norm(kind))) problems.push(`database.md: unknown kind "${plain(kind)}" under ## Logic in the database (use ${DB_KINDS.join(', ')})`);
@@ -478,21 +496,21 @@ export function checkDatabaseDrift(root, problems) {
 function checkData(survey, dir, boxes, problems) {
   const dbText = readIf(path.join(survey, 'database.md'), problems);
   if (dbText === null) return;
-  const data = readIf(path.join(dir, 'data.md'), problems);
-  if (data === null) { problems.push('data.md is missing (write "None" when the survey found no database)'); return; }
   if (!(listedDatabases(dbText) ?? []).length) return;
+  const data = readIf(path.join(dir, 'data.md'), problems);
+  if (data === null) { problems.push('data.md is missing (the survey\'s database.md lists databases)'); return; }
   for (const title of ['Schema policy', 'Database logic', 'Data access mapping', 'Schema changes', 'Test database']) {
-    const body = stripComments(section(data, title) ?? '').trim();
+    const body = stripComments(sectionNamed(data, title) ?? '').trim();
     if (!body || PLACEHOLDER.test(plain(body))) problems.push(`data.md has no "## ${title}" section, or it is empty (keep the template's English headings)`);
   }
-  for (const [topic = '', , rule = ''] of tableRows(section(data, 'Data access mapping') ?? '')) {
+  for (const [topic = '', , rule = ''] of tableRows(sectionNamed(data, 'Data access mapping') ?? '')) {
     if (plain(topic) && PLACEHOLDER.test(plain(rule))) problems.push(`data.md: the data access mapping of "${plain(topic)}" has no target rule (write "same" when nothing differs)`);
   }
   for (const [id, what] of [['D0', 'the schema policy'], ['D90', 'the exceptions'], ['D91', 'the data access mapping'], ['D92', 'the schema changes and the test database']]) {
     if (!hasId(boxes, id)) problems.push(`review.md has no ${id} item for ${what}`);
   }
-  const kinds = [...new Set(tableRows(section(dbText, 'Logic in the database') ?? '').map(([kind = '']) => norm(kind)).filter((k) => DB_KINDS.includes(k)))];
-  const handling = new Map(tableRows(section(data, 'Database logic') ?? '').map(([kind = '', how = '']) => [norm(kind), norm(how)]));
+  const kinds = [...new Set(tableRows(sectionNamed(dbText, 'Logic in the database') ?? '').map(([kind = '']) => norm(kind)).filter((k) => DB_KINDS.includes(k)))];
+  const handling = new Map(tableRows(sectionNamed(data, 'Database logic') ?? '').map(([kind = '', how = '']) => [norm(kind), norm(how)]));
   for (const kind of kinds) {
     const how = handling.get(kind);
     if (how === undefined) problems.push(`data.md has no row for ${kind} under ## Database logic (the survey's database.md lists it)`);
@@ -505,6 +523,29 @@ function checkData(survey, dir, boxes, problems) {
   }
 }
 
+// The survey's inventory rows: path, context and handling. Handling is `port`
+// (the default, also when the cell or the column is missing) or `carry`: the
+// file goes to the new system unchanged (CSS, images, fonts, script libraries,
+// report templates), copied byte for byte by a port.
+export const HANDLINGS = ['port', 'carry'];
+export function inventoryRows(text) {
+  return headedRows(text).map(({ header, cells }) => {
+    const at = (pattern, fallback) => { const i = column(header, pattern); return cells[i >= 0 ? i : fallback] ?? ''; };
+    const handling = column(header, HANDLING_COLUMN) >= 0 ? plain(at(HANDLING_COLUMN, -1)).toLowerCase() : '';
+    // Paths keep every character (my_module, Copy (1).php, [id].php); only code marks go.
+    return { path: cleanPath(at(/^(path|パス)(?![a-z0-9_])/i, 0)), context: plain(at(/^(context|コンテキスト)(?![a-z0-9_])/i, 1)).toLowerCase(), handling: PLACEHOLDER.test(handling) ? '' : handling };
+  }).filter((r) => r.path);
+}
+
+const cleanPath = (p) => relPath(p.trim().replace(/^`(.*)`$/, '$1').trim());
+
+// The row that decides a file: its own row, else the longest folder row above it.
+export function inventoryRowFor(rows, file) {
+  return rows.find((r) => r.path === file)
+    ?? rows.filter((r) => r.path.endsWith('/') && file.startsWith(r.path)).sort((a, b) => b.path.length - a.path.length)[0]
+    ?? null;
+}
+
 function checkSurvey(root, dir, boxes, problems) {
   const map = readIf(path.join(dir, 'context-map.md'), problems);
   const contexts = contextIds(map);
@@ -513,9 +554,14 @@ function checkSurvey(root, dir, boxes, problems) {
     if (!boxes.some((b) => new RegExp(`^K\\d+\\s*[.:)-]?\\s*${id}(?![\\w-])`, 'i').test(b.plain))) problems.push(`context has no review item: ${id}`);
   }
   const known = new Set([...contexts, 'excluded']);
-  // Paths keep every character (my_module, Copy (1).php, [id].php); only code marks go.
-  const rows = tableRows(readIf(path.join(dir, 'inventory.md'), problems)).map(([p = '', context = '']) => ({ path: relPath(p.trim().replace(/^`(.*)`$/, '$1').trim()), context: plain(context).toLowerCase() })).filter((r) => r.path);
+  const inventoryText = readIf(path.join(dir, 'inventory.md'), problems);
+  const tables = headedRows(inventoryText);
+  const noHandling = tables.find(({ header }) => column(header, /^(path|パス)(?![a-z0-9_])/i) >= 0 && column(header, HANDLING_COLUMN) < 0);
+  if (noHandling) problems.push(`inventory.md has a table without the Handling column (| ${noHandling.header.join(' | ')} |); use | Path | Context | Handling | Notes |`);
+  const rows = inventoryRows(inventoryText);
   for (const row of rows.filter((r) => !known.has(r.context))) problems.push(`inventory row "${row.path}" names an unknown context "${row.context}"`);
+  for (const row of rows.filter((r) => r.handling && !HANDLINGS.includes(r.handling))) problems.push(`inventory row "${row.path}" has the handling "${row.handling}"; use port or carry`);
+  for (const row of rows.filter((r) => r.context === 'excluded' && r.handling === 'carry')) problems.push(`inventory row "${row.path}" is excluded and carry at once; a carried file belongs to the context whose module receives it`);
   const files = sourceFiles(root);
   if (files === null) {
     problems.push(`the source root "${configValue(root, 'Source root', '.')}" in openspec/config.yaml is not a folder inside the repository`);
@@ -603,13 +649,74 @@ function checkTarget(root, dir, boxes, problems) {
     const firsts = tableRows(readIf(path.join(dir, file), problems)).map(([first = '']) => plain(first).toLowerCase());
     for (const id of contexts.filter((c) => !firsts.includes(c))) problems.push(`${file} has no ${what} row for context ${id}`);
   }
-  // One review item per module (A<n>) and per context's verification levels (E<n>).
-  for (const [letter, what] of [['A', 'module'], ['E', 'verification levels']]) {
+  checkUi(root, survey, dir, contexts, problems);
+  // One review item per module (A<n>), per context's verification levels (E<n>)
+  // and per context's screens (U<n>).
+  for (const [letter, what] of [['A', 'module'], ['E', 'verification levels'], ['U', 'screen policy']]) {
     for (const id of contexts) {
       if (!boxes.some((b) => new RegExp(`^${letter}\\d+\\s*[.:)-]?\\s*\\W*${id}(?![\\w-])`, 'i').test(b.plain))) problems.push(`the ${what} of context ${id} has no review item (${letter}<n> ${id})`);
     }
   }
   checkData(survey, dir, boxes, problems);
+}
+
+// How a context's screens look in the new system, decided once in ui.md:
+// `same` (the look too), `layout` (layout, wording, order and keys; drawn by the
+// new toolkit), `new` (a new look; items, wording and transitions stay) or
+// `none` (no screens).
+export const POLICIES = ['same', 'layout', 'new', 'none'];
+
+function checkUi(root, survey, dir, contexts, problems) {
+  const ui = readIf(path.join(dir, 'ui.md'), problems);
+  if (ui === null) { problems.push('ui.md is missing (a context without screens gets the policy none)'); return; }
+  const screens = headedRows(section(ui, /^screens$/i) ?? '');
+  if (screens.length === 0) problems.push('ui.md has no table under "## Screens"');
+  const rows = screens.map(({ header, cells }) => {
+    const policyAt = column(header, POLICY_COLUMN);
+    return {
+      context: plain(cells[Math.max(column(header, /^(context|コンテキスト)(?![a-z0-9_])/i), 0)] ?? '').toLowerCase(),
+      policy: policyAt < 0 ? null : plain(cells[policyAt] ?? '').toLowerCase(),
+    };
+  });
+  if (rows.some((r) => r.policy === null)) problems.push('the table under "## Screens" in ui.md has no Policy column');
+  for (const id of contexts.filter((c) => !rows.some((r) => r.context === c))) problems.push(`ui.md has no screens row for context ${id}`);
+  for (const row of rows.filter((r) => r.policy !== null && !POLICIES.includes(r.policy))) problems.push(`ui.md gives context ${row.context || '(blank)'} the policy "${row.policy || 'blank'}"; use same, layout, new or none`);
+  // Every carry row of the inventory needs a place in the new system, and
+  // every place must be one a port may write.
+  const carry = inventoryRows(readIf(path.join(survey, 'inventory.md'), problems)).filter((r) => r.handling === 'carry');
+  const placed = carriedRows(ui);
+  if (placed === null) { if (carry.length) problems.push('ui.md has no "## Carried files" section, but the inventory marks files carry'); return; }
+  for (const row of carry.filter((r) => !placed.some((p) => p.source === r.path))) problems.push(`ui.md has no "## Carried files" row for the inventory's carry row "${row.path}"`);
+  for (const row of placed) {
+    if (!carry.some((r) => r.path === row.source)) problems.push(`ui.md's carried files row "${row.source}" is not a carry row of the inventory`);
+    const why = badTarget(root, row.source, row.target);
+    if (why) problems.push(`ui.md's carried files row "${row.source}": ${why}`);
+  }
+}
+
+// The rows of a "## Carried files" table (source | target), or null when the
+// section is missing. "None" and an untouched template row are no rows.
+function carriedRows(text) {
+  const body = section(text, /^carried files\b/i);
+  if (body === null) return null;
+  // Only the first table: a later one ("Not copied | Why") is not a placement.
+  const rows = headedRows(body);
+  return rows.filter((r) => r.header === rows[0].header).map(({ cells: [source = '', target = ''] }) => ({ source: cleanPath(source), target: cleanPath(target) }))
+    .filter((r) => !NOTHING.test(r.source));
+}
+
+// Why a carried file may not go to `target`, or null. It must stay in the
+// repository, under the target root when one is set, and never in openspec/,
+// .git or on a source file.
+function badTarget(root, source, target) {
+  const inside = (rel) => rel && !rel.split('/').includes('..') && !/^[a-z]:/i.test(rel);
+  if (!inside(source) || !inside(target)) return `"${source}" -> "${target || 'blank'}" leaves the repository or has no target`;
+  if (source.endsWith('/') && !target.endsWith('/')) return `the source ${source} is a folder, so the target ${target} must end in /`;
+  const lower = `${target}/`.toLowerCase();
+  if (/^(openspec|\.git)\//.test(lower)) return `the target ${target} is inside openspec/ or .git`;
+  const targetRoot = relPath(cleanValue(configValue(root, 'Target root', ''))).replace(/\/$/, '');
+  if (targetRoot && targetRoot !== '.' && !lower.startsWith(`${targetRoot.toLowerCase()}/`)) return `the target ${target} is outside the target root ${targetRoot}`;
+  return null;
 }
 
 export function checkReview(root, change) {
@@ -746,8 +853,66 @@ export function checkPortDone(root, change) {
     if (now === null) problems.push(`no baseline spec for ${capability}`);
     else if (now !== hash.toLowerCase()) problems.push(`the baseline of ${capability} changed after this port started (an amendment was archived); update the port to it, then record the new hash`);
   }
+  checkCarried(root, readIf(path.join(dir, 'design.md'), problems) ?? '', problems);
   checkDatabaseDrift(root, problems);
   return { ok: problems.length === 0, problems };
+}
+
+// The same bytes; a text file may differ only in CRLF and LF line endings.
+function sameContent(a, b) {
+  if (a.equals(b)) return true;
+  if (a.includes(0) || b.includes(0)) return false;
+  return a.toString('latin1').replace(/\r\n/g, '\n') === b.toString('latin1').replace(/\r\n/g, '\n');
+}
+
+// design.md's "## Carried files" (source | target): each row must be a carry
+// row of the archived survey's inventory, placed where the archived ui.md says,
+// and the target must hold the same content. A folder row (ending in /) covers
+// the carry files below it; a target ending in / is a folder that receives the
+// file under its own name. When ui.md places carried files, design.md must have
+// the section (a table or "None"), so a renamed heading cannot skip the check.
+function checkCarried(root, design, problems) {
+  const target = archivedChange(root, 'target-design');
+  const placed = target ? carriedRows(readIf(path.join(target, 'ui.md'), []) ?? '') ?? [] : [];
+  const rows = carriedRows(design);
+  if (rows === null) {
+    if (placed.length) problems.push('design.md has no "## Carried files" section; ui.md carries files, so list the ones this port copies, or write None');
+    return;
+  }
+  if (rows.length === 0) return;
+  const survey = archivedChange(root, 'survey');
+  if (!survey) { problems.push('design.md lists carried files, but there is no archived survey whose inventory marks them carry'); return; }
+  const inventory = inventoryRows(readIf(path.join(survey, 'inventory.md'), problems));
+  const files = sourceFiles(root) ?? [];
+  const sources = new Set(files.map((f) => f.toLowerCase()));
+  const destOf = (row, file) => (row.source.endsWith('/') ? `${row.target}${file.slice(row.source.length)}` : row.target.endsWith('/') ? `${row.target}${path.posix.basename(file)}` : row.target);
+  // The ui.md row that decides a file: its own row, else the longest folder row above it.
+  const placeOf = (file) => placed.find((p) => p.source === file)
+    ?? placed.filter((p) => p.source.endsWith('/') && file.startsWith(p.source)).sort((a, b) => b.source.length - a.source.length)[0];
+  for (const row of rows) {
+    const why = badTarget(root, row.source, row.target);
+    if (why) { problems.push(`carried file row "${row.source}": ${why}`); continue; }
+    const folder = row.source.endsWith('/');
+    if (!folder && !files.includes(row.source) && files.some((f) => f.startsWith(`${row.source}/`))) { problems.push(`carried file row "${row.source}" is a folder; end it with /`); continue; }
+    const listed = folder ? files.filter((f) => f.startsWith(row.source)) : [row.source];
+    const carried = listed.filter((f) => inventoryRowFor(inventory, f)?.handling === 'carry');
+    if (!folder && carried.length === 0) { problems.push(`carried file ${row.source} is not a carry row in the inventory; port it, or mark it carry in a new survey`); continue; }
+    if (carried.length === 0) { problems.push(`no file under ${row.source} is a carry file in the inventory`); continue; }
+    for (const file of carried) {
+      const dest = destOf(row, file);
+      const place = placeOf(file);
+      if (!place) { problems.push(`carried file ${file} has no place in the archived ui.md's carried files`); continue; }
+      if (destOf(place, file).toLowerCase() !== dest.toLowerCase()) { problems.push(`carried file ${file} goes to ${dest}, but ui.md places it at ${destOf(place, file)}`); continue; }
+      if (dest.toLowerCase() === file.toLowerCase() || (sources.has(dest.toLowerCase()) && inventoryRowFor(inventory, dest))) { problems.push(`carried file ${file} would be copied onto the source file ${dest}`); continue; }
+      let from; let to;
+      try { from = fs.readFileSync(path.join(root, file)); } catch { problems.push(`carried file ${file} cannot be read`); continue; }
+      try { to = fs.readFileSync(path.join(root, dest)); } catch (error) {
+        problems.push(error.code === 'EISDIR' ? `carried file target ${dest} is a folder; end the target with /` : `carried file ${file} is missing at ${dest}`);
+        continue;
+      }
+      if (!sameContent(from, to)) problems.push(`carried file ${dest} differs from ${file}; a carried file is copied unchanged (port it instead if it needs an edit)`);
+    }
+  }
 }
 
 // The person's language for `next`: --lang, else the artifact language in openspec/config.yaml.

@@ -5,9 +5,14 @@
 <!-- only additions to conventions.md; "None" if none -->
 
 ## Screens
-| Screen (screens.md) | Target page or form | How the design is kept |
-|---|---|---|
-| <!-- --> | <!-- --> | <!-- --> |
+| Screen (screens.md) | Policy (ui.md) | Target page or form | How the design is kept |
+|---|---|---|---|
+| <!-- --> | <!-- same / layout / new --> | <!-- --> | <!-- --> |
+
+## Carried files
+| Source | Target |
+|---|---|
+| <!-- public/css/ or None --> | <!-- web/static/css/ --> |
 
 ## Data access
 | Table or object (source-map.md) | Handling (data.md) | How the module reaches it |
