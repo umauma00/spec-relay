@@ -160,9 +160,10 @@ artifacts:
 
       `node "<kit>/scripts/sites.mjs" --change <change>` lists the sites of the
       files in source-map.md: methods, functions, constructors, properties
-      with a body, constants, stored procedures, and `(file)`, the lines of a
-      file that are in no other site and still do something (page code and
-      HTML outside functions, top-level statements, field values, SQL outside
+      with a body, constants, enum values (`<Enum>.(values)`), stored
+      procedures, and `(file)`, the lines of a file that are in no other site
+      and still do something (page code and HTML outside functions, top-level
+      statements, field values, attributes and annotations, SQL outside
       procedures, code the scanner did not recognize; the whole file in a
       language it does not read, such as an .aspx page). It writes them in groups to
       `openspec/spec-relay/work/<change>/sites/<nn>.md`, each site with its

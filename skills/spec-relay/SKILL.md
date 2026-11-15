@@ -449,7 +449,8 @@ waves.
    file with a higher number, merged the same way); or move it to
    questions.md and write `question Q<n>` as its verdict yourself. A changed
    source map or source file means running sites.mjs again and judging the
-   new sites: `gate.mjs review` scans the files itself, fails on a site
+   sites of the changed files again (a verdict is tied to a site id, not to
+   its content; an added overload renumbers `#2`): `gate.mjs review` scans the files itself, fails on a site
    without a row, and names the rows of sites it no longer finds, which you
    delete from coverage.md. When sites.mjs writes no group (the files hold no
    code), coverage.md keeps its empty table.

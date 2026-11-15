@@ -52,11 +52,15 @@ markers in the sites file point at lines that usually matter; account for
 each marker line, but do not stop at them.
 - A site id is `<path>:<symbol>`. `Class.Method#2` is the second member of
   that name in the file (an overload), in file order. `(init)` and
-  `(static init)` are initializer blocks.
+  `(static init)` are initializer blocks. `<Enum>.(values)` is the values of
+  an enum: covered when a requirement or screen uses those values (a stored
+  code, a label), else `no behavior`.
 - `(file)` is the code of the file that is in no other site: page code and
-  HTML outside functions, top-level statements, field values, code the
-  scanner did not recognize. Its Lines cell lists those lines (`2, 4-5`);
-  read exactly them. `binary` means a file that is not text (an Office or
+  HTML outside functions, top-level statements, field values, attributes and
+  annotations (validation rules such as [Required] or [Range], routes,
+  authorization, transactions), code the scanner did not recognize. Its
+  Lines cell lists those lines (`2, 4-5`): judge every one of them, reading
+  the lines around them as far as you need. `binary` means a file that is not text (an Office or
   database file): judge it from what the file is, or write `gap` when it
   may hold logic (macros, queries). `minified: not scanned` means one-line
   generated code: say whether it is the project's own code.

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // The sites of a capability's source files: the places whose behavior a spec
 // must cover. A site is a method, function, constructor, property with a body,
-// constant, stored procedure, or `(file)`: the lines of a file that are in no
-// other site and still do something (old PHP pages and their HTML, scripts,
-// top-level statements, field initializers, SQL outside procedures, code the
+// constant, the values of an enum (`<Enum>.(values)`), stored procedure, or
+// `(file)`: the lines of a file that are in no other site and still do
+// something (old PHP pages and their HTML, scripts, top-level statements, field
+// initializers, attributes and annotations, SQL outside procedures, code the
 // scanner did not recognize). A file in a language the scanner does not read,
 // such as an .aspx page or a config file, is one `(file)` site.
 //
@@ -16,18 +17,24 @@
 //
 // The scanner reads text, not syntax trees: it blanks out comments and string
 // literals, follows braces, and takes the declarations it recognizes. Only
-// lines it knows do nothing by themselves (using/import lines, type headers,
-// field declarations without a value, declarations without a body, closing
-// braces) may be in no site; every other line is in a member's site or in
+// text it positively knows does nothing by itself may be in no site:
+// using/import/package lines and a require or include of a fixed path at the
+// top of a file, namespace and type headers (without their attributes),
+// field declarations without a value, declarations without a body,
+// auto-properties, VB Imports/Option/End lines, SQL GO/SET/USE lines, comments
+// and punctuation. Every other line, read with only comments blanked (so a
+// string the masker misread still counts), is in a member's site or in
 // `(file)`. So unusual code (macros, eval, generated members) makes a site
-// coarser, never lost. Markers are lines with words that usually mean an
+// coarser, never lost. The one exception is minified code (more than half of
+// a file over 20 KB in lines over 2000 characters): one site, with no markers
+// and no members. Markers are lines with words that usually mean an
 // observable effect (a database write, an error, a redirect, a mail, the
 // current time...). They tell the checker where to look; they prove nothing.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readIf, sourceFiles, archivedChange, tableRows } from './gate.mjs';
-import { sourceMapPaths, covers, contextOf, inventoryRows } from './coverage.mjs';
+import { sourceMapPaths, covers, contextOf, inventoryRows, ownersOf } from './coverage.mjs';
 
 // ---------------------------------------------------------------- reading
 
@@ -143,7 +150,7 @@ export function mask(text, lang) {
     }
     const ch = text[i];
     const next = text[i + 1];
-    if (lang === 'php' && ch === '?' && next === '>') { blank(i, i + 2, true); i += 2; inPhp = false; continue; }
+    if (lang === 'php' && ch === '?' && next === '>') { blank(i, i + 2, true); code[i] = ';'; i += 2; inPhp = false; continue; } // ?> ends a statement
     // Line comments. PHP's end at ?> too.
     const lineComment = (ch === '/' && next === '/' && lang !== 'vb' && lang !== 'sql')
       || (ch === '#' && lang === 'php' && next !== '[')
@@ -269,14 +276,26 @@ const range = (from, to) => Array.from({ length: Math.max(0, to - from + 1) }, (
 
 // Words that are never the name of a declaration, compared case-sensitively
 // (Add, Get and Remove are ordinary method names).
-const RESERVED = new Set(['if', 'else', 'for', 'foreach', 'while', 'do', 'switch', 'case', 'catch', 'try', 'finally', 'using', 'lock', 'fixed', 'return', 'new', 'typeof', 'sizeof', 'nameof', 'default', 'checked', 'unchecked', 'when', 'synchronized', 'function', 'throw', 'await', 'yield', 'elseif', 'base', 'this', 'super', 'goto', 'delete', 'void']);
+const RESERVED = new Set(['if', 'else', 'for', 'foreach', 'while', 'do', 'switch', 'case', 'catch', 'try', 'finally', 'using', 'lock', 'fixed', 'return', 'new', 'typeof', 'sizeof', 'nameof', 'default', 'checked', 'unchecked', 'when', 'synchronized', 'function', 'throw', 'await', 'yield', 'elseif', 'base', 'this', 'super', 'goto', 'delete', 'void', 'break', 'continue']);
 // The last word before a name that makes it a call or an expression, not a declaration.
 const NOT_BEFORE_NAME = /(?:^|[^\w])(new|return|await|throw|yield|else|case|in|is|as|typeof|nameof|sizeof|when|using|lock|fixed|checked|unchecked|goto|out)$/;
 // A `=` that assigns (not ==, !=, <=, >= or =>).
 const ASSIGN = /(?<![=!<>])=(?![=>])/;
 const TYPE = /\b(record\s+(?:class|struct)|class|struct|interface|record|enum|trait)\s+([A-Za-z_]\w*)/;
-// Modifiers, attributes and annotations before a type keyword.
-const LEAD = /(?:(?:\[[^\]]*\]|@\w+(?:\([^)]*\))?|\b(?:export|default|declare|abstract|final|public|private|protected|internal|static|sealed|partial|readonly|unsafe|new|file|strictfp|ref|data)\b)\s*)*$/;
+// Modifiers before a type keyword. Attributes and annotations are not in it:
+// [Required], [Authorize] and @Transactional are behavior, so they stay in (file).
+const LEAD = /(?:\b(?:export|default|declare|abstract|final|public|private|protected|internal|static|sealed|partial|readonly|unsafe|new|file|strictfp|ref|data)\b\s*)*$/;
+// The length of the attributes and annotations that start a header.
+const marksLength = (header) => header.match(/^\s*(?:(?:\[[^[\]]*(?:\[[^[\]]*\][^[\]]*)*\]|@\w+(?:\.\w+)*(?:\((?:[^()]|\([^()]*\))*\))?)\s*)*/)[0].length;
+// A header with an open ( or [: a brace there is in an argument ([InlineData(new[] { 1 })], @Mapping(value = {"/a"})).
+const unclosed = (header) => {
+  let depth = 0;
+  for (const ch of header) { if (ch === '(' || ch === '[') depth += 1; else if ((ch === ')' || ch === ']') && depth > 0) depth -= 1; }
+  return depth > 0;
+};
+// A type-level statement that is plainly a field or event declaration without a value.
+const DECLARATION = /^(?:(?:public|private|protected|internal|static|readonly|volatile|const|final|transient|virtual|override|sealed|extern|unsafe|new|event|required)\s+)*[A-Za-z_][\w.]*(?:\s*<[\w\s.,<>[\]?]*>)?(?:\s*\[[\s,]*\])*\??\s+[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*$/;
+const isDeclaration = (text) => DECLARATION.test(text) && !RESERVED.has(text.match(/^\w+/)?.[0]);
 // Leading attributes ([HttpPost]) and annotations (@Override) of a member.
 const withoutAttributes = (header) => header.trim().replace(/^(?:\[[^\]]*\]\s*)+/, '').replace(/^(?:@\w+(?:\([^)]*\))?\s*)+/, '').trim();
 // The text without attributes ([Route("x")]) and annotations (@Table(name = "x")).
@@ -321,13 +340,17 @@ function constantName(header) {
   return fieldName(header);
 }
 
-// Claim the header of a type or namespace from its modifiers and attributes.
+// Claim the header of a type or namespace from its modifiers. When the header
+// has parentheses after the name (a primary constructor, a base call with
+// arguments), only the part up to the name is claimed.
 function claimHeader(claims, headerFrom, header, matchIndex, end) {
   const lead = header.slice(0, matchIndex).match(LEAD);
-  claims.push([headerFrom + (lead ? lead.index : matchIndex), end]);
+  const name = header.slice(matchIndex).match(/^\S+\s+(?:class\s+|struct\s+)?[\w$]+/);
+  const to = /\(/.test(header.slice(matchIndex).replace(/\bnew\s*\(\s*\)/g, '')) && name ? headerFrom + matchIndex + name[0].length : end;
+  claims.push([headerFrom + (lead ? lead.index : matchIndex), to]);
 }
 
-const CS_TRIVIAL_ROOT = /^\s*(?:(?:global\s+)?using\s+(?!\(|var\b|await\b)[^;]*|namespace\s+[\w.]+|package\s+[\w.]+|import\s+(?:static\s+)?[\w.*]+|extern\s+alias\s+\w+|\[\s*(?:assembly|module)\s*:[\s\S]*\])\s*$/;
+const CS_TRIVIAL_ROOT = /^\s*(?:(?:global\s+)?using\s+(?:static\s+)?(?:\w+\s*=\s*)?[\w.]+(?:\s*<[\w\s.,<>]*>)?|namespace\s+[\w.]+|package\s+[\w.]+|import\s+(?:static\s+)?[\w.*]+|extern\s+alias\s+\w+)\s*$/;
 
 // C#, Java: members of types. Returns { sites, claims }: the members, and the
 // offsets of the text that does nothing by itself.
@@ -351,20 +374,30 @@ function scanBraces(code) {
     if (ch === '{') {
       const type = header.match(TYPE);
       const typeHere = type && !/[=(]/.test(withoutMarks(header.slice(0, type.index)));
+      if (frame.kind === 'inner' || (frame.kind !== 'member' && frame.kind !== 'block' && unclosed(header))) {
+        // A brace inside the parentheses of an attribute or a call: the header goes on after it.
+        stack.push({ kind: 'inner' });
+        continue;
+      }
       if (frame.kind === 'root' || frame.kind === 'namespace') {
         const ns = header.match(/\bnamespace\s+[\w.]+\s*$/);
         if (ns) { stack.push({ kind: 'namespace' }); claimHeader(claims, headerFrom, header, ns.index, i + 1); }
-        else if (typeHere) { stack.push({ kind: 'type', name: type[2], enumHead: /^enum$/.test(type[1]) }); claimHeader(claims, headerFrom, header, type.index, i + 1); }
+        else if (typeHere) { stack.push({ kind: 'type', name: type[2], enumHead: /^enum$/.test(type[1]), open: i }); claimHeader(claims, headerFrom, header, type.index, i + 1); }
         else stack.push({ kind: 'block' });
       } else if (frame.kind === 'type') {
         const trimmed = withoutAttributes(header);
         if (frame.pending || frame.enumHead) stack.push({ kind: 'block' });
-        else if (typeHere) { stack.push({ kind: 'type', name: type[2], enumHead: /^enum$/.test(type[1]) }); claimHeader(claims, headerFrom, header, type.index, i + 1); }
+        else if (typeHere) { stack.push({ kind: 'type', name: type[2], enumHead: /^enum$/.test(type[1]), open: i }); claimHeader(claims, headerFrom, header, type.index, i + 1); }
         else {
           let name = memberName(trimmed);
           if (!name && /\bthis\s*\[[^\]]*\]\s*$/.test(trimmed)) name = 'this[]';
-          if (name) stack.push({ kind: 'member', name, from: firstCodeLine(boundary), start: headerFrom, open: i });
-          else if (ASSIGN.test(trimmed)) {
+          const arrowMember = !name && /=>/.test(trimmed) ? memberName(trimmed.split('=>')[0]) : null;
+          if (name) stack.push({ kind: 'member', name, from: firstCodeLine(boundary), start: headerFrom + marksLength(header), open: i });
+          else if (arrowMember) {
+            // An expression-bodied member whose expression has braces: Create(int x = 1) => new Foo { A = x };
+            frame.pending = { name: arrowMember, from: firstCodeLine(boundary) };
+            stack.push({ kind: 'block' });
+          } else if (ASSIGN.test(trimmed)) {
             // A field whose value has braces (an array, an object, a lambda): a site named after the field.
             frame.pending = { name: fieldName(trimmed), from: firstCodeLine(boundary) };
             stack.push({ kind: 'block' });
@@ -377,37 +410,50 @@ function scanBraces(code) {
             if (trimmed === '') name = '(init)';
             else if (trimmed === 'static') name = '(static init)';
             else if (prop && !RESERVED.has(prop[1])) name = prop[1];
-            stack.push(name ? { kind: 'member', name, from: firstCodeLine(boundary), start: headerFrom, open: i } : { kind: 'block' });
+            stack.push(name ? { kind: 'member', name, from: firstCodeLine(boundary), start: headerFrom + marksLength(header), open: i } : { kind: 'block' });
           }
         }
       } else stack.push({ kind: 'block' });
       boundary = i + 1;
     } else if (ch === '}') {
       const done = stack.length > 1 ? stack.pop() : null;
+      if (done?.kind === 'inner') continue;
       if (done?.kind === 'member') {
-        // An auto-property ({ get; set; }) holds no behavior; a value after it is (file).
+        // An auto-property ({ get; set; }) holds no behavior; its attributes and a value after it are (file).
         if (AUTO_ACCESSORS.test(code.slice(done.open + 1, i))) claims.push([done.start, i + 1]);
         else site(done.name, done.from, lineAt(starts, i));
-      } else if (done?.kind === 'type' && done.enumHead) claims.push([boundary, i]);
+      } else if (done?.kind === 'type' && done.enumHead) {
+        // C#: the values of an enum are one site.
+        if (SIGNIFICANT.test(code.slice(done.open + 1, i))) sites.push({ symbol: `${typeName()}${typeName() ? '.' : ''}${done.name}.(values)`, from: firstCodeLine(done.open + 1), to: lineAt(starts, i) });
+      }
       if (!top().pending) boundary = i + 1;
     } else if (ch === ';') {
+      if (frame.kind === 'inner') continue;
+      // Claims need the whole statement: never claim from a header cut at 2000 characters.
+      const whole = headerFrom === boundary;
+      const markEnd = boundary + marksLength(code.slice(boundary, i));
       if (frame.kind === 'type') {
+        const full = code.slice(boundary, i);
         const trimmed = withoutAttributes(header);
         if (frame.pending) {
           if (frame.pending.name) site(frame.pending.name, frame.pending.from, lineAt(starts, i));
           frame.pending = null;
-        } else if (frame.enumHead) { claims.push([boundary, i + 1]); frame.enumHead = false; } // Java: the constants end at ;
-        else {
+        } else if (frame.enumHead) {
+          // Java: the enum constants end at ;
+          if (SIGNIFICANT.test(full)) site('(values)', firstCodeLine(boundary), lineAt(starts, i));
+          frame.enumHead = false;
+        } else {
           const arrow = trimmed.indexOf('=>');
           const left = arrow > 0 ? trimmed.slice(0, arrow) : '';
           let name = arrow > 0 ? memberName(left) ?? (ASSIGN.test(left) ? null : lastWord(left)) : null;
-          if (!name && ASSIGN.test(trimmed) && (constantName(trimmed) || /=>/.test(trimmed.split(ASSIGN).slice(1).join('=')))) name = fieldName(trimmed);
+          const value = withoutAttributes(full);
+          if (!name && ASSIGN.test(value) && (constantName(value) || /=>/.test(value.split(ASSIGN).slice(1).join('=')))) name = fieldName(value);
           if (name) site(name, firstCodeLine(boundary), lineAt(starts, i));
-          else if (memberName(trimmed) || !/=/.test(trimmed.replace(/[=!<>]=/g, ''))) claims.push([boundary, i + 1]); // a declaration without a body or a value
+          else if (whole && (memberName(trimmed) || isDeclaration(trimmed))) claims.push([markEnd, i + 1]); // a declaration without a body or a value
         }
       } else if (frame.kind === 'root' || frame.kind === 'namespace') {
         const trimmed = withoutAttributes(header);
-        if (CS_TRIVIAL_ROOT.test(trimmed) || (/\bdelegate\b|^(?:[\w\s]*\s)?(?:record|interface|class|struct)\s/.test(trimmed) && !ASSIGN.test(trimmed) && !/=>/.test(trimmed))) claims.push([boundary, i + 1]);
+        if (whole && (CS_TRIVIAL_ROOT.test(trimmed) || (/\bdelegate\b|^(?:[\w\s]*\s)?(?:record|interface|class|struct)\s/.test(trimmed) && !ASSIGN.test(trimmed) && !/=>/.test(trimmed)))) claims.push([markEnd, i + 1]);
       }
       boundary = i + 1;
     }
@@ -415,19 +461,26 @@ function scanBraces(code) {
   return { sites, claims };
 }
 
-const JS_TRIVIAL_TOP = /^\s*(?:namespace\s+[\w\\]+|use\s+[^;$]+|declare\s*\([^)]*\)|(?:require|include)(?:_once)?\b[^;$]*|(["'])\s*\1|export\s*(?:type\s*)?\{[^}]*\}(?:\s*from\s*["']\s*["'])?|export\s+\*[^;]*|import(?!\s*\()\b[^;]*|(?:export\s+)?declare\s[^;]*|(?:export\s+)?type\s+[A-Za-z_$][\w$]*[^;]*)\s*$/;
+// Top-level statements that do nothing by themselves, read one line at a time:
+// namespace, use, declare(strict_types), a require or include of a fixed path,
+// "use strict", imports and re-exports, a require into a constant, TypeScript
+// types and ambient declarations.
+const TRIVIAL_TOP = /^\s*(?:namespace\s+[\w\\]+|use\s+(?:function\s+|const\s+)?[\w\\]+(?:\s+as\s+\w+)?(?:\s*,\s*[\w\\]+(?:\s+as\s+\w+)?)*|declare\s*\(\s*\w+\s*=\s*\w+\s*\)|(?:require|include)(?:_once)?\s*\(?\s*(?:(?:__DIR__|dirname\s*\(\s*__FILE__\s*\))\s*\.\s*)?(["'])[^"'$]*\1\s*\)?|(["'])\s*\2|export\s+\*(?:\s+as\s+[\w$]+)?\s+from\s*(["'])\s*\3|import(?:\s+type)?\s+(?:[\w$]+\s+from\s*|\*\s*as\s+[\w$]+\s+from\s*)?(["'])\s*\4|(?:const|let|var)\s+[\w$]+\s*=\s*require\s*\(\s*(["'])\s*\5\s*\)|(?:export\s+)?declare\s+(?:const|let|var|function|class)\s[^=]*|(?:export\s+)?type\s+[A-Za-z_$][\w$]*(?:<[^=]*>)?\s*=[^;]*)\s*;?\s*$/;
+// Class-level declarations without a value or body.
+const PHP_MEMBER_DECLARATION = /^\s*(?:(?:(?:public|private|protected|var|static|readonly)\s+)+(?:\??[\w\\|]+\s+)?\$\w+(?:\s*,\s*\$\w+)*|(?:(?:abstract|public|private|protected|static|final)\s+)*function\s+&?\w+\s*\((?:[^()]|\([^()]*\))*\)\s*(?::\s*[?\w\\|]+)?|use\s+[\w\\]+(?:\s*,\s*[\w\\]+)*)\s*$/;
+const JS_MEMBER_DECLARATION = /^\s*(?:(?:(?:public|private|protected|static|readonly|declare|override|abstract)\s+)*#?[A-Za-z_$][\w$]*[?!]?\s*(?::\s*[^=;(){}]+)?|(?:(?:public|private|protected|static|abstract|async)\s+)*[A-Za-z_$][\w$]*\??\s*(?:<[^(){}]*>)?\s*\((?:[^()]|\([^()]*\))*\)\s*:\s*[^=;(){}]+)\s*$/;
 const JS_CLASS_METHOD = /(?:^|[\s;}])(?:(?:public|private|protected|static|async|get|set|readonly|override|abstract)\s+)*(?:\*\s*)?#?([A-Za-z_$][\w$]*)\s*[?!]?\s*(?:<[^(){}]*>)?\s*\([^]*\)\s*(?::\s*[^{};=]*)?$/;
 const JS_ARROW_FIELD = /(?:^|[\s;}])(?:(?:public|private|protected|static|readonly|override)\s+)*#?([A-Za-z_$][\w$]*)\s*[!?]?\s*(?::\s*[^=;{}]*)?=\s*(?:async\s*)?(?:<[^(){}]*>\s*)?(?:\([^]*\)|[A-Za-z_$][\w$]*)\s*(?::\s*[^=;{}]*)?=>\s*$/;
 const JS_ARROW_CONST = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=;{}]*)?=\s*(?:async\s*)?(?:<[^(){}]*>\s*)?(?:\([^]*\)|[A-Za-z_$][\w$]*)\s*(?::\s*[^=;{}]*)?=>/;
 
 // Import and export lists, and PHP group use, have braces that are not blocks.
-const LISTS = /(?<=^|[\n;}])[ \t]*(?:(?:import|export)(?:\s+type)?\s*(?:[\w$]+\s*,?\s*)?(?:\*\s*as\s+[\w$]+\s*)?\{[^{}]*\}\s*(?:from\s*(["'])\s*\1)?\s*;?|use\s+[\w\\]+\\\{[^{}]*\}\s*;)/g;
+const LISTS = /(?<=^|[\n;}])[ \t]*(?:import(?:\s+type)?\s*(?:[\w$]+\s*,\s*)?\{[^{}]*\}\s*from\s*(["'])\s*\1\s*;?|export(?:\s+type)?\s*\{[^{}]*\}\s*(?:from\s*(["'])\s*\2)?\s*;?|use\s+[\w\\]+\\\{[^{}]*\}\s*;)/g;
 
 // PHP and JavaScript/TypeScript: functions and methods. Returns { sites, claims }.
 function scanFunctions(text, lang) {
   const claims = [];
   // The braces of import lists are blanked; the lists do nothing by themselves.
-  const code = text.replace(LISTS, (list, _q, offset) => {
+  const code = text.replace(LISTS, (list, _q, _r, offset) => {
     claims.push([offset, offset + list.length]);
     return list.replace(/[{}]/g, ' ');
   });
@@ -440,6 +493,14 @@ function scanFunctions(text, lang) {
   const className = () => stack.filter((f) => f.kind === 'class').map((f) => f.name).join('.');
   const firstCodeLine = (from) => { let k = from; while (k < code.length && /\s/.test(code[k])) k += 1; return lineAt(starts, k); };
   const named = (name) => { const cls = className(); return cls ? `${cls}.${name}` : name; };
+  // One line at a time: a statement without ; (JavaScript) can follow an import.
+  const claimLines = (from, to) => {
+    let at = from;
+    for (const line of code.slice(from, to).split('\n')) {
+      if (line.trim() && TRIVIAL_TOP.test(line)) claims.push([at, at + line.length]);
+      at += line.length + 1;
+    }
+  };
   for (let i = 0; i < code.length; i += 1) {
     const ch = code[i];
     if (ch !== '{' && ch !== '}' && ch !== ';') continue;
@@ -459,18 +520,21 @@ function scanFunctions(text, lang) {
           ?? (lang === 'js' && frame.kind === 'class' ? header.match(JS_ARROW_FIELD) ?? header.match(JS_CLASS_METHOD) : null);
         if (m && !(lang === 'js' && RESERVED.has(m[1]))) fn = m[1];
       }
-      if (type && !(lang === 'js' && type[1] === 'enum')) {
+      if (type && lang === 'js' && type[1] === 'enum') {
+        // A TypeScript enum: its values are one site.
+        stack.push({ kind: 'function', name: named(`${type[2]}.(values)`), from: firstCodeLine(boundary) });
+      } else if (type) {
         claimHeader(claims, headerFrom, header, type.index, i + 1);
         stack.push({ kind: 'class', name: type[2] });
-      } else if (typedef || type) {
-        // A TypeScript type, enum or ambient declaration: nothing runs.
-        stack.push({ kind: 'typedef', start: headerFrom + (typedef ? typedef.index : header.slice(0, type.index).match(LEAD).index) });
+      } else if (typedef) {
+        // A TypeScript type or ambient declaration: nothing runs.
+        stack.push({ kind: 'typedef', start: headerFrom + typedef.index });
       } else if (fn) {
         stack.push({ kind: 'function', name: named(fn), from: firstCodeLine(boundary) });
-      } else {
-        if (ns) claimHeader(claims, headerFrom, header, ns.index, i + 1);
-        stack.push({ kind: 'block' });
-      }
+      } else if (ns && (frame.kind === 'root' || frame.kind === 'namespace')) {
+        claimHeader(claims, headerFrom, header, ns.index, i + 1);
+        stack.push({ kind: 'namespace' });
+      } else stack.push({ kind: 'block' });
       boundary = i + 1;
     } else if (ch === '}') {
       const done = stack.length > 1 ? stack.pop() : null;
@@ -478,21 +542,25 @@ function scanFunctions(text, lang) {
       if (done?.kind === 'typedef') claims.push([done.start, i + 1]);
       boundary = i + 1;
     } else if (!inFunction()) {
+      const whole = headerFrom === boundary;
       if (frame.kind === 'class') {
         // A class constant is behavior (a rate, a limit), and so is a method written as an arrow field.
-        const constant = header.match(/^\s*(?:(?:public|private|protected|final|static)\s+)*(?:const|readonly\s+static|static\s+readonly)\s+(?:[\w\\?]+\s+)?([A-Za-z_]\w*)\s*(?::[^=]*)?=/);
+        const full = code.slice(boundary, i);
+        const constant = full.match(/^\s*(?:(?:public|private|protected|final|static)\s+)*(?:const|readonly\s+static|static\s+readonly)\s+(?:[\w\\?]+\s+)?([A-Za-z_]\w*)\s*(?::[^=]*)?=/);
         const arrow = lang === 'js' && !constant && header.match(new RegExp(`${JS_ARROW_FIELD.source.replace(/\\s\*\$$/, '')}`));
         if (constant) sites.push({ symbol: named(constant[1]), from: firstCodeLine(boundary), to: lineAt(starts, i) });
         else if (arrow) sites.push({ symbol: named(arrow[1]), from: firstCodeLine(boundary), to: lineAt(starts, i) });
-        else if (!ASSIGN.test(header) || /^\s*case\s/.test(header)) claims.push([boundary, i + 1]); // a declaration without a value, an enum case
+        else if (whole && (lang === 'php' ? PHP_MEMBER_DECLARATION : JS_MEMBER_DECLARATION).test(withoutMarks(header))) claims.push([boundary + marksLength(header), i + 1]); // a declaration without a value
       } else {
         const arrow = lang === 'js' && header.match(JS_ARROW_CONST);
         if (arrow) sites.push({ symbol: named(arrow[1]), from: firstCodeLine(boundary), to: lineAt(starts, i) });
-        else if (JS_TRIVIAL_TOP.test(header)) claims.push([boundary, i + 1]);
+        else if (whole && (frame.kind === 'root' || frame.kind === 'namespace')) claimLines(boundary, i);
       }
       boundary = i + 1;
     } else boundary = i + 1;
   }
+  // The statements after the last ; or brace.
+  if (stack.length === 1 || top().kind === 'namespace') claimLines(boundary, code.length);
   return { sites, claims };
 }
 
@@ -504,13 +572,13 @@ function scanVb(code) {
   const sites = [];
   const trivial = new Set();
   const types = [];
-  const ATTR = '(?:<[^>]*>\\s*_?\\s*)*';
+  const ATTR = '(?:<[^>]*>[\\s_]*)*';
   const MODS = '(?:(?:Public|Private|Protected|Friend|Shared|Overrides|Overridable|NotOverridable|MustOverride|Overloads|Shadows|Async|Partial|Static|ReadOnly|WriteOnly|Default|Iterator|Widening|Narrowing|Custom)\\s+)*';
   const DECL = new RegExp(`^\\s*${ATTR}${MODS}(Sub|Function|Property|Operator|Event)\\s+([\\w[\\]]+|[+\\-*/\\\\&=<>^]+)`, 'i');
   const TYPE_LINE = new RegExp(`^\\s*${ATTR}(?:(?:Public|Private|Protected|Friend|Partial|Shared|MustInherit|NotInheritable|Shadows)\\s+)*(Class|Module|Structure|Interface|Enum)\\s+(\\w+)`, 'i');
   const CONST = new RegExp(`^\\s*${ATTR}(?:(?:Public|Private|Protected|Friend|Shadows)\\s+)*(?:Const|Shared\\s+ReadOnly|ReadOnly\\s+Shared)\\s+(?:(?:Public|Private|Protected|Friend|Shadows)\\s+)*(\\w+)[^=]*=`, 'i');
   const FIELD = new RegExp(`^\\s*${ATTR}(?:(?:Public|Private|Protected|Friend|Shared|ReadOnly|Dim|Static|WithEvents|Shadows)\\s+)+\\w`, 'i');
-  const TRIVIAL = /^\s*(?:Imports\b|Option\s+(?:Strict|Explicit|Compare|Infer)\b|Namespace\b|End\s+(?:Namespace|Class|Module|Structure|Interface|Enum)\b|Inherits\b|Implements\b|<\s*(?:Assembly|Module)\s*:)/i;
+  const TRIVIAL = /^\s*(?:Imports\b|Option\s+(?:Strict|Explicit|Compare|Infer)\b|Namespace\b|End\s+(?:Namespace|Class|Module|Structure|Interface|Enum)\b|Inherits\b|Implements\b)/i;
   const LAMBDA = /\b(Sub|Function)\s*\((?:[^()]|\([^()]*\))*\)\s*(?:As\s+[\w.]+(?:\s*\([^)]*\))?)?\s*$/i;
   const continued = (line) => /\s_\s*$/.test(line);
   const qualified = (name) => `${types.map((t) => t.name).join('.')}${types.length ? '.' : ''}${name}`;
@@ -519,7 +587,7 @@ function scanVb(code) {
   for (let k = 0; k < lines.length; k += 1) {
     const line = lines[k];
     if (open) {
-      const end = line.match(/^\s*End\s+(Sub|Function|Property|Operator|Event)\b/i);
+      const end = line.match(/^\s*End\s+(Sub|Function|Property|Operator|Event|Enum)\b/i);
       const kind = end ? end[1][0].toUpperCase() + end[1].slice(1).toLowerCase() : null;
       if (kind && open.nested[kind] > 0) open.nested[kind] -= 1;
       else if (kind === open.kind) { sites.push({ symbol: open.name, from: open.from, to: k + 1 }); open = null; }
@@ -528,12 +596,15 @@ function scanVb(code) {
     }
     if (carry) { trivial.add(k + 1); carry = continued(line); continue; }
     if (!line.trim()) continue;
+    // A statement continued with ` _` is read whole: `Private x As Integer _` / `= Load()` has a value.
+    let full = line;
+    for (let j = k; continued(lines[j]) && j + 1 < lines.length; j += 1) full += ` ${lines[j + 1]}`;
     const type = line.match(TYPE_LINE);
-    if (type) { types.push({ name: type[2], plain: /interface|enum/i.test(type[1]) }); trivial.add(k + 1); carry = continued(line); continue; }
-    if (/^\s*End\s+(Class|Module|Structure|Interface|Enum)\b/i.test(line)) { types.pop(); trivial.add(k + 1); continue; }
-    if (types.at(-1)?.plain || TRIVIAL.test(line)) { trivial.add(k + 1); carry = continued(line); continue; } // interface members, enum values
-    if (new RegExp(`^\\s*${ATTR}$`).test(line)) { trivial.add(k + 1); continue; } // an attribute on its own line
-    const constant = line.match(CONST);
+    if (type && /^enum$/i.test(type[1])) { open = { kind: 'Enum', name: `${qualified(type[2])}.(values)`, from: k + 1, nested: {} }; continue; } // the values of an enum are one site
+    if (type) { types.push({ name: type[2], plain: /interface/i.test(type[1]) }); if (!/^\s*</.test(line)) trivial.add(k + 1); carry = false; continue; } // attributes on the line stay in (file)
+    if (/^\s*End\s+(Class|Module|Structure|Interface)\b/i.test(line)) { types.pop(); trivial.add(k + 1); continue; }
+    if ((types.at(-1)?.plain && !/^\s*</.test(line)) || TRIVIAL.test(line)) { trivial.add(k + 1); carry = continued(line); continue; } // interface members
+    const constant = full.match(CONST);
     if (constant) { sites.push({ symbol: qualified(constant[1]), from: k + 1, to: k + 1 }); continue; }
     const decl = line.match(DECL);
     if (decl) {
@@ -550,10 +621,10 @@ function scanVb(code) {
       }
       if (hasBody) { open = { kind, name: qualified(decl[2].replace(/[[\]]/g, '')), from: k + 1, nested: {} }; continue; }
       // A declaration without a body; an auto-property with a value is (file).
-      if (!/=/.test(line)) { trivial.add(k + 1); carry = continued(line); }
+      if (!/=/.test(full) && !/^\s*</.test(line)) { trivial.add(k + 1); carry = continued(line); }
       continue;
     }
-    if (/^\s*Declare\b/i.test(line) || (FIELD.test(line) && !/=|\bNew\b/i.test(line))) { trivial.add(k + 1); carry = continued(line); }
+    if (!/^\s*</.test(line) && (/^\s*Declare\b/i.test(line) || (FIELD.test(line) && !/=|\bNew\b/i.test(full)))) { trivial.add(k + 1); carry = continued(line); }
   }
   if (open) sites.push({ symbol: open.name, from: open.from, to: lines.length });
   return { sites, trivial };
@@ -608,7 +679,8 @@ export function scanText(text, file) {
   const all = normalized.split('\n');
   const fileSite = (lines, extra = {}) => ({ id: `${file}:(file)`, file, symbol: '(file)', from: lines[0] ?? 1, to: lines.at(-1) ?? 1, lines, markers: [], ...extra });
   // Minified or generated one-line code has no members worth reading apart.
-  if (all.some((line) => line.length > 5000) || (normalized.length > 20000 && normalized.length / all.length > 300)) {
+  const longChars = all.reduce((sum, line) => sum + (line.length > 2000 ? line.length : 0), 0);
+  if ((normalized.length > 20000 && longChars > normalized.length / 2) || (normalized.length > 20000 && normalized.length / all.length > 300)) {
     return [fileSite(range(1, all.length), { minified: true })];
   }
   const { code, plain, html, hidden } = mask(normalized, lang);
@@ -623,7 +695,9 @@ export function scanText(text, file) {
   for (const [a, b] of html) {
     for (let k = a; k < b; k += 1) if (!/\s/.test(normalized[k])) extra.push(lineAt(starts, k));
   }
-  const rest = residualLines(lang === 'text' ? normalized : code, found.sites, { ...found, extra });
+  // Lines are read in the copy with only comments blanked, so a string the
+  // masker misread, or a multi-line string, still counts.
+  const rest = residualLines(lang === 'text' ? normalized : plain, found.sites, { ...found, extra });
   const plainLines = (lang === 'text' ? normalized : plain).split('\n');
   const seen = new Map();
   const sites = found.sites.sort((a, b) => a.from - b.from || a.to - b.to).map((s) => {
@@ -650,7 +724,10 @@ export function scanFile(root, file) {
 // The kept source files a change's source map names (a folder row stands for
 // the files below it), in path order.
 export function changeFiles(root, dir) {
-  const listed = sourceMapPaths(readIf(path.join(dir, 'source-map.md'), []) ?? '', root);
+  const listed = sourceMapPaths(readIf(path.join(dir, 'source-map.md'), []) ?? '', root).map((p) => {
+    // A folder written without its trailing / is still the folder.
+    try { return !p.endsWith('/') && fs.statSync(path.join(root, p)).isDirectory() ? `${p}/` : p; } catch { return p; }
+  });
   const all = sourceFiles(root) ?? [];
   const survey = archivedChange(root, 'survey');
   const inventory = survey ? inventoryRows(readIf(path.join(survey, 'inventory.md'), []) ?? '') : [];
@@ -698,9 +775,11 @@ const ledgerKey = (text) => {
 export function parseVerdict(text) {
   const v = text.replace(/<!--[\s\S]*?-->/g, '').replace(/[*_`]/g, '').trim().replace(/[.。]$/, '').trim();
   const NOTE = '(?:\\s*(?:\\(.*\\)|[:：—–-]\\s.*))?$';
+  // A note may explain a verdict, never take it back.
+  if (/\b(?:but|except|however|unless|gap|partly|partially|not\s+all)\b|ただし|しかし|除く|以外|一部/i.test(v.replace(/^\s*gap\b/i, ''))) return { kind: 'invalid' };
   let m = v.match(/^covered\s*:?\s*(.+)$/i);
   if (m) {
-    const tokens = m[1].replace(/\s*\([^)]*\)\s*$/, '').split(/[\s,、;/]+|\band\b/i).filter(Boolean);
+    const tokens = m[1].split(/[\s,、;/]+|\band\b/i).filter(Boolean);
     const refs = [];
     for (const token of tokens) {
       const one = token.match(/^([RS])0*(\d+)$/i);
@@ -772,7 +851,7 @@ export function checkLedger(root, dir, { requirements, screens, asked, assignmen
       const paths = assignment.get(v.capability);
       if (v.capability === own) bad.push(`coverage of ${site.id} names its own capability as "other capability"`);
       else if (!paths) bad.push(`coverage of ${site.id} names ${v.capability}, which is not a capability of the plan`);
-      else if (!paths.some((p) => covers(p, site.file))) bad.push(`coverage of ${site.id} names ${v.capability}, but the plan does not give ${site.file} to that capability (list the file under it too, or judge the site here)`);
+      else if (!ownersOf(assignment, site.file).includes(v.capability)) bad.push(`coverage of ${site.id} names ${v.capability}, but the plan does not give ${site.file} to that capability (list the file itself under it too, or judge the site here)`);
     } else if (v.kind === 'question') {
       if (!asked.has(v.question)) bad.push(`coverage of ${site.id} points to ${v.question}, which is not in questions.md with a review item`);
     } else if (v.kind === 'gap') bad.push(`site ${site.id} is a gap: add the requirement it needs (then check it again), or move it to questions.md as "question Q<n>"`);
