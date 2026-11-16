@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { main, bypassFiles, STUB_MARKER, SCHEMAS } from '../scripts/setup.mjs';
-import { checkReview, checkPortReady, checkPortDone, baselineHash } from '../scripts/gate.mjs';
+import { checkReview, checkPortReady, checkPortDone, baselineHash, databaseHash } from '../scripts/gate.mjs';
 import { status as progress } from '../scripts/status.mjs';
 import { runOpenspec, runCommand, findNpm, findOpenspec, OPENSPEC_VERSION } from '../scripts/openspec.mjs';
 import { tempDir, write, quiet, isolateOpenspec, crlf } from './helpers.mjs';
@@ -90,6 +90,8 @@ function fill(dir, change, files) {
 test('survey -> target design -> extract -> review gate -> archive -> port -> amend', { skip: !hasOpenspec && 'npm not found' }, () => {
   const dir = setUp();
   write(dir, 'src/calc.py', 'def add(a, b):\n    return a + b\n');
+  // Definitions exported from a database, with CRLF as Windows tools write them.
+  write(dir, 'openspec/spec-relay/db/calc/tables.sql', crlf('CREATE TABLE sums (a int, b int, total int);\nCREATE TRIGGER sums_total ON sums AFTER INSERT AS UPDATE sums SET total = a + b;\n'));
   const steps = () => progress(dir).todoList.slice(1).map((item) => item.status);
   const keys = () => progress(dir).todoList.slice(1).map((item) => item.key);
 
@@ -97,11 +99,12 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   openspec(dir, 'new', 'change', 'survey', '--schema', 'spec-relay-survey');
   assert.deepEqual(keys(), ['survey', 'target']);
   fill(dir, 'survey', {
-    'inventory.md': '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | calc | port | |\n',
+    'inventory.md': '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | calc | port | |\n| openspec/spec-relay/db/calc/ | calc | port | |\n',
     'context-map.md': '## Contexts\n\n### Context: platform\n- generic\n\n### Context: calc\n- core\n',
     'glossary.md': '# Glossary\n',
-    'capabilities.md': '# Capabilities\n\n### calc\n1. `calc/add` 足し算\n   - `src/`\n',
-    'review.md': 'Reviewer: Uma\n\n- [x] K1 platform\n- [x] K2 calc\n- [x] C1 inventory\n',
+    'capabilities.md': '# Capabilities\n\n### calc\n1. `calc/add` 足し算\n   - `src/`\n   - `openspec/spec-relay/db/calc/`\n',
+    'database.md': `# Databases\n\n## Databases\n| Database | Product and version | Connection setting | Definitions |\n|---|---|---|---|\n| calc | SQL Server 2012 | CalcDb | \`openspec/spec-relay/db/calc/\` |\n\n## Logic in the database\n| Kind | Count | Contexts | Notes |\n|---|---|---|---|\n| trigger | 1 | calc | |\n\n## Missing definitions\nNone\n\n## Snapshot\nsha256: ${databaseHash(dir)}\n`,
+    'review.md': 'Reviewer: Uma\n\n- [x] K1 platform\n- [x] K2 calc\n- [x] C1 inventory\n- [x] D1 calc: definitions\n- [x] D90 missing definitions\n',
   });
   assert.deepEqual(checkReview(dir, 'survey'), { ok: true, problems: [] });
   openspec(dir, 'archive', 'survey', '--yes');
@@ -114,7 +117,8 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
     'conventions.md': '# Conventions\n',
     'ui.md': '# UI\n\n## Screens\n| Context | Screens | Source kind | Target | Policy | Why |\n|---|---|---|---|---|---|\n| platform | all | none | none | none | |\n| calc | all | none | none | none | |\n\n## Carried files\nNone\n',
     'verification.md': '| Context | A |\n|---|---|\n| platform | yes |\n| calc | yes |\n',
-    'review.md': 'Reviewer: Uma\n\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 calc\n- [x] E1 platform: levels\n- [x] E2 calc: levels\n- [x] U1 platform: screens\n- [x] U2 calc: screens\n- [x] U90 shared look\n',
+    'data.md': '# Data\n\n## Schema policy\nkeep\n\n## Database logic\n| Kind | Handling | Reason |\n|---|---|---|\n| trigger | keep | |\n\n## Data access mapping\n| Topic | Source behavior | Target rule |\n|---|---|---|\n| Character set | cp932 | same |\n\n## Schema changes\nno migrations\n\n## Test database\nLocalDB\n',
+    'review.md': 'Reviewer: Uma\n\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 calc\n- [x] E1 platform: levels\n- [x] E2 calc: levels\n- [x] U1 platform: screens\n- [x] U2 calc: screens\n- [x] U90 shared look\n- [x] D0 schema policy\n- [x] D1 trigger: keep\n- [x] D90 exceptions\n- [x] D91 mapping\n- [x] D92 schema changes, test database\n',
   });
   assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
   openspec(dir, 'archive', 'target-design', '--yes');
@@ -124,7 +128,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   openspec(dir, 'new', 'change', 'extract-calc-add', '--schema', 'spec-relay-extract');
   const review = (box) => crlf(`﻿# Review\n\nReviewer: Uma\n\n## 1. Requirements\n- [${box}] R1 Add two numbers\n`);
   fill(dir, 'extract-calc-add', {
-    'source-map.md': '# Source map\n\n| Path | Role | In scope |\n|---|---|---|\n| src/calc.py | adds | full |\n',
+    'source-map.md': '# Source map\n\n| Path | Role | In scope |\n|---|---|---|\n| src/calc.py | adds | full |\n| openspec/spec-relay/db/calc/tables.sql | the sums table and its trigger | full |\n',
     'specs/calc/add/spec.md': crlf(SPEC),
     'screens.md': '# Screens\r\n\r\nNone\r\n',
     'trace.md': '# Trace\r\n\r\n| Requirement | Source | Existing tests |\r\n|---|---|---|\r\n| Add two numbers | src/calc.py:add:1-2 | none |\r\n',
@@ -143,8 +147,12 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   assert.deepEqual(steps(), ['completed', 'completed', 'not-started']);
   assert.match(fs.readFileSync(path.join(dir, 'openspec/specs/calc/add/spec.md'), 'utf8'), /Requirement: Add two numbers/);
 
-  // 4. Port.
+  // 4. Port. Definitions that changed after the survey stop it.
   assert.deepEqual(checkPortReady(dir, 'calc/add'), { ok: true, problems: [] });
+  write(dir, 'openspec/spec-relay/db/calc/tables.sql', 'CREATE TABLE sums (a int);\n');
+  assert.match(checkPortReady(dir, 'calc/add').problems.join(), /database definitions changed after the survey/);
+  write(dir, 'openspec/spec-relay/db/calc/tables.sql', 'CREATE TABLE sums (a int, b int, total int);\nCREATE TRIGGER sums_total ON sums AFTER INSERT AS UPDATE sums SET total = a + b;\n');
+  assert.deepEqual(checkPortReady(dir, 'calc/add'), { ok: true, problems: [] }, 'line endings do not count');
   openspec(dir, 'new', 'change', 'port-calc-add', '--schema', 'spec-relay-port');
   assert.match(fs.readFileSync(path.join(dir, 'openspec/changes/port-calc-add/.openspec.yaml'), 'utf8'), /skip_specs: true/);
   const next = JSON.parse(openspec(dir, 'status', '--change', 'port-calc-add', '--json'));

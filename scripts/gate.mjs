@@ -9,6 +9,8 @@
 //   node gate.mjs baseline --capability <capability>       the baseline hash a port records
 //   node gate.mjs coverage                                 every kept source file has a capability in the plan, and
 //                                                          every analyzed capability's source map holds its files
+//   node gate.mjs db-hash                                  the hash of the exported database definitions
+//                                                          (openspec/spec-relay/db/) the survey records
 //   node gate.mjs guard --save <name>                      before a wave: snapshot the hashes of the files no
 //                                                          subagent may write (active review.md and questions.md,
 //                                                          plan.md, lessons.md, openspec/specs/, openspec/config.yaml,
@@ -149,7 +151,7 @@ export function section(text, heading) {
   let found = false;
   for (const line of unfencedLines(stripComments(text ?? ''))) {
     const h2 = line.match(/^##\s+(.*?)(?:\s+#+)?\s*$/);
-    if (h2) { inside = heading.test(plain(h2[1].trim().replace(/^\d+[.)]\s*/, ''))); found ||= inside; continue; }
+    if (h2) { inside = heading.test(plain(h2[1].trim()).replace(/^\d+[.)]?\s+/, '')); found ||= inside; continue; }
     if (inside) out.push(line);
   }
   return found ? out.join('\n') : null;
@@ -301,13 +303,19 @@ const relPath = (p) => p.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/
 // Copilot files.
 export const cleanValue = (v) => v.replace(/\s+#.*$/, '').trim().replace(/^(["'`])(.*)\1$/, '$2').trim();
 
-// Files under the source root the inventory must cover, or null when the source
+// Files under the source root the inventory must cover, and the exported
+// database definitions (openspec/spec-relay/db/), or null when the source
 // root is not a folder inside the repository. In a git repository these are the
 // files git tracks or would track (so .vs/, desktop.ini and other ignored local
 // files do not count); otherwise every file on disk. Kit and tool folders are
 // never source code: .git, openspec/, the target root and OpenSpec's generated
 // Copilot files.
 export function sourceFiles(root) {
+  const code = repositoryFiles(root);
+  return code === null ? null : [...new Set([...code, ...databaseFiles(root)])].sort();
+}
+
+function repositoryFiles(root) {
   const source = relPath(cleanValue(configValue(root, 'Source root', '.'))).replace(/\/$/, '');
   const target = relPath(cleanValue(configValue(root, 'Target root', ''))).replace(/\/$/, '');
   const base = path.resolve(root);
@@ -343,6 +351,206 @@ export function sourceFiles(root) {
   };
   visit(prefix.replace(/\/$/, ''));
   return out.sort();
+}
+
+// The database definitions the person exported from the database (DDL of tables,
+// views, procedures, triggers, jobs...), for databases whose definitions are not
+// in the repository. They are source code like the files under the source root:
+// read-only, in the inventory, cited by trace.md.
+export const DATABASE_DIR = 'openspec/spec-relay/db';
+// The kinds of database objects that hold logic, as database.md and data.md name them.
+export const DB_KINDS = ['view', 'procedure', 'function', 'trigger', 'constraint', 'sequence', 'job', 'other'];
+const JUNK = /^(desktop\.ini|thumbs\.db|\.ds_store)$/i;
+
+// Repository-relative paths of the files under openspec/spec-relay/db/. In a git
+// repository only the files git tracks or would track count, as for source files,
+// so a local file a .gitignore rule hides never makes clones disagree.
+export function databaseFiles(root) {
+  const onDisk = walk(path.join(root, DATABASE_DIR)).filter((f) => !JUNK.test(path.basename(f)))
+    .filter((f) => { try { return fs.statSync(f).isFile(); } catch { return false; } })
+    .map((f) => path.relative(root, f).split(path.sep).join('/')).sort();
+  if (onDisk.length === 0) return onDisk;
+  const top = spawnSync('git', ['rev-parse', '--show-cdup'], { cwd: root, encoding: 'utf8', windowsHide: true });
+  if (top.status !== 0 || top.stdout.trim() !== '') return onDisk;
+  const git = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', DATABASE_DIR], { cwd: root, encoding: 'buffer', windowsHide: true, maxBuffer: Infinity });
+  if (git.status !== 0 || !git.stdout) return onDisk;
+  const listed = new Set(git.stdout.toString('utf8').split('\0').filter(Boolean).map((f) => f.toLowerCase()));
+  return onDisk.filter((f) => listed.has(f.toLowerCase()));
+}
+
+const hasBom16 = (buffer) => (buffer[0] === 0xff && buffer[1] === 0xfe) || (buffer[0] === 0xfe && buffer[1] === 0xff);
+const isUtf16 = (buffer, file) => hasBom16(buffer) || (/\.(sql|ddl|txt|csv|tsv|md)$/i.test(file) && buffer.includes(0));
+
+// Definition files saved as UTF-16 (SSMS "Unicode text", `>` in Windows PowerShell 5.1),
+// which analysts and the gate cannot read as text.
+export function databaseUtf16(root) {
+  return databaseFiles(root).filter((f) => { try { return isUtf16(fs.readFileSync(path.join(root, f)), f); } catch { return false; } });
+}
+
+// A text file's bytes without a UTF-8 BOM and with CRLF and CR as LF. It works on
+// bytes, so Shift_JIS or EUC-JP definitions hash by what they hold.
+function normalisedBytes(buffer) {
+  const start = buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf ? 3 : 0;
+  const out = Buffer.alloc(buffer.length - start);
+  let n = 0;
+  for (let i = start; i < buffer.length; i += 1) {
+    if (buffer[i] === 0x0d) { out[n++] = 0x0a; if (buffer[i + 1] === 0x0a) i += 1; } else out[n++] = buffer[i];
+  }
+  return out.subarray(0, n);
+}
+
+// sha256 over the definition files (paths relative to openspec/spec-relay/db/ in
+// lowercase, because Windows folders ignore case; text with line endings and BOM
+// normalised so a Windows checkout gives the same hash), or null when the folder
+// holds no file.
+export function databaseHash(root) {
+  const files = databaseFiles(root);
+  if (files.length === 0) return null;
+  const lines = files.map((f) => {
+    let buffer;
+    try { buffer = fs.readFileSync(path.join(root, f)); } catch { buffer = Buffer.from(`unreadable ${f}`); }
+    if (!isUtf16(buffer, f) && !buffer.includes(0)) buffer = normalisedBytes(buffer);
+    return `${f.slice(DATABASE_DIR.length + 1).toLowerCase()}\0${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+  }).sort();
+  return crypto.createHash('sha256').update(lines.join('\n')).digest('hex');
+}
+
+// The body of the `## <title>` section (up to the next `##` heading), or null.
+const sectionNamed = (text, title) => section(text, new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
+
+const isNone = (text) => /^(none|なし|該当なし)[.。]?$/i.test(plain(stripComments(text ?? '').replace(/^#.*$/gm, '')));
+// The review boxes `<letter><n> <name>` or `<letter><n> <name>: <note>` for this name.
+const itemsFor = (boxes, letter, name) => boxes.filter((b) => new RegExp(`^${letter}\\d+\\b`, 'i').test(b.plain))
+  .filter((b) => withoutId(b.plain, letter).split(/[:：]/)[0].trim() === norm(name));
+// The note after the name: `D1 trigger: keep` gives "keep".
+const itemNote = (box) => norm(box.plain.split(/[:：]/).slice(1).join(':'));
+const hasId = (boxes, id) => boxes.some((b) => new RegExp(`^${id}\\b`, 'i').test(b.plain));
+// The snapshot hash in `## Snapshot` (or anywhere when that heading is gone).
+const recordedDbHash = (text) => stripComments(sectionNamed(text, 'Snapshot') ?? text ?? '').match(/sha-?256[^0-9a-f\n]*([0-9a-f]{64})(?![0-9a-f])/i)?.[1].toLowerCase() ?? null;
+
+// The rows of the first table in the text as objects keyed by the lowercase header cells.
+function firstTable(text) {
+  const lines = unfencedLines(stripComments(text ?? ''));
+  const cells = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^\s*\|/.test(lines[i]) || !/^\s*\|?\s*:?-{2,}/.test(lines[i + 1] ?? '')) continue;
+    const header = cells(lines[i]).map((c) => norm(c));
+    const rows = [];
+    for (i += 2; i < lines.length && /^\s*\|/.test(lines[i]); i += 1) {
+      const row = cells(lines[i]);
+      rows.push(Object.fromEntries(header.map((h, n) => [h, row[n] ?? ''])));
+    }
+    return { header, rows };
+  }
+  return { header: [], rows: [] };
+}
+
+// A section's text with comments dropped but fenced blocks kept, or '' when missing.
+function rawSection(text, title) {
+  const out = [];
+  let inside = false;
+  for (const line of stripComments(text ?? '').split(/\r?\n/)) {
+    const h2 = line.match(/^##\s+(.*?)(?:\s+#+)?\s*$/);
+    if (h2) { inside = norm(h2[1]).replace(/^\d+[.)]?\s+/, '') === norm(title); continue; }
+    if (inside) out.push(line);
+  }
+  return out.join('\n');
+}
+
+// The databases database.md lists under ## Databases: [] when it says None, or null when unreadable.
+function listedDatabases(text) {
+  const body = sectionNamed(text, 'Databases');
+  if (body === null) return null;
+  return firstTable(body).rows.map((row) => ({ ...row, name: plain(row.database ?? Object.values(row)[0] ?? '') })).filter((row) => row.name);
+}
+
+function checkDatabases(root, dir, boxes, problems) {
+  const text = readIf(path.join(dir, 'database.md'), problems);
+  if (text === null) { problems.push('database.md is missing (write "None" under ## Databases when the system uses no database)'); return; }
+  const files = databaseFiles(root);
+  const databases = listedDatabases(text);
+  if (databases === null) { problems.push('database.md has no "## Databases" section (keep the template\'s English headings)'); return; }
+  if (databases.length === 0) {
+    if (!isNone(sectionNamed(text, 'Databases'))) problems.push('database.md lists no database in the ## Databases table; write only "None" there when the system uses none');
+    else if (files.length) problems.push(`database.md says the system uses no database, but ${DATABASE_DIR}/ holds ${files.length} file${files.length === 1 ? '' : 's'}`);
+    return;
+  }
+  const missing = [];
+  for (const db of databases) {
+    const items = itemsFor(boxes, 'D', db.name).length;
+    if (items !== 1) problems.push(`database has ${items ? 'more than one' : 'no'} review item: ${db.name} (D<n> ${db.name})`);
+    const key = Object.keys(db).find((k) => k.startsWith('definition'));
+    if (!key) { problems.push('the ## Databases table of database.md has no Definitions column'); break; }
+    if (isNone(db[key])) { missing.push(db.name); continue; }
+    const paths = [...db[key].matchAll(/`([^`]+)`/g)].map((m) => relPath(m[1].trim()));
+    if (paths.length === 0) problems.push(`database ${db.name} names no definitions path (in backticks) and does not say "none"`);
+    for (const p of paths) {
+      if (p.split('/').includes('..') || path.isAbsolute(p) || !fs.existsSync(path.join(root, p))) problems.push(`database ${db.name}: the definitions path ${p} does not exist in the repository`);
+    }
+  }
+  const missingText = sectionNamed(text, 'Missing definitions') ?? '';
+  if (missing.length && (isNone(missingText) || !plain(missingText))) {
+    problems.push(`database ${missing.join(', ')} has no definitions; say under ## Missing definitions what is missing and why`);
+  }
+  if (!hasId(boxes, 'D90')) problems.push('review.md has no D90 item for the missing definitions');
+  const logic = sectionNamed(text, 'Logic in the database');
+  if (logic === null) problems.push('database.md has no "## Logic in the database" section');
+  for (const [kind = ''] of tableRows(logic ?? '')) {
+    if (plain(kind) && !DB_KINDS.includes(norm(kind))) problems.push(`database.md: unknown kind "${plain(kind)}" under ## Logic in the database (use ${DB_KINDS.join(', ')})`);
+  }
+  const recorded = recordedDbHash(text);
+  const now = databaseHash(root);
+  if (now && !recorded) problems.push('database.md records no snapshot hash ("sha256: <hash>" under ## Snapshot; get it with gate.mjs db-hash)');
+  else if (now && recorded !== now) problems.push(`the database definitions under ${DATABASE_DIR}/ differ from the hash database.md records; check what changed, then record the hash gate.mjs db-hash prints`);
+  else if (!now && recorded) problems.push(`database.md records a snapshot hash, but ${DATABASE_DIR}/ holds no files`);
+  const wide = databaseUtf16(root);
+  for (const f of wide.slice(0, 20)) problems.push(`database definition is UTF-16: ${f}`);
+  if (wide.length > 20) problems.push(`...and ${wide.length - 20} more UTF-16 database definitions`);
+}
+
+// After the survey is archived, specs and ports rest on the definitions it
+// reviewed. A survey from kit 0.9.0 or earlier has no database.md: nothing to compare.
+export function checkDatabaseDrift(root, problems) {
+  const survey = archivedChange(root, 'survey');
+  if (!survey) return;
+  const text = readIf(path.join(survey, 'database.md'), problems);
+  if (text === null) return;
+  const recorded = recordedDbHash(text);
+  const now = databaseHash(root);
+  if (recorded !== now) {
+    problems.push(`database definitions changed after the survey: ${DATABASE_DIR}/ no longer matches the hash in the archived survey's database.md (${recorded ? recorded.slice(0, 12) : 'none'} recorded, ${now ? now.slice(0, 12) : 'none'} now)`);
+  }
+}
+
+// The target design decides once how the database is used, from the survey's database.md.
+function checkData(survey, dir, boxes, problems) {
+  const dbText = readIf(path.join(survey, 'database.md'), problems);
+  if (dbText === null) return;
+  const data = readIf(path.join(dir, 'data.md'), problems);
+  if (data === null) { problems.push('data.md is missing (write "None" when the survey found no database)'); return; }
+  if (!(listedDatabases(dbText) ?? []).length) return;
+  for (const title of ['Schema policy', 'Database logic', 'Data access mapping', 'Schema changes', 'Test database']) {
+    const body = rawSection(data, title).trim();
+    if (!body || PLACEHOLDER.test(plain(body))) problems.push(`data.md has no "## ${title}" section, or it is empty (keep the template's English headings)`);
+  }
+  for (const [topic = '', , rule = ''] of tableRows(sectionNamed(data, 'Data access mapping') ?? '')) {
+    if (plain(topic) && PLACEHOLDER.test(plain(rule))) problems.push(`data.md: the data access mapping of "${plain(topic)}" has no target rule (write "same" when nothing differs)`);
+  }
+  for (const [id, what] of [['D0', 'the schema policy'], ['D90', 'the exceptions'], ['D91', 'the data access mapping'], ['D92', 'the schema changes and the test database']]) {
+    if (!hasId(boxes, id)) problems.push(`review.md has no ${id} item for ${what}`);
+  }
+  const kinds = [...new Set(tableRows(sectionNamed(dbText, 'Logic in the database') ?? '').map(([kind = '']) => norm(kind)).filter((k) => DB_KINDS.includes(k)))];
+  const handling = new Map(tableRows(sectionNamed(data, 'Database logic') ?? '').map(([kind = '', how = '']) => [norm(kind), norm(how)]));
+  for (const kind of kinds) {
+    const how = handling.get(kind);
+    if (how === undefined) problems.push(`data.md has no row for ${kind} under ## Database logic (the survey's database.md lists it)`);
+    else if (!/^(keep|move)\b/.test(how)) problems.push(`data.md: the handling of ${kind} is "${how || 'blank'}"; write keep or move, and list objects handled the other way under ## Exceptions`);
+    const items = itemsFor(boxes, 'D', kind);
+    if (items.length !== 1) problems.push(`the handling of ${kind} has ${items.length ? 'more than one' : 'no'} review item (D<n> ${kind}: <handling>)`);
+    else if (/^(keep|move)\b/.test(how ?? '') && /^(keep|move)\b/.test(itemNote(items[0])) && itemNote(items[0]).split(/\W/)[0] !== how.split(/\W/)[0]) {
+      problems.push(`the review item of ${kind} says "${itemNote(items[0])}", but data.md says "${how}"`);
+    }
+  }
 }
 
 // The survey's inventory rows: path, context and handling. Handling is `port`
@@ -383,6 +591,7 @@ function checkSurvey(root, dir, boxes, problems) {
   const rows = inventoryRows(inventoryText);
   for (const row of rows.filter((r) => !known.has(r.context))) problems.push(`inventory row "${row.path}" names an unknown context "${row.context}"`);
   for (const row of rows.filter((r) => r.handling && !HANDLINGS.includes(r.handling))) problems.push(`inventory row "${row.path}" has the handling "${row.handling}"; use port or carry`);
+  for (const row of rows.filter((r) => r.handling === 'carry' && (r.path === `${DATABASE_DIR}/` || r.path.startsWith(`${DATABASE_DIR}/`)))) problems.push(`inventory row "${row.path}" carries database definitions; they are port (data.md decides what stays in the database)`);
   for (const row of rows.filter((r) => r.context === 'excluded' && r.handling === 'carry')) problems.push(`inventory row "${row.path}" is excluded and carry at once; a carried file belongs to the context whose module receives it`);
   const files = sourceFiles(root);
   if (files === null) {
@@ -404,6 +613,7 @@ function checkSurvey(root, dir, boxes, problems) {
     if (keys.has(key)) problems.push(`capabilities ${keys.get(key)} and ${cap} get the same change name`);
     keys.set(key, cap);
   }
+  checkDatabases(root, dir, boxes, problems);
 }
 
 // Capability paths listed as top-level items that start with a backticked path
@@ -451,6 +661,7 @@ function checkSurveyed(root, change, dir, kind, problems) {
     ...(survey ? capabilityList(readIf(path.join(survey, 'capabilities.md'), problems)) : []),
     ...planCapabilities(readIf(path.join(root, PLAN), problems)),
   ]);
+  checkDatabaseDrift(root, problems);
   for (const cap of specCapabilities(dir)) {
     if (survey && !listed.has(cap)) problems.push(`capability ${cap} is not in the archived survey's capabilities.md or in ${PLAN}; add it to the plan's capability list before this review`);
     if (/-v\d+$/.test(cap.split('/').join('-'))) { problems.push(`capability ${cap} ends like a rerun suffix (-v<n>), so its change cannot be told from a rerun; rename it in the plan`); continue; }
@@ -478,6 +689,7 @@ function checkTarget(root, dir, boxes, problems) {
       if (!boxes.some((b) => new RegExp(`^${letter}\\d+\\s*[.:)-]?\\s*\\W*${id}(?![\\w-])`, 'i').test(b.plain))) problems.push(`the ${what} of context ${id} has no review item (${letter}<n> ${id})`);
     }
   }
+  checkData(survey, dir, boxes, problems);
 }
 
 // How a context's screens look in the new system, decided once in ui.md:
@@ -649,6 +861,7 @@ export function checkPortReady(root, capability) {
   }
   if (!archivedChange(root, 'survey')) problems.push('no archived survey change: map the bounded contexts and have them reviewed first');
   if (!archivedChange(root, 'target-design')) problems.push('no archived target-design change: decide the target design and have it reviewed first');
+  checkDatabaseDrift(root, problems);
   return { ok: problems.length === 0, problems };
 }
 
@@ -673,6 +886,7 @@ export function checkPortDone(root, change) {
     else if (now !== hash.toLowerCase()) problems.push(`the baseline of ${capability} changed after this port started (an amendment was archived); update the port to it, then record the new hash`);
   }
   checkCarried(root, readIf(path.join(dir, 'design.md'), problems) ?? '', problems);
+  checkDatabaseDrift(root, problems);
   return { ok: problems.length === 0, problems };
 }
 
@@ -755,6 +969,8 @@ const NEXT = {
       ? 'The survey (the map of contexts and the capability list) is not reviewed and archived yet. I prepare it; its review is yours, and this step waits for it.'
       : 'The target design is not reviewed and archived yet. I prepare it; its review is yours, and implementation waits for it.'),
     guard: (list) => `Files outside the subagents' assignments changed (${list}). Decide: undo the change, or keep it. The results of this wave are not used until you decide.`,
+    dbDrift: 'The database definitions (openspec/spec-relay/db/) changed after the survey was reviewed. If you exported them again on purpose, the survey is run again (survey-v2) and you review what changed; after its archive, the orchestrator copies the capability paths of the new definitions into plan.md and runs gate.mjs coverage. If not, restore the files from git.',
+    dbUtf16: (list) => `Some database definitions are saved as UTF-16 (${list}). Export them again as UTF-8, or convert them as docs/DATABASE.md shows.`,
   },
   ja: {
     unticked: (n, list) => `レビューで未承認の項目が ${n} 件あります（${list}）。チャットで承認を伝えるか、review.md で自分でチェックしてください。`,
@@ -767,6 +983,8 @@ const NEXT = {
       ? '調査（コンテキストの地図と capability の一覧）がまだレビュー・archive されていません。AI が用意するので、そのレビューをお願いします。この工程はそれを待ちます。'
       : '移行先の設計がまだレビュー・archive されていません。AI が用意するので、そのレビューをお願いします。実装はそれを待ちます。'),
     guard: (list) => `割り当て外のファイルが変わりました（${list}）。元に戻すか、そのまま受け入れるかを決めてください。決まるまで、この波の結果は使いません。`,
+    dbDrift: 'DB の定義（openspec/spec-relay/db/）が、調査のレビューのあとで変わりました。意図して取り直したのなら調査をやり直し（survey-v2）、変わったところをレビューしてください。その archive のあと、オーケストレーターが新しい定義の capability を plan.md に写し、gate.mjs coverage で確かめます。意図しない変更なら git で元に戻してください。',
+    dbUtf16: (list) => `DB の定義ファイルが UTF-16 で保存されています（${list}）。UTF-8 で出し直すか、docs/DATABASE.md の手順で変換してください。`,
   },
 };
 
@@ -794,7 +1012,10 @@ export function nextSteps(command, result, lang = 'en') {
   if (undecided.length) person.push(words.decision(shortList(undecided)));
   for (const name of active) person.push(words.activeReview(name));
   for (const name of foundation) person.push(words.foundation(name));
-  agent = problems.filter((p) => !/^(not ticked: |review\.md names no reviewer|question has no recorded decision: |(?:extract|amend) change \S+ is still active|no archived (?:survey|target-design) change)/.test(p));
+  if (problems.some((p) => p.startsWith('database definitions changed after the survey'))) person.push(words.dbDrift);
+  const wide = problems.filter((p) => p.startsWith('database definition is UTF-16: ')).map((p) => p.slice('database definition is UTF-16: '.length));
+  if (wide.length) person.push(words.dbUtf16(shortList(wide)));
+  agent = problems.filter((p) => !/^(not ticked: |review\.md names no reviewer|question has no recorded decision: |(?:extract|amend) change \S+ is still active|no archived (?:survey|target-design) change|database definitions changed after the survey|database definition is UTF-16: |\.\.\.and \d+ more UTF-16)/.test(p));
   if (result.ok && command === 'review') person.push(words.archive);
   if (result.ok && command === 'port-done') person.push(words.portArchive);
   return { person, agent };
@@ -820,12 +1041,16 @@ export function main(argv) {
   else if (command === 'guard' && opts.save !== undefined && opts.compare === undefined) result = guardSave(opts.root, opts.save);
   else if (command === 'guard' && opts.compare !== undefined && opts.save === undefined) result = guardCompare(opts.root, opts.compare);
   else if (command === 'guard' && opts.save === undefined && opts.compare === undefined) result = guardHash(opts.root);
+  else if (command === 'db-hash') {
+    const wide = databaseUtf16(opts.root);
+    result = { ok: wide.length === 0, sha256: databaseHash(opts.root), files: databaseFiles(opts.root).length, ...(wide.length ? { problems: wide.map((f) => `database definition is UTF-16: ${f}`) } : {}) };
+  }
   else if (command === 'baseline' && opts.capability) {
     const sha256 = baselineHash(opts.root, opts.capability);
     result = sha256 ? { ok: true, capability: opts.capability, sha256 } : { ok: false, problems: [`no baseline spec for ${opts.capability}`] };
   }
   else return usage();
-  if (command !== 'baseline' && !(command === 'guard' && opts.compare === undefined)) {
+  if (command !== 'baseline' && !(command === 'db-hash' && result.ok) && !(command === 'guard' && opts.compare === undefined)) {
     result.next = nextSteps(command, result, language(opts.root, opts.lang));
   }
   console.log(JSON.stringify(result, null, 2));
@@ -833,7 +1058,7 @@ export function main(argv) {
 }
 
 function usage() {
-  console.error('Usage: node gate.mjs review --change NAME | port-ready --capability PATH | port-done --change NAME | baseline --capability PATH | coverage | guard [--save NAME | --compare NAME] [--root DIR] [--lang ja|en]');
+  console.error('Usage: node gate.mjs review --change NAME | port-ready --capability PATH | port-done --change NAME | baseline --capability PATH | coverage | db-hash | guard [--save NAME | --compare NAME] [--root DIR] [--lang ja|en]');
   return 2;
 }
 
