@@ -20,13 +20,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkboxes, questionIds, tableRows, changeSchema, archivedChange } from './gate.mjs';
+import { leftoverRows } from './finish.mjs';
 
 // ---------------------------------------------------------------- labels
 
 const LABELS = {
   ja: {
-    kinds: { 'spec-relay-extract': '抽出レビュー', 'spec-relay-survey': '調査レビュー', 'spec-relay-target': '移行先設計レビュー', 'spec-relay-amend': '修正レビュー', 'spec-relay-port': '移植' },
-    groups: { requirements: '要件', screens: '画面', questions: '質問', coverage: '網羅性', contexts: 'コンテキスト', map: 'マップ', architecture: 'アーキテクチャ', conventions: '規約', verification: '検証', impact: '影響', databases: 'データベース', data: 'データ' },
+    kinds: { 'spec-relay-extract': '抽出レビュー', 'spec-relay-survey': '調査レビュー', 'spec-relay-target': '移行先設計レビュー', 'spec-relay-amend': '修正レビュー', 'spec-relay-port': '移植', 'spec-relay-finish': '仕上げレビュー' },
+    groups: { requirements: '要件', screens: '画面', questions: '質問', coverage: '網羅性', contexts: 'コンテキスト', map: 'マップ', architecture: 'アーキテクチャ', conventions: '規約', verification: '検証', impact: '影響', databases: 'データベース', data: 'データ', checks: '全体の確認', leftovers: '残りもの', handover: '引き渡し' },
     qkinds: { 'suspected bugs': 'バグの疑い', ambiguities: 'あいまいな点', assumptions: '仮定', 'not migrated': '移行しない' },
     steps: { GIVEN: '前提', WHEN: '操作', THEN: '結果', AND: 'かつ', BUT: 'ただし' },
     deltas: { added: '＋ 追加', removed: '－ 削除', modified: '＊ 変更', renamed: '＊ 名前変更' },
@@ -41,6 +42,9 @@ const LABELS = {
     scenario: 'シナリオ', evidence: '根拠（元コード）', source: '元コード', tests: '既存のテスト', crosscheck: '照合（AI の再確認）', lines: '行',
     noTrace: 'trace.md に記載がありません', unreadable: 'ファイルを読めませんでした', truncated: '長いため先頭のみ表示', encoding: (e) => `文字コード ${e} を変換して表示`, dedent: (n) => `字下げを ${n} 文字詰めて表示`,
     decision: '判断', noDecision: (id) => `未記入 — review.md の ${id} の行に decision: を書きます`,
+    leftoverKind: '種類', leftoverWhere: '場所', leftoverClass: '分類（案）', leftoverReason: '理由', noLeftover: '同じ id の行が leftovers.md にありません',
+    leftoverKinds: { todo: '実装の積み残し TODO(port)', 'follow-up': '後回しの作業', risk: 'リスク', verification: '実行できなかった比較', flow: 'テストのないコンテキスト間の流れ' },
+    leftoverClasses: { 'before-release': '切替の前に直す', 'after-release': '切替の後の課題', 'wont-fix': '直さない' },
     noReviewRow: 'review.md に項目がありません', noReq: '同じ名前の要件が仕様にありません', noScreen: '同じ名前の画面が screens.md にありません', noContext: '同じ id のコンテキストが context-map.md にありません', noQuestion: 'questions.md に本文がありません',
     tickedNoDecision: 'チェック済みですが、判断が未記入です', decisionNoTick: '判断は書かれていますが、チェックされていません',
     was: '旧', now: '新', noBaseline: '現在の仕様（openspec/specs）に同じ名前の要件がありません',
@@ -51,7 +55,7 @@ const LABELS = {
     note: 'この画面は表示用です。正は Markdown のファイルで、判断は review.md に記録します。ファイルを直したら作り直してください。',
   },
   en: {
-    kinds: { 'spec-relay-extract': 'Extract review', 'spec-relay-survey': 'Survey review', 'spec-relay-target': 'Target design review', 'spec-relay-amend': 'Amend review', 'spec-relay-port': 'Port' },
+    kinds: { 'spec-relay-extract': 'Extract review', 'spec-relay-survey': 'Survey review', 'spec-relay-target': 'Target design review', 'spec-relay-amend': 'Amend review', 'spec-relay-port': 'Port', 'spec-relay-finish': 'Finish review' },
     groups: {}, qkinds: {}, steps: {},
     deltas: { added: '+ Added', removed: '- Removed', modified: '* Modified', renamed: '* Renamed' },
     document: 'Document', requirements: 'Requirements', screens: 'Screens', questions: 'Questions', contexts: 'Contexts', other: 'Other',
@@ -65,6 +69,9 @@ const LABELS = {
     scenario: 'Scenario', evidence: 'Evidence (source code)', source: 'Source', tests: 'Existing tests', crosscheck: 'Crosscheck (second look by the AI)', lines: '',
     noTrace: 'No entry in trace.md', unreadable: 'Could not read the file', truncated: 'long; only the beginning is shown', encoding: (e) => `decoded from ${e}`, dedent: (n) => `indentation reduced by ${n} characters`,
     decision: 'Decision', noDecision: (id) => `blank — write decision: on the ${id} line of review.md`,
+    leftoverKind: 'Kind', leftoverWhere: 'Where', leftoverClass: 'Class (proposed)', leftoverReason: 'Reason', noLeftover: 'No row of this id in leftovers.md',
+    leftoverKinds: { todo: 'TODO(port) left in the code', 'follow-up': 'Work moved to after the migration', risk: 'Risk', verification: 'Comparison that did not run', flow: 'Cross-context flow without a test' },
+    leftoverClasses: { 'before-release': 'Fix before the switch', 'after-release': 'Known issue after the switch', 'wont-fix': 'Accepted as it is' },
     noReviewRow: 'No item in review.md', noReq: 'No requirement of this name in the specs', noScreen: 'No screen of this name in screens.md', noContext: 'No context of this id in context-map.md', noQuestion: 'No text in questions.md',
     tickedNoDecision: 'Ticked, but the decision is blank', decisionNoTick: 'A decision is written, but the item is not ticked',
     was: 'Old', now: 'New', noBaseline: 'No requirement of this name in the current specs (openspec/specs)',
@@ -625,6 +632,13 @@ ${q?.text || kind ? `<p class="q-text">${kind}${q?.text && q.text !== it.title ?
 </div>` };
 }
 
+function leftoverBody(it, c) {
+  const { L } = c;
+  const row = it.data;
+  const facts = [[L.leftoverKind, L.leftoverKinds[row.kind] ?? row.kind], [L.leftoverWhere, row.where], [L.leftoverClass, L.leftoverClasses[row.klass] ?? row.klass], [L.leftoverReason, row.reason]];
+  return { tag: '', notes: [], html: `<div class="q-body"><p class="q-text">${inline(row.what)}</p><dl class="facts">${facts.filter(([, v]) => v).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${inline(v)}</dd>`).join('')}</dl></div>` };
+}
+
 function reviewView({ root, dir, schema, L, outDir }) {
   const groups = parseReview(readText(path.join(dir, 'review.md')) ?? '');
   const review = stripComments(readText(path.join(dir, 'review.md')) ?? '');
@@ -651,6 +665,8 @@ function reviewView({ root, dir, schema, L, outDir }) {
   const contexts = blocks(mapText, 'Context');
   const questionsText = readText(path.join(dir, 'questions.md'));
   const questions = parseQuestions(questionsText);
+  const leftoversText = readText(path.join(dir, 'leftovers.md'));
+  const leftovers = new Map(leftoverRows(leftoversText ?? '').map((row) => [row.id, row]));
   const c = { root, L, outDir, amend, baseline, cross, trace: parseTrace(readText(path.join(dir, 'trace.md'))) };
 
   // Tie each review row to the thing it names.
@@ -667,6 +683,9 @@ function reviewView({ root, dir, schema, L, outDir }) {
     } else if (item.letter === 'K' && mapText !== null) {
       item.data = take(contexts, (k) => new RegExp(`^k\\d+\\s*[.:)-]?\\s*${k.name.replace(/[^\w-]/g, '\\$&')}(?![\\w-])`, 'i').test(item.plain));
       if (item.data) item.kind = 'context'; else item.notes.push(L.noContext);
+    } else if (item.letter === 'L' && leftoversText !== null) {
+      item.data = leftovers.get(item.id);
+      if (item.data) item.kind = 'leftover'; else item.notes.push(L.noLeftover);
     } else if (item.letter === 'Q') {
       item.kind = 'q';
       item.data = questions.get(item.id);
@@ -700,6 +719,7 @@ function reviewView({ root, dir, schema, L, outDir }) {
       ids.add(anchor);
       item.anchor = anchor;
       const body = item.kind === 'req' ? requirementBody(item, c) : item.kind === 'screen' ? screenBody(item, c) : item.kind === 'q' ? questionBody(item, c)
+        : item.kind === 'leftover' ? leftoverBody(item, c)
         : item.kind === 'context' ? { tag: '', notes: [], html: `<div class="q-body"><div class="doc">${markdown(item.data.body.join('\n'), { headingOffset: 2 })}</div></div>` } : { tag: '', notes: [], html: '' };
       const notes = [...item.notes, ...body.notes];
       item.name = plainText(item.title) || plainText(item.data?.text ?? '') || item.label;

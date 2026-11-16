@@ -134,12 +134,13 @@ test('the port step follows tasks.md and the archive', () => {
   assert.deepEqual(statuses(report), ['not-started', 'not-started', 'not-started', 'not-started']);
 });
 
-test('everything ported leaves one completed line, unless a change is open again', () => {
+test('everything ported leads to the finish step, unless a change is open again', () => {
   const dir = repo({ plan: '## Capabilities\n- `common/base`\n' });
   fs.rmSync(path.join(dir, EXTRACT), { recursive: true });
   const report = status(dir);
-  assert.deepEqual(report.todoList.map(({ title, status: s }) => [title, s]), [['Overall: all 1 capabilities ported', 'completed']]);
-  assert.equal(report.current, null);
+  // Every capability is ported; the finish step (finish.mjs) completes the migration.
+  assert.deepEqual(report.todoList.map(({ title, status: s }) => [title, s]), [['Overall: all 1 capabilities ported; the finish step is next', 'not-started'], ['Finish: check the whole system, list what is left, hand over', 'not-started']]);
+  assert.deepEqual(report.current, { capability: null, step: 'finish', owner: 'agent' });
   write(dir, 'openspec/changes/extract-common-base/source-map.md', '# again\n');
   const reopened = status(dir);
   assert.equal(reopened.todoList[0].status, 'not-started');

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { main, bypassFiles, STUB_MARKER, SCHEMAS } from '../scripts/setup.mjs';
 import { checkReview, checkPortReady, checkPortDone, baselineHash, databaseHash } from '../scripts/gate.mjs';
 import { status as progress } from '../scripts/status.mjs';
+import { checkFinishReady, draft } from '../scripts/finish.mjs';
 import { runOpenspec, runCommand, findNpm, findOpenspec, OPENSPEC_VERSION } from '../scripts/openspec.mjs';
 import { tempDir, write, quiet, isolateOpenspec, crlf } from './helpers.mjs';
 
@@ -114,7 +115,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   openspec(dir, 'new', 'change', 'target-design', '--schema', 'spec-relay-target');
   fill(dir, 'target-design', {
     'architecture.md': '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| calc | ts/calc |\n',
-    'conventions.md': '# Conventions\n',
+    'conventions.md': '# Conventions\n\n## Commands\n| Purpose | Command |\n|---|---|\n| Test | `npm test` |\n',
     'ui.md': '# UI\n\n## Screens\n| Context | Screens | Source kind | Target | Policy | Why |\n|---|---|---|---|---|---|\n| platform | all | none | none | none | |\n| calc | all | none | none | none | |\n\n## Carried files\nNone\n',
     'verification.md': '| Context | A |\n|---|---|\n| platform | yes |\n| calc | yes |\n',
     'data.md': '# Data\n\n## Schema policy\nkeep\n\n## Database logic\n| Kind | Handling | Reason |\n|---|---|---|\n| trigger | keep | |\n\n## Data access mapping\n| Topic | Source behavior | Target rule |\n|---|---|---|\n| Character set | cp932 | same |\n\n## Schema changes\nno migrations\n\n## Test database\nLocalDB\n',
@@ -167,9 +168,31 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   write(dir, 'openspec/changes/port-calc-add/tasks.md', '# Tasks\n\n## 1. Core\n\n- [x] 1.1 Implement add; verify with its test\n');
   assert.deepEqual(checkPortDone(dir, 'port-calc-add'), { ok: true, problems: [] });
   openspec(dir, 'archive', 'port-calc-add', '--yes');
-  assert.deepEqual(progress(dir).todoList.map((item) => item.status), ['completed']);
+  // Every capability is ported: the finish step is next, so the migration is not complete yet.
+  assert.deepEqual(progress(dir).todoList.map((item) => [item.key, item.status]), [['overall', 'not-started'], ['finish', 'not-started']]);
 
-  // 5. Amend: OpenSpec merges the MODIFIED requirement into the baseline, which
+  // 5. Finish: the whole-system checks, the leftovers and the hand-over.
+  write(dir, 'ts/calc/add.ts', 'export const add = (a: number, b: number) => a + b; // TODO(port) overflow\n');
+  assert.deepEqual(checkFinishReady(dir), { ok: true, problems: [] });
+  openspec(dir, 'new', 'change', 'finish', '--schema', 'spec-relay-finish');
+  const order = JSON.parse(openspec(dir, 'status', '--change', 'finish', '--json'));
+  assert.deepEqual(order.artifacts.map((a) => a.id), ['checks', 'leftovers', 'handover', 'review']);
+  assert.deepEqual(draft(dir, 'finish').written, ['checks.md', 'leftovers.md']);
+  const checks = fs.readFileSync(path.join(dir, 'openspec/changes/finish/checks.md'), 'utf8').replace(/<!-- pass \/ fail(?: \/ not-run: reason)? -->/g, 'pass');
+  const leftovers = fs.readFileSync(path.join(dir, 'openspec/changes/finish/leftovers.md'), 'utf8').replace('<!-- before-release / after-release / wont-fix --> | |', 'after-release | rare input |');
+  assert.match(leftovers, /\| L1 \| todo \| `ts\/calc\/add.ts:1` \|/);
+  fill(dir, 'finish', {
+    'checks.md': checks,
+    'leftovers.md': leftovers,
+    'handover.md': '# Handover\n\n## Verdict\nMigration complete against the reviewed specs; behavior was not compared with the source program.\n',
+    'review.md': 'Reviewer: Uma\n\n- [x] C1 checks\n- [x] L1 overflow - class: after-release\n- [x] H1 verdict\n- [x] H2 before the switch\n',
+  });
+  assert.deepEqual(checkReview(dir, 'finish'), { ok: true, problems: [] });
+  assert.equal(progress(dir).todoList[1].title, 'Finish: check the whole system, list what is left, hand over [reviewed; waiting for approval to archive]');
+  openspec(dir, 'archive', 'finish', '--yes');
+  assert.deepEqual(progress(dir).todoList.map((item) => [item.title, item.status]), [['Overall: migration complete (1 capabilities, handed over)', 'completed'], ['Finish: check the whole system, list what is left, hand over', 'completed']]);
+
+  // 6. Amend: OpenSpec merges the MODIFIED requirement into the baseline, which
   // changes the hash a later port must record.
   openspec(dir, 'new', 'change', 'amend-calc-add', '--schema', 'spec-relay-amend');
   fill(dir, 'amend-calc-add', {
