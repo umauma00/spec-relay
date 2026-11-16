@@ -16,13 +16,22 @@ artifacts:
         and a one-line role. Mark files that are only partly in scope. It must
         hold every file `openspec/spec-relay/plan.md` assigns to this
         capability (the indented items under it): `gate.mjs review` lists each
-        one that is missing, and each listed path with no file on disk. When an
+        one that is missing, and each listed path with no file on disk. That
+        includes the database definition files under `openspec/spec-relay/db/`
+        the plan assigns: give each one (or its folder) a row here too. When an
         assigned file belongs to another capability, report it instead of
         leaving it out; the orchestrator moves it in the plan.
       - **Entry points**: Public functions, endpoints, commands, jobs or screens
         through which callers reach this capability (path and symbol).
       - **Dependencies**: Other capabilities, libraries, databases, files,
         environment variables and external services it uses.
+      - **Database**: the tables it reads and writes, and the database objects
+        that take part, with the path of each definition (archived survey's
+        database.md): procedures and functions it calls, views it reads,
+        triggers on the tables it writes (they run without being called),
+        constraints and defaults that change or reject its data, and jobs that
+        act on the same tables. "None" when it uses no database. This table
+        names objects; the files that define them are rows of Source files.
       - **Out of scope**: Nearby code that belongs to another capability.
 
       Write every path relative to the repository root with forward slashes
@@ -45,6 +54,10 @@ artifacts:
       - Observable inputs, outputs, side effects, error conditions and limits.
       - Edge cases the code handles today, including odd ones: empty input,
         rounding, ordering, encodings, time zones, null handling, overflow.
+      - What the database does is behavior too: a trigger's effect, a
+        default, a constraint that rejects data, a procedure's result, the
+        order a query returns rows in. Specify it like the rest, without naming
+        the objects (they belong in trace.md).
       - Do NOT name classes, functions, libraries or language features of the
         source language. Those belong in trace.md.
       - Do NOT fix behavior. If the code looks wrong, still specify what it
@@ -130,7 +143,9 @@ artifacts:
     instruction: |
       For EVERY requirement in the specs, list where the source code implements
       it: repository-relative path with forward slashes, symbol, and line range
-      when stable. Step 5
+      when stable. Behavior that lives in the database points to its
+      definition (`openspec/spec-relay/db/sales/dbo/Procedures/usp_Close.sql`,
+      or the repository's `.sql` file) as well as to the code that reaches it. Step 5
       implementers read the original logic through this file, so make each
       reference precise enough to open directly.
 
@@ -157,8 +172,10 @@ artifacts:
       several checkers take groups of items, each writes a part file, and the
       kit's `merge.mjs` merges them (see the spec-relay skill).
 
-      The checker opens every trace reference and decides for each requirement
-      and each screen:
+      The checker opens every trace reference (including database
+      definitions) and decides for each requirement and each screen. For a
+      requirement that writes a table, it also checks the triggers,
+      constraints and defaults on that table that source-map.md lists:
       - `confirmed`: the source code does what the spec or screen says,
         including every scenario's values. For a screen this includes its
         Look, Scripts and Look details: the paths exist, the ids and classes
@@ -247,7 +264,9 @@ artifacts:
         the new language, or fix (a fix is a separate change after migration).
       - **Ambiguities**: behavior the code does not make clear, such as
         unreachable branches, configuration-dependent paths or dead code.
-      - **Assumptions**: anything you inferred instead of reading it in code.
+      - **Assumptions**: anything you inferred instead of reading it in code,
+        including behavior of database objects whose definitions are missing
+        (the survey's database.md, Missing definitions).
       - **Not migrated**: parts you propose to leave out, with the reason.
 
       Give each item an id (Q1, Q2, ...), the related requirement and the

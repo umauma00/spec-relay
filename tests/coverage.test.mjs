@@ -70,6 +70,7 @@ test('the survey gate needs every kept file in a capability, and every listed pa
   write(dir, `${S}/context-map.md`, '### Context: platform\n\n### Context: billing\n');
   write(dir, `${S}/inventory.md`, '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/billing/ | billing | port | |\n| src/common/ | platform | port | |\n| src/vendor/ | excluded | | |\n');
   write(dir, `${S}/review.md`, 'Reviewer: Uma\n- [x] K1 platform\n- [x] K2 billing\n');
+  write(dir, `${S}/database.md`, '## Databases\nNone\n\n## Logic in the database\nNone\n');
   write(dir, `${S}/capabilities.md`, '### platform\n1. `platform/db`\n\n### billing\n1. `billing/invoice`\n   - `src/billing`\n');
   const found = checkReview(dir, 'survey').problems;
   assert.ok(found.includes('source file is in no capability of capabilities.md: src/common/db.php (list it, or its folder, under a capability, or mark it excluded in inventory.md)'), found.join('\n'));
@@ -239,4 +240,46 @@ test('gate.mjs coverage checks the whole plan and lists the capabilities not ana
   assert.match(checkCoverage(none).problems.join(), /no archived survey/);
   assert.equal(quiet(() => main(['coverage', '--root', none])), 1);
   assert.equal(quiet(() => main(['coverage', '--root', project()])), 0);
+});
+
+test('database definitions: assigned to a capability, held by its source map, and not listed file by file after a drift', async () => {
+  const { databaseHash } = await import('../scripts/gate.mjs');
+  const DB = 'openspec/spec-relay/db/sales/dbo';
+  const withDb = CAPABILITIES.replace('   - `src/billing/`\n', '   - `src/billing/`\n   - `openspec/spec-relay/db/sales/`\n');
+  const dir = project({ capabilities: withDb });
+  write(dir, `${SURVEY}/inventory.md`, '| Path | Context | Notes |\n|---|---|---|\n| src/billing/ | billing | |\n| src/common/ | platform | |\n| src/vendor/ | excluded | library |\n| openspec/spec-relay/db/ | billing | |\n');
+  write(dir, `${DB}/Tables/Invoices.sql`, 'CREATE TABLE dbo.Invoices (Id int);\n');
+  const snapshot = () => write(dir, `${SURVEY}/database.md`, `## Databases\n| Database | Product | Connection | Definitions |\n|---|---|---|---|\n| sales | SQL Server 2016 | connectionStrings/Sales | \`openspec/spec-relay/db/sales/\` |\n\n## Snapshot\nsha256: ${databaseHash(dir)}\n`);
+  snapshot();
+
+  // The assigned definition file must be in the Source files table of the source map.
+  assert.match(problems(dir).join('\n'), /assigned to billing\/invoice in capabilities\.md of the archived survey is not in source-map\.md: openspec\/spec-relay\/db\/sales\/dbo\/Tables\/Invoices\.sql/);
+  assert.match(checkCoverage(dir).problems.join('\n'), /billing\/invoice is not in the source map of extract-billing-invoice or of an amendment: openspec\/spec-relay\/db\/sales\/dbo\/Tables\/Invoices\.sql/);
+  write(dir, `${CHANGE}/source-map.md`, '# Source map\n\n## Source files\n| Path | Role | In scope |\n|---|---|---|\n| `src/billing/` | x | full |\n| `openspec/spec-relay/db/sales/` | tables | full |\n\n## Database\n| Table or object | Kind | Use | Definition |\n|---|---|---|---|\n| dbo.Invoices | table | write | `openspec/spec-relay/db/sales/dbo/Tables/Invoices.sql` |\n');
+  // The definitions are sites of the omission check too.
+  write(dir, `${CHANGE}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `openspec/spec-relay/db/sales/dbo/Tables/Invoices.sql:(file)` | no behavior | the table only |\n');
+  assert.deepEqual(problems(dir), []);
+  assert.deepEqual(checkCoverage(dir).problems, []);
+
+  // A source map without the Source files heading: the Database table names objects, not files.
+  write(dir, `${CHANGE}/source-map.md`, '| Path | Role | In scope |\n|---|---|---|\n| src/billing/ | x | full |\n| openspec/spec-relay/db/sales/ | tables | full |\n\n## Database\n| Table or object | Kind | Use | Definition |\n|---|---|---|---|\n| dbo.Invoices | table | write | db |\n');
+  assert.deepEqual(problems(dir), []);
+
+  // A definition in no capability is reported like any source file.
+  write(dir, 'openspec/spec-relay/plan.md', `# Plan\n\n## Capabilities\n\n${CAPABILITIES.replace('# Capabilities\n\n', '')}`);
+  assert.match(checkCoverage(dir).problems.join('\n'), /in no capability of openspec\/spec-relay\/plan\.md: openspec\/spec-relay\/db\/sales\/dbo\/Tables\/Invoices\.sql/);
+  write(dir, 'openspec/spec-relay/plan.md', `# Plan\n\n## Capabilities\n\n${withDb.replace('# Capabilities\n\n', '')}`);
+  assert.deepEqual(checkCoverage(dir).problems, []);
+
+  // A definition added after the survey: the drift is reported once, not each file under it.
+  write(dir, `${DB}/Triggers/trg_Invoices.sql`, 'CREATE TRIGGER trg_Invoices ON dbo.Invoices AFTER INSERT AS SELECT 1;\n');
+  write(dir, `${CHANGE}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| `src/billing/` | x | full |\n| `openspec/spec-relay/db/sales/dbo/Tables/Invoices.sql` | table | full |\n');
+  const coverage = checkCoverage(dir);
+  assert.equal(coverage.problems.length, 1, coverage.problems.join('\n'));
+  assert.match(coverage.problems[0], /^database definitions changed after the survey/);
+  const review = problems(dir);
+  assert.ok(review.some((p) => p.startsWith('database definitions changed after the survey')), review.join('\n'));
+  assert.ok(!review.some((p) => p.includes('trg_Invoices')), review.join('\n'));
+  snapshot();
+  assert.match(checkCoverage(dir).problems.join('\n'), /not in the source map of extract-billing-invoice or of an amendment: openspec\/spec-relay\/db\/sales\/dbo\/Triggers\/trg_Invoices\.sql/);
 });
