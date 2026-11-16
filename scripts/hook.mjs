@@ -34,7 +34,7 @@ export const SHELL_TOOLS = ['bash', 'powershell', 'write_bash', 'write_powershel
 export const EDIT_TOOLS = ['edit', 'create', 'str_replace_editor', 'apply_patch'];
 const PATH_KEYS = ['path', 'file_path', 'filePath', 'new_path', 'newPath', 'old_path', 'oldPath'];
 const FOLD = process.platform === 'win32' || process.platform === 'darwin';
-const REVIEWED = new Set(['spec-relay-survey', 'spec-relay-target', 'spec-relay-extract', 'spec-relay-amend']);
+const REVIEWED = new Set(['spec-relay-survey', 'spec-relay-target', 'spec-relay-extract', 'spec-relay-amend', 'spec-relay-finish']);
 // A shell command that may write a file (PowerShell and POSIX forms).
 const WRITES = /(?:^|[\s;&|(])(?:set-content|add-content|out-file|clear-content|new-item|ni|copy-item|cp|copy|move-item|mv|move|rename-item|ren|remove-item|rm|del|erase|sed|perl|tee|truncate|dd)\b|-replace\b|\[io\.file\]|>/i;
 

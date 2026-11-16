@@ -138,4 +138,6 @@ apply:
       anything against a database other than the test database of the target
       design's data.md.
     - Leave a `TODO(port)` comment for anything unresolved and list it in your
-      report.
+      report. A stand-in for a capability that is not ported yet (a call into
+      the old system, a temporary fake) gets one too, so the finish step finds
+      it.
