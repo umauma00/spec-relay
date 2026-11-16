@@ -32,7 +32,11 @@ confirmed. A screen is confirmed only when its labels and messages, and the
 Look, Scripts and Look details it gives, match the source: the stylesheet and
 script paths exist, the ids and classes are in the markup, and positions,
 sizes and tab order match the designer file or XAML. A screen without Look
-details because it says "policy new" is not a mismatch for that.
+details because it says "policy new" is not a mismatch for that. Database definitions (under `openspec/spec-relay/db/` or
+`.sql` files in the repository) count as source code: when a requirement
+writes a table, read the triggers, constraints and defaults on that table too,
+and mark the requirement `mismatch` when one of them changes the result the
+text states.
 
 Write your verdict file in UTF-8 with your edit tool, as one Markdown table:
 `| Item | Verdict | Evidence |`, then one row per item in spec order and then

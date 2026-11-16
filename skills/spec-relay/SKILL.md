@@ -80,6 +80,11 @@ need the reasoning behind a step.
   capability when it belongs to one; the finish step collects them.
 - **Baseline spec**: `openspec/specs/<capability>/spec.md`, created when a
   reviewed extract change is archived.
+- **Database definitions**: `openspec/spec-relay/db/<database>/`, the
+  definitions (tables, views, procedures, triggers, jobs) the person exported
+  from a database whose definitions are not in the repository. Source code
+  like the source root: read-only for every agent, in the inventory, cited by
+  trace.md. See the kit's `docs/DATABASE.md`.
 - **Plan**: `openspec/spec-relay/plan.md`, the capability list and order.
 - **Lessons**: `openspec/spec-relay/lessons.md`, what the person's corrections
   taught that later analyses and ports must follow (see Lessons).
@@ -336,9 +341,23 @@ Read the WHOLE source code base before splitting it, so that the split follows
 the domain, not the folders.
 
 1. `node "<kit>/scripts/openspec.mjs" new change survey --schema spec-relay-survey`.
-2. Write inventory, context-map, glossary and capabilities (schema
+   **Databases first**: ask the person which databases the system uses
+   (product and version) and whether their definitions are in the
+   repository. For each one that is not, ask them to export its definitions
+   into `openspec/spec-relay/db/<database>/` as `docs/DATABASE.md` shows
+   (from a copy or a development database, not production) and to tell you
+   when it is done. Never connect to a database yourself and never ask for a
+   password or connection string; run an export command only when the person
+   asks you to, against the database they name, with the sign-in they set
+   up. Then run `node "<kit>/scripts/gate.mjs" db-hash`: it prints the hash
+   for database.md and lists files saved as UTF-16, which the person converts
+   (docs/DATABASE.md). If the definitions cannot be had, go on and record that
+   under Missing definitions.
+2. Write inventory, context-map, glossary, capabilities and database (schema
    `spec-relay-survey`) in waves (see Working in parallel). Every source file
-   must be in the inventory.
+   must be in the inventory, and so must every file under
+   `openspec/spec-relay/db/`: give those folders to analysts like the source
+   folders.
    - **Inventory**: split the source folders across `spec-relay-analyst`
      subagents. Each writes its rows to
      `openspec/spec-relay/work/<change>/inventory/<n>.md` and its evidence to
@@ -351,7 +370,10 @@ the domain, not the folders.
      inventory, writes context-map.md and corrects the Context column of
      inventory.md to the context ids it chose. You read context-map.md: the
      review needs you to know it.
-   - **Glossary and capabilities**: one wave of two analysts, one file each.
+   - **Glossary, capabilities and database**: one wave of three analysts,
+     one file each. The database analyst reads the evidence, the merged
+     inventory and the definitions, and gets the person's answers about the
+     databases and the hash from `gate.mjs db-hash`.
    - **Carry**: the Handling column says `carry` for files the new system
      uses unchanged (stylesheets, images, fonts, script libraries, report
      templates) and `port` for everything else. Ask the analysts to propose
@@ -389,11 +411,21 @@ the domain, not the folders.
    has no file, or an analyzed capability's source map lacks one of its files,
    and it lists the capabilities not analyzed yet. Run it also after the last
    extract is archived.
+5. **When the database definitions change later.** A gate that reports
+   "database definitions changed after the survey" stops extract and amend
+   reviews, port-ready and port-done. Ask the person whether they exported
+   again on purpose. If not, they restore `openspec/spec-relay/db/` from git.
+   If so, run the survey again as `survey-v2` (its inventory, capabilities and
+   database.md cover the new definitions, and the person reviews what
+   changed); after it is archived, copy the capability paths of the new or
+   moved definition files into `openspec/spec-relay/plan.md` and run
+   `gate.mjs coverage`. Files under `openspec/spec-relay/db/` are placed only
+   during a survey: one added after the archive is drift too.
 
 ## 2. Target design: decide how the new system is built
 
 1. `node "<kit>/scripts/openspec.mjs" new change target-design --schema spec-relay-target`.
-2. Write architecture, conventions, ui and verification from their instructions.
+2. Write architecture, conventions, ui, verification and data from their instructions.
    The default architecture is a modular monolith in the manner of Spring
    Modulith: one module per context, public API and events only, one owner per
    table, an automated boundary check. Ask the person about anything the code
@@ -406,8 +438,13 @@ the domain, not the folders.
    instruction says which fits which source); the person decides, and you
    never pick `new` yourself. Never write a password, token or connection
    string into a file; sign-in for B2 and C comes from environment variables
-   the person sets. Write architecture.md first (yourself or one analyst),
-   then give conventions.md and ui.md to two analysts in one wave, then
+   the person sets. For data.md, ask how old and new will run during the
+   switch (all at once, or side by side on the same database), whether the
+   database product stays, and whether the defaults for the logic in the
+   database (keep triggers, constraints, views, procedures and functions in
+   the database) fit; never ask for a connection string. Write
+   architecture.md first (yourself or one analyst), then give conventions.md,
+   ui.md and data.md to three analysts in one wave, then
    verification.md (it suggests level C from ui.md's policies), with the
    person's answers in each task.
 3. Write review.md, validate, and run the review (above). While the person
@@ -473,7 +510,8 @@ Words); the finish step (step 6) lists it in the hand-over.
    `toolchain` warning (the target language's build tools) must be fixed
    first. `node "<kit>/scripts/gate.mjs" port-ready --capability <capability>` must
    pass before you create the port change (it also needs the archived survey
-   and target design, and no open amendment).
+   and target design, no open amendment, and database definitions that still
+   match the survey's hash).
 2. `node "<kit>/scripts/openspec.mjs" new change port-<capability> --schema spec-relay-port`, then write
    proposal, design and tasks with `node "<kit>/scripts/openspec.mjs" instructions <artifact> --change
    port-<capability> --json`. Record the baseline hash in the proposal from

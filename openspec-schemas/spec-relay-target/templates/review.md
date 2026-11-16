@@ -21,3 +21,10 @@ Reviewer: <!-- name -->
 ## 4. Screens
 - [ ] U1 <!-- context -->: screens
 - [ ] U90 Shared look, carried files and client-side scripts
+
+## 5. Data
+- [ ] D0 The schema policy
+- [ ] D1 <!-- kind -->: <!-- keep / move -->
+- [ ] D90 The exceptions
+- [ ] D91 The data access mapping
+- [ ] D92 The schema changes and the test database
