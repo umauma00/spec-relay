@@ -31,6 +31,7 @@ function project({ capabilities = CAPABILITIES, sourceMap = ['src/billing/invoic
   write(dir, `${CHANGE}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| R1 Total | src/billing/invoice.php:Invoice.total:3-9 | none |\n');
   write(dir, `${CHANGE}/source-map.md`, `# Source map\n\n## Source files\n| Path | Role | In scope |\n|---|---|---|\n${sourceMap.map((p) => `| \`${p}\` | x | full |`).join('\n')}\n\n## Dependencies\n| Dependency | Use |\n|---|---|\n| MySQL invoices table | reads |\n`);
   write(dir, `${CHANGE}/review.md`, 'Reviewer: Uma\n- [x] R1 Total\n');
+  write(dir, `${CHANGE}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n');
   return dir;
 }
 const problems = (dir) => checkReview(dir, 'extract-billing-invoice').problems;
@@ -135,7 +136,7 @@ test('source maps: the Source files table only, any letter case, rows marked out
 
 test('source map cells: a path with spaces, notes after the path, out-of-scope notes', () => {
   const dir = project({ sourceMap: [] });
-  write(dir, 'src/billing/My Project/AssemblyInfo.vb', 'x');
+  write(dir, 'src/billing/My Project/AssemblyInfo.vb', 'Imports System\n');
   write(dir, `${CHANGE}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/billing/My Project/AssemblyInfo.vb | info | full |\n| src/billing/invoice.php (main) | x | full |\n| **src/billing/print.php** | x | partial |\n| src/billing/tax.php | x | No (belongs to billing/tax) |\n');
   assert.deepEqual(problems(dir), []);
 });
@@ -255,6 +256,8 @@ test('database definitions: assigned to a capability, held by its source map, an
   assert.match(problems(dir).join('\n'), /assigned to billing\/invoice in capabilities\.md of the archived survey is not in source-map\.md: openspec\/spec-relay\/db\/sales\/dbo\/Tables\/Invoices\.sql/);
   assert.match(checkCoverage(dir).problems.join('\n'), /billing\/invoice is not in the source map of extract-billing-invoice or of an amendment: openspec\/spec-relay\/db\/sales\/dbo\/Tables\/Invoices\.sql/);
   write(dir, `${CHANGE}/source-map.md`, '# Source map\n\n## Source files\n| Path | Role | In scope |\n|---|---|---|\n| `src/billing/` | x | full |\n| `openspec/spec-relay/db/sales/` | tables | full |\n\n## Database\n| Table or object | Kind | Use | Definition |\n|---|---|---|---|\n| dbo.Invoices | table | write | `openspec/spec-relay/db/sales/dbo/Tables/Invoices.sql` |\n');
+  // The definitions are sites of the omission check too.
+  write(dir, `${CHANGE}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `openspec/spec-relay/db/sales/dbo/Tables/Invoices.sql:(file)` | no behavior | the table only |\n');
   assert.deepEqual(problems(dir), []);
   assert.deepEqual(checkCoverage(dir).problems, []);
 

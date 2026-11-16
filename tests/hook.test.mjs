@@ -23,6 +23,7 @@ function project({ hooks = 'on', source = 'src', target = 'ts' } = {}) {
   write(dir, `${C}/source-map.md`, '| Path | Role | In scope |\n|---|---|---|\n| src/a.php | invoice | full |\n');
   write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Add two numbers | src/a.php:add:1 | none |\n');
   write(dir, 'src/a.php', '<?php\n');
+  write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n');
   write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/a.php:1 |\n');
   write(dir, `${C}/review.md`, 'Reviewer: Uma\n- [ ] R1 Add two numbers\n');
   return dir;

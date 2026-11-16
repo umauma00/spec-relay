@@ -484,17 +484,43 @@ waves.
    and a new checker check that row again (a part file with a higher number,
    such as `crosscheck-02.md`, merged the same way), or move it to questions.md and write `question Q<n>` as its verdict
    yourself.
-4. **Questions and review.** Write questions.md from the analysts' reported
+4. **Omission check.** In the same wave as the crosscheck (both need only
+   trace.md), run `node "<kit>/scripts/sites.mjs" --change
+   extract-<capability>`. It lists the sites of the source map's files in
+   groups of 40 under `openspec/spec-relay/work/extract-<capability>/sites/`
+   (`--per N` changes the size). Give each group to its own
+   `spec-relay-checker` with the change's specs and screens.md paths, the
+   numbered requirement and screen names, the capabilities that own parts of
+   shared files (from the plan), and the path
+   `openspec/spec-relay/work/extract-<capability>/coverage/<nn>.md` to write.
+   Never give it the analysts' notes. Merge with `merge.mjs --into
+   openspec/changes/extract-<capability>/coverage.md --parts
+   openspec/spec-relay/work/extract-<capability>/coverage --clean`. For every
+   `gap`, have an analyst add the requirement it needs (and its trace) at
+   the END of the spec, so the R numbers the ledger already uses stay the
+   same; have a checker crosscheck the new requirement and judge that site
+   again (give it the site ids from the sites file, and have it write a part
+   file with a higher number, merged the same way); or move it to
+   questions.md and write `question Q<n>` as its verdict yourself. A changed
+   source map or source file means running sites.mjs again and judging the
+   sites of the changed files again (a verdict is tied to a site id, not to
+   its content; an added overload renumbers `#2`): `gate.mjs review` scans the files itself, fails on a site
+   without a row, and names the rows of sites it no longer finds, which you
+   delete from coverage.md. When sites.mjs writes no group (the files hold no
+   code), coverage.md keeps its empty table.
+5. **Questions and review.** Write questions.md from the analysts' reported
    doubts and the rows moved to questions, then review.md (names by search,
    not by reading the spec).
-5. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
+6. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
    analyst fix every error and warning. `gate.mjs review` also checks the
    coverage, so the person does not: source-map.md holds every file the plan
    assigns to the capability, and every requirement has a trace row whose
    paths exist.
-6. **Report** to the person: the number of requirements and screens, what the
-   crosscheck found and fixed, the questions they must decide, the path of the
-   review page, and that step 4 is theirs. Then stop and wait.
+7. **Report** to the person: the number of requirements and screens, what the
+   crosscheck found and fixed, how many sites the omission check judged and
+   the gaps it found and how they were resolved, the questions they must
+   decide, the path of the review page, and that step 4 is theirs. Then stop
+   and wait.
 
 ## 4. Review: the person decides
 
