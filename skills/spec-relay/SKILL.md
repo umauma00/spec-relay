@@ -16,6 +16,7 @@ The kit's own files are two directories above this skill:
 [scripts/setup.mjs](../../scripts/setup.mjs),
 [scripts/gate.mjs](../../scripts/gate.mjs),
 [scripts/status.mjs](../../scripts/status.mjs),
+[scripts/metrics.mjs](../../scripts/metrics.mjs),
 [scripts/merge.mjs](../../scripts/merge.mjs),
 [scripts/finish.mjs](../../scripts/finish.mjs),
 [scripts/doctor.mjs](../../scripts/doctor.mjs), `openspec-schemas/` and
@@ -693,6 +694,32 @@ keep this list; the analyst, checker and implementer subagents have no TODO tool
    Never install anything or change settings to get the TODO list working.
 7. `--format markdown` adds a table of every capability; show it when the
    person asks for the whole picture.
+
+## Time spent
+
+Each run of `status.mjs` records the steps whose state changed, and the plugin
+hook records when each kit subagent (analyst, checker, implementer) starts and
+stops, in `openspec/spec-relay/local/metrics.jsonl` (git-ignored, one
+machine's record). This is a record only: it approves and blocks nothing, and
+progress still comes from the `openspec/` files. Running `status.mjs` at every
+step start and end (above) is what makes the times right.
+
+1. When the person asks how long things took, and in the report after each
+   port archive, run `node "<kit>/scripts/metrics.mjs" report --format json`
+   and show its `markdown` field as it is. Its step table separates time in
+   progress from time waiting for the person, and its subagent table gives the
+   subagents' own working time per capability. Times are wall clock between
+   recorded changes, so nights and a session left open count too; the table
+   says so, and you need not add more.
+2. Tokens are not recorded: hooks get no token counts. Never estimate them.
+   If the person pastes Copilot CLI's `/usage` output, write it unchanged to
+   `openspec/spec-relay/local/usage.txt` with your edit tool and run
+   `node "<kit>/scripts/metrics.mjs" note --file openspec/spec-relay/local/usage.txt
+   [--capability <capability>]` (a file, because a shell would change `$`,
+   backticks and quotes in the text). Never read the person's session files.
+3. "Record metrics: off" in `openspec/config.yaml` stops all recording. Do not
+   change that line; the person does. The record is not part of any review or
+   gate, and you never edit or delete `metrics.jsonl`.
 
 ## When something stops
 

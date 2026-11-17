@@ -19,7 +19,9 @@
 // being analyzed or are in review, and which may be analyzed next without
 // running more than `ahead` capabilities ahead of the person's review (both
 // numbers come from openspec/config.yaml). It never records or grants an approval; the review gate is
-// scripts/gate.mjs. Read-only. Exits 0, 1 when --capability names no known
+// scripts/gate.mjs. It changes no file the migration reads; each run only adds
+// the steps whose state changed to the git-ignored time record (metrics.mjs),
+// which never changes the output. Exits 0, 1 when --capability names no known
 // capability, 2 on bad usage.
 //
 // Steps are data (STEPS below): a new step is one more entry with a label, the
@@ -28,6 +30,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { recordSteps } from './metrics.mjs';
 import { checkboxes, readIf, capabilitySegments, checkReview, baseName, archivedChange, baselineHash, configValue, cleanValue, language } from './gate.mjs';
 import { finishState } from './finish.mjs';
 
@@ -449,7 +452,7 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
     plan, total, ported, reviewed, finished,
     current: here,
     parallel: parallelPlan(root, capabilities, foundation, problems),
-    foundation: foundation.map(({ id, status: st }) => ({ id, status: st })),
+    foundation: foundation.map(({ id, status: st, waiting }) => ({ id, status: st, ...(waiting ? { waiting: true } : {}) })),
     finish: { status: finish.status, ...(finish.waiting ? { waiting: true } : {}) },
     active: capabilities.filter((c) => c.active).map((c) => c.capability),
     todoList,
@@ -540,6 +543,8 @@ export function main(argv) {
     return 2;
   }
   const report = status(opts.root, { capability: opts.capability, language: language(opts.root, opts.language) });
+  // A record of when each step changed (metrics.mjs); it never changes the output or the exit code.
+  try { recordSteps(opts.root, report); } catch { /* recording is best effort */ }
   const todoList = report.todoList.map(({ id, title, description, status: s }) => ({ id, title, description, status: s }));
   if (opts.format === 'todo') console.log(ascii(JSON.stringify({ todoList, checklist: checklist(report), current: report.current, parallel: report.parallel, problems: report.problems }, null, 2)));
   else if (opts.format === 'checklist') console.log(checklist(report, { problems: true }));
