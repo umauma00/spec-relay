@@ -95,7 +95,8 @@ test('port-done needs at least one task and every task done', () => {
   write(dir, 'openspec/specs/calc/spec.md', SPEC);
   const hash = baselineHash(dir, 'calc');
   write(dir, 'openspec/changes/port-calc/proposal.md', `## Baseline\n- \`calc\` sha256:${hash}\n`);
-  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  // What is left is the evidence of the port (tests/port.test.mjs).
+  assert.deepEqual(checkPortDone(dir, 'port-calc').problems.filter((p) => /not done|no tasks|baseline/.test(p)), []);
   // A CRLF checkout of the same baseline has the same hash.
   write(dir, 'openspec/specs/calc/spec.md', SPEC.replace(/\n/g, '\r\n'));
   assert.equal(baselineHash(dir, 'calc'), hash);
@@ -252,10 +253,17 @@ test('the target-design gate needs a module and verification levels for every co
   write(dir, `${T}/review.md`, `Reviewer: Uma\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform: levels\n- [x] E2 \`billing\`: levels\n${UI_BOXES}`);
   write(dir, `${T}/ui.md`, UI);
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n');
-  write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
-  assert.deepEqual(checkReview(dir, 'target-design').problems, ['architecture.md has no module row for context billing', 'data.md is missing (write "None" when the survey found no database)']);
+  write(dir, `${T}/verification.md`, '| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| platform | yes | no | no | no |\n| billing | yes | yes | 未定 | no |\n');
+  write(dir, `${T}/conventions.md`, '## Commands\n| Purpose | Command |\n|---|---|\n| Test | `npm.cmd test` |\n| Boundary check | |\n');
+  assert.deepEqual(checkReview(dir, 'target-design').problems, [
+    'architecture.md has no module row for context billing',
+    'conventions.md names no Boundary check command (## Commands, | Boundary check | <command> |)',
+    'verification.md: the B2 cell of context billing is "未定"; write yes or no',
+    'data.md is missing (write "None" when the survey found no database)',
+  ]);
   write(dir, `${T}/data.md`, '# Data\n\n## Schema policy\nNone\n');
-  assert.deepEqual(checkReview(dir, 'target-design').problems, ['architecture.md has no module row for context billing']);
+  write(dir, `${T}/verification.md`, '| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| platform | yes | no | no | no |\n| billing | yes | yes | no | no |\n');
+  write(dir, `${T}/conventions.md`, '## Commands\n| Purpose | Command |\n|---|---|\n| Test | `npm.cmd test` |\n| Boundary check | `npx.cmd depcruise src` |\n');
   write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A1 platform\n- [x] E1 platform\n');
   assert.match(checkReview(dir, 'target-design').problems.join(), /module of context billing has no review item/);
   assert.match(checkReview(dir, 'target-design').problems.join(), /screen policy of context billing has no review item \(U<n> billing\)/);
@@ -622,7 +630,8 @@ test('the target design decides the handling of every kind of database logic', (
   const DATA = '# Data\n\n## Schema policy\nkeep; old and new side by side\n\n## Database logic\n| Kind | Handling | Reason |\n|---|---|---|\n| procedure | keep | |\n| trigger | keep (acts on every writer) | |\n\n## Exceptions\nNone\n\n## Data access mapping\n| Topic | Source behavior | Target rule |\n|---|---|---|\n| Trailing spaces | ignored | rtrim |\n\n## Schema changes\nddl-auto=validate\n\n## Test database\nLocalDB\n';
   write(dir, `${T}/.openspec.yaml`, 'schema: spec-relay-target\n');
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| billing | ts/billing |\n');
-  write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
+  write(dir, `${T}/conventions.md`, '# Conventions\n\n## Commands\n| Purpose | Command |\n|---|---|\n| Test | `npm test` |\n| Boundary check | `npm run boundary` |\n');
+  write(dir, `${T}/verification.md`, '| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| platform | yes | no | no | no |\n| billing | yes | no | no | no |\n');
   write(dir, `${T}/review.md`, REVIEW);
   write(dir, `${T}/data.md`, DATA);
   write(dir, `${T}/ui.md`, UI);
@@ -712,7 +721,8 @@ test('port-done also stops when the definitions changed after the survey', () =>
   const P = 'openspec/changes/port-calc';
   write(dir, `${P}/proposal.md`, `## Baseline\n- \`calc\` sha256:${baselineHash(dir, 'calc')}\n`);
   write(dir, `${P}/tasks.md`, '- [x] 1.1 a\n');
-  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  // Only the database part of port-done: the port's other evidence is tested in port.test.mjs.
+  assert.deepEqual(checkPortDone(dir, 'port-calc').problems.filter((p) => /database/.test(p)), []);
   write(dir, `${DB}/x/t.sql`, 'CREATE TABLE t (a int);\n');
   assert.match(checkPortDone(dir, 'port-calc').problems.join(), /database definitions changed after the survey/);
   assert.match(nextSteps('port-done', checkPortDone(dir, 'port-calc'), 'en').person.join(), /survey is run again \(survey-v2\)/);
@@ -740,7 +750,8 @@ test('the target-design gate needs ui.md: a row and a valid policy per context, 
   write(dir, `${T}/data.md`, '# Data\n\n## Schema policy\nNone\n');
   write(dir, `${T}/review.md`, `Reviewer: Uma\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform\n- [x] E2 billing\n${UI_BOXES}`);
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| billing | ts/billing |\n');
-  write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
+  write(dir, `${T}/conventions.md`, '# Conventions\n\n## Commands\n| Purpose | Command |\n|---|---|\n| Test | `npm test` |\n| Boundary check | `npm run boundary` |\n');
+  write(dir, `${T}/verification.md`, '| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| platform | yes | no | no | no |\n| billing | yes | no | no | no |\n');
   assert.match(checkReview(dir, 'target-design').problems.join(), /ui\.md is missing/);
   write(dir, `${T}/ui.md`, UI.replace('| billing | all | WinForms | React | layout | |\n| billing | printed reports | Crystal Reports | PDF | same | |\n', '').replace('| same |', '| pixel |'));
   const problems = checkReview(dir, 'target-design').problems;
@@ -755,6 +766,9 @@ test('the target-design gate needs ui.md: a row and a valid policy per context, 
 
 test('port-done compares carried files with their source, placed where ui.md says', () => {
   const dir = tempDir();
+  // Only the carried-file part of port-done: the port's other evidence (verify
+  // run, tags, crosscheck) is tested in port.test.mjs.
+  const carried = () => checkPortDone(dir, 'port-calc').problems.filter((p) => /carr(y|ied)/i.test(p));
   write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only; only openspec/ and the target root may change): .\n  Target root (new implementation): web\n');
   write(dir, 'openspec/changes/archive/2026-11-01-survey/inventory.md', '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | port | |\n| public/css/ | platform | carry | |\n| public/css/print.css | platform | port | |\n| public/logo.png | platform | carry | |\n| public/app.js | platform | port | |\n');
   write(dir, 'openspec/changes/archive/2026-11-02-target-design/ui.md', '## Carried files\n| Source | Target |\n|---|---|\n| public/css/ | web/static/css/ |\n| public/logo.png | web/static/ |\n');
@@ -768,7 +782,7 @@ test('port-done compares carried files with their source, placed where ui.md say
   write(dir, 'openspec/changes/port-calc/proposal.md', `## Baseline\n- \`calc\` sha256:${baselineHash(dir, 'calc')}\n`);
   const design = (rows, heading = '## Carried files') => write(dir, 'openspec/changes/port-calc/design.md', `## Screens\nNone\n\n${heading}\n<!--\n## not a heading\n-->\n| Source | Target |\n|---|---|\n${rows}\n## Decisions\n- print.css is ported\n`);
   design('| public/css/ | web/static/css/ |\n| `public/logo.png` | web/static/ |\n');
-  let problems = checkPortDone(dir, 'port-calc').problems.join('\n');
+  let problems = carried().join('\n');
   assert.match(problems, /carried file public\/css\/site.css is missing at web\/static\/css\/site.css/);
   assert.match(problems, /carried file public\/css\/sub\/grid.css is missing at web\/static\/css\/sub\/grid.css/);
   assert.doesNotMatch(problems, /print\.css/, 'a more specific port row wins over the carry folder');
@@ -776,17 +790,17 @@ test('port-done compares carried files with their source, placed where ui.md say
   write(dir, 'web/static/css/site.css', 'body{color:red}\r\n');
   write(dir, 'web/static/css/sub/grid.css', 'td{}\n');
   fs.writeFileSync(path.join(dir, 'web/static/logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 10]));
-  problems = checkPortDone(dir, 'port-calc').problems;
+  problems = carried();
   assert.deepEqual(problems, ['carried file web/static/logo.png differs from public/logo.png; a carried file is copied unchanged (port it instead if it needs an edit)'], 'CRLF counts as the same text; a binary must match byte for byte');
   fs.writeFileSync(path.join(dir, 'web/static/logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 13, 10]));
-  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  assert.deepEqual(carried(), []);
   // A heading with a closing ## and a number still counts.
   design('| public/css/ | web/static/css/ |\n', '## 2. Carried files ##');
-  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  assert.deepEqual(carried(), []);
   write(dir, 'web/static/css/site.css', 'body{color:blue}\n');
-  assert.match(checkPortDone(dir, 'port-calc').problems.join(), /web\/static\/css\/site.css differs from public\/css\/site.css/);
+  assert.match(carried().join(), /web\/static\/css\/site.css differs from public\/css\/site.css/);
   design('| public/app.js | web/static/ |\n| public/css/ | ../elsewhere/ |\n| public/logo.png | static/ |\n| public/css/site.css | web/other/ |\n| public/css | web/static/css/ |\n| public/logo.png | openspec/x/ |\n| public/logo.png | web/static |\n');
-  problems = checkPortDone(dir, 'port-calc').problems.join('\n');
+  problems = carried().join('\n');
   assert.match(problems, /carried file public\/app.js is not a carry row in the inventory/);
   assert.match(problems, /leaves the repository/);
   assert.match(problems, /the target static\/ is outside the target root web/);
@@ -795,23 +809,23 @@ test('port-done compares carried files with their source, placed where ui.md say
   assert.match(problems, /the target openspec\/x\/ is inside openspec\/ or .git/);
   assert.match(problems, /public\/logo.png goes to web\/static, but ui.md places it at web\/static\/logo.png/);
   design('| None | |\n');
-  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  assert.deepEqual(carried(), []);
   // Only the first table is read; "## 1) " numbering counts too.
   design('| public/logo.png | web/static/ |\n\n| Not copied | Why |\n|---|---|\n| public/css/print.css | ported |\n', '## 1) Carried files');
-  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  assert.deepEqual(carried(), []);
   design('| . | web/ |\n');
-  assert.match(checkPortDone(dir, 'port-calc').problems.join(), /"\." is a folder; end it with \/|not a carry row/);
+  assert.match(carried().join(), /"\." is a folder; end it with \/|not a carry row/);
   // A target root written in another case still keeps the copies out of the source files.
   write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only; only openspec/ and the target root may change): .\n  Target root (new implementation): Web\n');
   design('| public/css/ | web/static/css/ |\n| public/logo.png | web/static/ |\n');
   write(dir, 'web/static/css/site.css', 'body{color:red}\n');
-  assert.deepEqual(checkPortDone(dir, 'port-calc'), { ok: true, problems: [] });
+  assert.deepEqual(carried(), []);
   write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only; only openspec/ and the target root may change): .\n  Target root (new implementation): web\n');
   // A renamed or missing section cannot skip the check while ui.md carries files.
   design('| public/css/ | web/static/css/ |\n', '## 引き継ぐファイル');
-  assert.match(checkPortDone(dir, 'port-calc').problems.join(), /design.md has no "## Carried files" section/);
+  assert.match(carried().join(), /design.md has no "## Carried files" section/);
   write(dir, 'openspec/changes/port-calc/design.md', '## Screens\nNone\n');
-  assert.match(checkPortDone(dir, 'port-calc').problems.join(), /design.md has no "## Carried files" section/);
+  assert.match(carried().join(), /design.md has no "## Carried files" section/);
 });
 
 test('the survey needs the Handling column; translated headers are read by name', () => {
@@ -833,7 +847,8 @@ test('ui.md carried files must be carry rows placed inside the target root', () 
   write(dir, `${T}/data.md`, '# Data\n\n## Schema policy\nNone\n');
   write(dir, `${T}/review.md`, `Reviewer: Uma\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform\n- [x] E2 billing\n${UI_BOXES}`);
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| billing | ts/billing |\n');
-  write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
+  write(dir, `${T}/conventions.md`, '# Conventions\n\n## Commands\n| Purpose | Command |\n|---|---|\n| Test | `npm test` |\n| Boundary check | `npm run boundary` |\n');
+  write(dir, `${T}/verification.md`, '| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| platform | yes | no | no | no |\n| billing | yes | no | no | no |\n');
   const ui = (carried) => write(dir, `${T}/ui.md`, UI.replace(/## Carried files\n[\s\S]*$/, `## Carried files\n| Source | Target |\n|---|---|\n${carried}`).replace('| Policy |', '| 方針 (same / layout / new / none) |'));
   ui('| src/common/ | ts/static |\n| src/billing/ | ts/static/ |\n');
   let problems = checkReview(dir, 'target-design').problems.join('\n');
@@ -868,7 +883,8 @@ test('a test database given as a fenced command block counts', () => {
   const T = 'openspec/changes/target-design';
   write(dir, `${T}/.openspec.yaml`, 'schema: spec-relay-target\n');
   write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| billing | ts/billing |\n');
-  write(dir, `${T}/verification.md`, '| Context | A |\n|---|---|\n| platform | yes |\n| billing | yes |\n');
+  write(dir, `${T}/conventions.md`, '# Conventions\n\n## Commands\n| Purpose | Command |\n|---|---|\n| Test | `npm test` |\n| Boundary check | `npm run boundary` |\n');
+  write(dir, `${T}/verification.md`, '| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| platform | yes | no | no | no |\n| billing | yes | no | no | no |\n');
   write(dir, `${T}/ui.md`, UI);
   write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform\n- [x] E2 billing\n' + UI_BOXES + '- [x] D0 policy\n- [x] D1 procedure: keep\n- [x] D2 trigger: keep\n- [x] D90 e\n- [x] D91 m\n- [x] D92 s\n');
   write(dir, `${T}/data.md`, '# Data\n\n## Schema policy\nkeep\n\n## Database logic\n| Kind | Handling | Reason |\n|---|---|---|\n| procedure | keep | |\n| trigger | keep | |\n\n## Data access mapping\n| Topic | Source behavior | Target rule |\n|---|---|---|\n| Character set | cp932 | same |\n\n## Schema changes\nno migrations\n\n## Test database\n```powershell\nsqllocaldb create spec-relay\n```\n');

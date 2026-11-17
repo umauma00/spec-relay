@@ -20,9 +20,9 @@
 | <!-- --> | <!-- keep / move --> | <!-- --> |
 
 ## Verification
-| Level | Covers |
-|---|---|
-| A scenario tests | <!-- every scenario --> |
+| Level | Covers | Command |
+|---|---|---|
+| A scenario tests | <!-- every scenario --> | <!-- empty: conventions.md's Test command --> |
 
 ## Source references
 | Requirement | Source (from trace.md) |

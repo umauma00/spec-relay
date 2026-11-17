@@ -105,6 +105,9 @@ test('agents may not write the source, baselines, archives, schemas, settings or
   assert.match(edit(dir, 'openspec/changes/extract-billing-invoice/review.md', sub), /only the orchestrator writes/);
   assert.match(edit(dir, 'openspec/spec-relay/plan.md', sub), /only the orchestrator writes/);
   assert.match(edit(dir, 'openspec/spec-relay/lessons.md', sub), /only the orchestrator writes/);
+  assert.match(edit(dir, 'openspec/changes/port-billing-invoice/crosscheck.md', sub), /only the orchestrator writes/);
+  assert.match(edit(dir, 'openspec/changes/port-billing-invoice/verify.json'), /only verify\.mjs writes/);
+  assert.match(edit(dir, 'openspec/changes/port-billing-invoice/verify.json', sub), /only verify\.mjs writes/);
   assert.match(edit(dir, 'openspec/spec-relay/lessons.md', { agentId: 'i1', agentType: 'spec-relay-implementer' }), /only the orchestrator writes/);
   assert.match(edit(dir, 'openspec/spec-relay/lessons.md', { agentId: 'c1', agentType: 'spec-relay:spec-relay-checker' }), /only the orchestrator writes/);
   assert.equal(edit(dir, 'openspec/changes/extract-billing-invoice/trace.md', sub), null);

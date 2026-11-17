@@ -19,6 +19,7 @@
 - <!-- naming, error handling, logging, tests -->
 
 ## Commands
+<!-- one-line PowerShell commands, run from the target root; Test and Boundary check are run by verify.mjs for every port -->
 | Purpose | Command |
 |---|---|
 | Build | |

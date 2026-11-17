@@ -126,7 +126,8 @@ test('the port step follows tasks.md and the archive', () => {
   write(dir, 'openspec/changes/port-billing-invoice/tasks.md', '- [x] 1.1 a\n- [ ] 1.2 b\n');
   assert.deepEqual(steps()[2], ['in-progress', 'Implement [tasks 1/2]']);
   write(dir, 'openspec/changes/port-billing-invoice/tasks.md', '- [x] 1.1 a\n- [x] 1.2 b\n');
-  assert.deepEqual(steps()[2], ['not-started', 'Implement [all tasks done; waiting for agreement to archive]']);
+  // Done tasks still need the verify run and the crosscheck (gate.mjs port-done).
+  assert.deepEqual(steps()[2], ['in-progress', 'Implement [all tasks done; running the tests and the crosscheck]']);
   fs.renameSync(path.join(dir, 'openspec/changes/port-billing-invoice'), path.join(dir, 'openspec/changes/archive/2026-11-10-port-billing-invoice'));
   // The next capability in plan order becomes current.
   const report = status(dir);

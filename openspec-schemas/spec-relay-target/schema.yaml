@@ -57,7 +57,11 @@ artifacts:
         errors and exceptions; collections and ordering; concurrency; I/O.
       - **Coding conventions**: naming, error handling, logging, tests.
       - **Commands**: build, test, lint and the boundary check, as one-line
-        commands that run in PowerShell on Windows.
+        commands that run in PowerShell on Windows, from the target root. Keep
+        the purposes `Test` and `Boundary check` as they are: the kit's
+        `verify.mjs` runs those two for every port and records the result. Each
+        must exit with a code other than 0 when it fails, so write one command,
+        not a chain whose last part always succeeds.
     requires:
       - architecture
 
@@ -142,8 +146,16 @@ artifacts:
         stay the same: suggest it for contexts with the policy `same` in
         ui.md, and consider it for `layout`.
 
+      Each port gives the command of every chosen level in its design.md, and
+      `gate.mjs port-done` fails until that command passed on the current
+      code. A context with only A is reported as "inferred": the source program
+      never ran, so equivalence rests on reading the code. Say so when the
+      person chooses.
+
       Sections:
-      - **Levels**: table of context, A (always yes), B1, B2, C, notes.
+      - **Levels**: table of context, A (always yes), B1, B2, C, notes. Write
+        each level cell as `yes` or `no` only: `gate.mjs review` stops on
+        anything else, so an open choice is a question, not a cell.
       - **Running the source program**: what is needed to run it for B1, B2 or
         C, or "not runnable" (then only A applies).
       - **Sign-in**: for B2 and C, the test account comes from environment

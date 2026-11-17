@@ -28,6 +28,8 @@ node "C:\path\to\spec-relay\scripts\doctor.mjs" --target . --client cli
 
 キットは OpenSpec を `node` で直接起動し（`node "<キットのフォルダー>\scripts\openspec.mjs" <引数>`）、導入スクリプトも npm を `node` で直接起動するので、この設定の影響を受けません。
 
+実装のテストを実行する `scripts/verify.mjs` は、移行先の設計で決めたコマンド（`npm test` など）を Windows PowerShell で実行します。そのとき、起動するプロセスだけ `-ExecutionPolicy Bypass` を付けるので、`npm.ps1` で止まりません。実行ポリシーの設定そのものは変えません（組織のグループポリシーで決められている場合は、そちらが優先されます）。
+
 ## 導入スクリプトを手で実行する
 
 PowerShell・コマンドプロンプトのどちらでも、1行で書きます（行末の `\` で折り返す書き方は bash 専用です）。パスは必ず `"` で囲んでください。

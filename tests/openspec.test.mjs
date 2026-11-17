@@ -7,6 +7,8 @@ import path from 'node:path';
 import { main, bypassFiles, STUB_MARKER, SCHEMAS } from '../scripts/setup.mjs';
 import { checkReview, checkPortReady, checkPortDone, baselineHash, databaseHash } from '../scripts/gate.mjs';
 import { status as progress } from '../scripts/status.mjs';
+import { verify } from '../scripts/verify.mjs';
+import { merge } from '../scripts/merge.mjs';
 import { checkFinishReady, draft } from '../scripts/finish.mjs';
 import { runOpenspec, runCommand, findNpm, findOpenspec, OPENSPEC_VERSION } from '../scripts/openspec.mjs';
 import { tempDir, write, quiet, isolateOpenspec, crlf } from './helpers.mjs';
@@ -88,7 +90,7 @@ function fill(dir, change, files) {
   openspec(dir, 'validate', change, '--strict');
 }
 
-test('survey -> target design -> extract -> review gate -> archive -> port -> amend', { skip: !hasOpenspec && 'npm not found' }, () => {
+test('survey -> target design -> extract -> review gate -> archive -> port -> amend', { skip: !hasOpenspec && 'npm not found' }, async () => {
   const dir = setUp();
   write(dir, 'src/calc.py', 'def add(a, b):\n    return a + b\n');
   // Definitions exported from a database, with CRLF as Windows tools write them.
@@ -115,9 +117,9 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   openspec(dir, 'new', 'change', 'target-design', '--schema', 'spec-relay-target');
   fill(dir, 'target-design', {
     'architecture.md': '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| calc | ts/calc |\n',
-    'conventions.md': '# Conventions\n\n## Commands\n| Purpose | Command |\n|---|---|\n| Test | `npm test` |\n',
+    'conventions.md': '# Conventions\n\n## Commands\n| Purpose | Command |\n|---|---|\n| Test | node test.js |\n| Boundary check | node boundary.js |\n',
     'ui.md': '# UI\n\n## Screens\n| Context | Screens | Source kind | Target | Policy | Why |\n|---|---|---|---|---|---|\n| platform | all | none | none | none | |\n| calc | all | none | none | none | |\n\n## Carried files\nNone\n',
-    'verification.md': '| Context | A |\n|---|---|\n| platform | yes |\n| calc | yes |\n',
+    'verification.md': '| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| platform | yes | no | no | no |\n| calc | yes | no | no | no |\n',
     'data.md': '# Data\n\n## Schema policy\nkeep\n\n## Database logic\n| Kind | Handling | Reason |\n|---|---|---|\n| trigger | keep | |\n\n## Data access mapping\n| Topic | Source behavior | Target rule |\n|---|---|---|\n| Character set | cp932 | same |\n\n## Schema changes\nno migrations\n\n## Test database\nLocalDB\n',
     'review.md': 'Reviewer: Uma\n\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 calc\n- [x] E1 platform: levels\n- [x] E2 calc: levels\n- [x] U1 platform: screens\n- [x] U2 calc: screens\n- [x] U90 shared look\n- [x] D0 schema policy\n- [x] D1 trigger: keep\n- [x] D90 exceptions\n- [x] D91 mapping\n- [x] D92 schema changes, test database\n',
   });
@@ -158,7 +160,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   openspec(dir, 'new', 'change', 'port-calc-add', '--schema', 'spec-relay-port');
   assert.match(fs.readFileSync(path.join(dir, 'openspec/changes/port-calc-add/.openspec.yaml'), 'utf8'), /skip_specs: true/);
   const next = JSON.parse(openspec(dir, 'status', '--change', 'port-calc-add', '--json'));
-  assert.deepEqual(next.artifacts.map((a) => a.id), ['proposal', 'design', 'tasks']);
+  assert.deepEqual(next.artifacts.map((a) => a.id), ['proposal', 'design', 'tasks', 'crosscheck']);
   const hash = baselineHash(dir, 'calc/add');
   write(dir, 'openspec/changes/port-calc-add/proposal.md', `## Baseline\n- \`calc/add\` sha256:${hash}\n`);
   write(dir, 'openspec/changes/port-calc-add/design.md', '# design\n');
@@ -167,7 +169,24 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   // No task ticked yet: the design waits for the person's agreement.
   assert.deepEqual(steps(), ['completed', 'completed', 'not-started']);
   write(dir, 'openspec/changes/port-calc-add/tasks.md', '# Tasks\n\n## 1. Core\n\n- [x] 1.1 Implement add; verify with its test\n');
-  assert.deepEqual(checkPortDone(dir, 'port-calc-add'), { ok: true, problems: [] });
+  // Done tasks are not enough: the verify run, a tagged test per scenario and the crosscheck.
+  assert.deepEqual(steps(), ['completed', 'completed', 'in-progress']);
+  assert.equal(checkPortDone(dir, 'port-calc-add').ok, false);
+  write(dir, 'ts/calc/add.ts', 'export const add = (a: number, b: number) => a + b;\n');
+  write(dir, 'ts/calc/add.test.ts', '// spec-relay: calc/add | Add two numbers | Positive numbers\n');
+  write(dir, 'ts/test.js', 'process.exit(0);\n');
+  write(dir, 'ts/boundary.js', 'process.exit(0);\n');
+  // The checkers' part file, merged (and stamped with the code) by merge.mjs.
+  write(dir, 'openspec/spec-relay/work/port-calc-add/crosscheck-01.md', '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/calc.py:2 vs ts/calc/add.ts:1 |\n');
+  assert.equal(merge(dir, { into: 'openspec/changes/port-calc-add/crosscheck.md', parts: ['openspec/spec-relay/work/port-calc-add'], clean: true }).ok, true);
+  const ran = await verify(dir, 'port-calc-add', { progress: () => {} });
+  assert.equal(ran.ok, true, JSON.stringify(ran));
+  const done = checkPortDone(dir, 'port-calc-add');
+  assert.deepEqual([done.ok, done.problems, done.equivalence], [true, [], 'inferred']);
+  assert.deepEqual(steps(), ['completed', 'completed', 'not-started']);
+  // OpenSpec takes the crosscheck artifact and the receipt beside it.
+  const port = JSON.parse(openspec(dir, 'status', '--change', 'port-calc-add', '--json'));
+  assert.ok(port.artifacts.every((a) => a.status === 'done'), JSON.stringify(port.artifacts));
   openspec(dir, 'archive', 'port-calc-add', '--yes');
   // Every capability is ported: the finish step is next, so the migration is not complete yet.
   assert.deepEqual(progress(dir).todoList.map((item) => [item.key, item.status]), [['overall', 'not-started'], ['finish', 'not-started']]);

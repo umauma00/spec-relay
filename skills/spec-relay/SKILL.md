@@ -18,6 +18,7 @@ The kit's own files are two directories above this skill:
 [scripts/status.mjs](../../scripts/status.mjs),
 [scripts/metrics.mjs](../../scripts/metrics.mjs),
 [scripts/merge.mjs](../../scripts/merge.mjs),
+[scripts/verify.mjs](../../scripts/verify.mjs),
 [scripts/finish.mjs](../../scripts/finish.mjs),
 [scripts/doctor.mjs](../../scripts/doctor.mjs), `openspec-schemas/` and
 `docs/WORKFLOW.md`. `<kit>` below stands for the absolute path of that
@@ -222,14 +223,16 @@ not wash out these instructions.
 4. **One writer per file.** No two subagents of a wave write the same file.
    Analysts and checkers write only the paths you give them, the implementer
    only its capability's module. Only you write `review.md`, `plan.md`,
-   `lessons.md` and `questions.md`, run `openspec` commands, render review
-   pages and archive.
+   `lessons.md` and `questions.md`, merge `crosscheck.md`, run `openspec`
+   commands and `verify.mjs`, render review pages and archive.
    Never give a subagent a path to write under the source root (when the
    source root is `.`, give only paths under `openspec/` and the target root),
    under `openspec/specs/`, `openspec/config.yaml` or the lessons.
    Before every wave, run `node "<kit>/scripts/gate.mjs" guard --save
    wave-<n>`: it saves the hashes of the files no subagent may write (every
-   active change's `review.md` and `questions.md`, `plan.md`, `lessons.md`,
+   active change's `review.md`, `questions.md`, `crosscheck.md` and
+   `verify.json`, every active port's `proposal.md` and `design.md`,
+   `plan.md`, `lessons.md`,
    `openspec/specs/`, `openspec/config.yaml` and the source files). After the
    wave, run `gate.mjs guard --compare wave-<n>`, which lists only the paths
    that changed (exit code 1 then: read the lists). If the wave is still
@@ -437,7 +440,10 @@ the domain, not the folders.
    training or printed forms show them, and the target UI technology, then
    propose a policy per context (`same`, `layout`, `new`, `none`; the
    instruction says which fits which source); the person decides, and you
-   never pick `new` yourself. Never write a password, token or connection
+   never pick `new` yourself. Tell the person plainly that a context with A only is
+   reported as "inferred" at every port: the source program never runs, so
+   the new code is checked against specs and code that AIs read, not against
+   what the old system does. Never write a password, token or connection
    string into a file; sign-in for B2 and C comes from environment variables
    the person sets. For data.md, ask how old and new will run during the
    switch (all at once, or side by side on the same database), whether the
@@ -552,8 +558,9 @@ Words); the finish step (step 6) lists it in the hand-over.
    for each screen's policy and record the answers under Decisions; never
    choose one yourself.
 3. Show the person the design's structure, any additions to the conventions,
-   the verification plan and open risks, and start implementing after they
-   agree. Propose lessons from their corrections (see Lessons).
+   the verification plan (each level and its command) and open risks, and
+   start implementing after they agree. Propose lessons from their corrections
+   (see Lessons).
 4. Run `node "<kit>/scripts/openspec.mjs" instructions apply --change port-<capability> --json` and work
    through tasks.md. Give groups of tasks to the `spec-relay-implementer`
    subagent, one at a time; check its report and its verification results
@@ -576,12 +583,56 @@ Words); the finish step (step 6) lists it in the hand-over.
    the tasks that do not depend on it meanwhile. When the behavior is in a file
    the plan assigns to another capability, it belongs to that capability's
    spec instead.
-6. When every task is done and verified, run `node "<kit>/scripts/gate.mjs"
-   port-done --change port-<capability>`, report the results, and archive the
-   port change after the person agrees: `node "<kit>/scripts/openspec.mjs" archive port-<capability>
-   --yes`. Pass the implementers' `TODO(port)` lines on in the report; the
-   finish step collects them from the code.
-7. When this was the last capability of the plan, go on to step 6 (Finish).
+6. **Verify.** When every task is done, run `node "<kit>/scripts/verify.mjs"
+   --change port-<capability>`. It runs level A (the tests from the
+   scenarios), the boundary check and the command design.md gives for each
+   level verification.md chose (B1, B2, C), in the target root, and records
+   the result in the change's `verify.json`; never write that file yourself.
+   Before it runs, tell the person which commands it runs (the host's prompt
+   to allow it shows only `node verify.mjs`) and that it may take a while. It
+   stops at the first failure: give the printed `tail` to the implementer as
+   one task and run it again. A command that chains (`a; b`, a pipe) is
+   refused; ask for a design.md command, or tell the person when the
+   conventions' command needs a new target design.
+7. **Port crosscheck.** Number the baseline spec's requirements (`R1 <name>`)
+   and the archived extract change's screens (`S1 <name>`) by search, as in
+   step 3, and give them to `spec-relay-checker` subagents as a **port
+   check**: the paths of the baseline spec, the archived extract change's
+   screens.md and trace.md (and any later amendment's trace.md), this change's
+   design.md, the archived target design's conventions.md, the target module's
+   folder, the items and the verdict file
+   `openspec/spec-relay/work/port-<capability>/crosscheck-<nn>.md`. Never give
+   a checker the implementer's reports, tasks.md or the lessons. Split a large
+   capability into groups in one wave, then merge with `merge.mjs --into
+   openspec/changes/port-<capability>/crosscheck.md --parts
+   openspec/spec-relay/work/port-<capability> --clean`; the merge stamps the
+   file with the hash of the code it was checked on, and port-done fails once
+   the code changes after it. Never run an implementer and a checker of the
+   same port in one wave. For every `mismatch`
+   and `unclear` row, give the row to the implementer to fix, run `verify.mjs`
+   again, then have a new checker check that row again (a part file with a
+   higher number) and merge it, so the stamp is the fixed code's. When the row
+   shows that the source code and the baseline spec disagree, stop and ask the
+   person (step 5).
+8. **Done check.** Run `node "<kit>/scripts/gate.mjs" port-done --change
+   port-<capability>`. Besides the tasks and the baseline hash, it fails when
+   the last verify run failed or the target code changed after it, when a
+   baseline scenario has no test tagged `spec-relay: <capability> |
+   <requirement> | <scenario>`, when a `TODO(port)` is left in the target
+   root, and when a crosscheck row is missing or not `confirmed`. Give a
+   `TODO(port)` to the implementer to finish. Only when it cannot be finished
+   in this port, ask the person whether to leave it for later; on a yes, list
+   the file under `## Follow-up` in the proposal as `` - `<path>` - what is
+   left (agreed by <name>) ``. Never weaken a test, a tag or a crosscheck row
+   to pass.
+9. When it passes, report the results with every `next.person` sentence: whether
+   the source program was compared (B1, B2, C) or the equivalence is only
+   inferred from the code, the commands that ran and where they came from
+   (a design.md command that replaced the conventions' one is named apart),
+   and the `TODO(port)` left for later; the finish step collects them from
+   the code. Archive the port change after the person agrees: `node
+   "<kit>/scripts/openspec.mjs" archive port-<capability> --yes`.
+10. When this was the last capability of the plan, go on to step 6 (Finish).
 
 ## Amend: correct a baseline spec
 

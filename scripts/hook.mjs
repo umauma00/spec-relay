@@ -12,7 +12,9 @@
 //     openspec/ and the target root), under openspec/specs/, openspec/changes/archive/,
 //     openspec/schemas/, openspec/spec-relay/tools/ (the pinned OpenSpec), openspec/spec-relay/db/ (the
 //     exported database definitions), of openspec/config.yaml, and inside the kit itself;
-//   - subagent edits of review.md, questions.md, the plan and the lessons;
+//   - any agent edit of a change's verify.json (verify.mjs writes it);
+//   - subagent edits of review.md, questions.md, crosscheck.md, a port's proposal.md and design.md, the plan and the lessons;
+//   - shell commands that write a verify.json;
 //   - shell commands that mention the "Hook enforcement" setting.
 // Shell commands that write files some other way are not parsed; the wave guard
 // (gate.mjs guard) still finds those changes afterwards.
@@ -37,6 +39,18 @@ const FOLD = process.platform === 'win32' || process.platform === 'darwin';
 const REVIEWED = new Set(['spec-relay-survey', 'spec-relay-target', 'spec-relay-extract', 'spec-relay-amend', 'spec-relay-finish']);
 // A shell command that may write a file (PowerShell and POSIX forms).
 const WRITES = /(?:^|[\s;&|(])(?:set-content|add-content|out-file|clear-content|new-item|ni|copy-item|cp|copy|move-item|mv|move|rename-item|ren|remove-item|rm|del|erase|sed|perl|tee|truncate|dd)\b|-replace\b|\[io\.file\]|>/i;
+
+// Whether a shell command writes a port's verify.json, which only verify.mjs
+// writes: a write command or redirection aimed at it, a .NET file write, or a
+// one-line script (node, python) that names it. Reading it is fine.
+const RECEIPT = String.raw`[^\s;|&]*verify(?:\.json|\*)`;
+const RECEIPT_WRITES = [
+  new RegExp(String.raw`(?:^|[\s;&|(])(?:set-content|add-content|out-file|clear-content|new-item|ni|copy-item|cp|copy|move-item|mv|move|rename-item|ren|remove-item|rm|del|erase|tee|tee-object|truncate|dd)\b[^;|&]*${RECEIPT}`, 'i'),
+  new RegExp(String.raw`>>?\s*["']?${RECEIPT}`, 'i'),
+  new RegExp(String.raw`\[(?:system\.)?io\.file\]::\w+\([^)]*${RECEIPT}`, 'i'),
+  new RegExp(String.raw`(?:^|[\s;&|(])(?:node|python3?|py|perl|ruby|php)(?:\.exe)?\b[^;|&]*\s-(?:e|p|c|r)\b[^;|&]*${RECEIPT}`, 'i'),
+];
+export const writesReceipt = (command) => /verify(?:\.json|\*)/i.test(command) && RECEIPT_WRITES.some((pattern) => pattern.test(command));
 
 // The repository root above `start` that spec-relay set up, or null.
 export function findRoot(start) {
@@ -106,8 +120,9 @@ export function protectedPath(root, file, { subagent = false, pluginRoot = KIT_R
     ['openspec/spec-relay/tools', 'the pinned OpenSpec is installed by setup.mjs'],
     ['openspec/spec-relay/db', 'the database definitions are exported from the database by the person and are read-only like the source code'],
   ]) if (under(rel, dir)) return why;
-  if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions)\.md$/i.test(rel) || [PLAN, LESSONS].some((p) => fold(p) === fold(rel)))) {
-    return 'only the orchestrator writes review.md, questions.md, the plan and the lessons';
+  if (/^openspec\/changes\/[^/]+\/verify\.json$/i.test(rel)) return 'only verify.mjs writes verify.json, the record of the last verify run; run it again instead';
+  if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions|crosscheck)\.md$/i.test(rel) || /^openspec\/changes\/port-[^/]+\/(proposal|design)\.md$/i.test(rel) || [PLAN, LESSONS].some((p) => fold(p) === fold(rel)))) {
+    return 'only the orchestrator writes review.md, questions.md, crosscheck.md, a port\'s proposal.md and design.md, the plan and the lessons';
   }
   if (source === '.') {
     if (!under(rel, 'openspec') && !(target !== '.' && under(rel, target))) return 'with the source root ".", agents change only openspec/ and the target root';
@@ -166,7 +181,11 @@ function archiveDenial(root, { name, literal, flags }, subagent) {
     return `${name} must be archived with its specs and validation: drop --skip-specs and --no-validate`;
   }
   const port = schema === 'spec-relay-port';
-  const result = port ? checkPortDone(root, name) : checkReview(root, name);
+  let result;
+  // A gate that cannot run is no pass: deny the archive rather than let it through.
+  try { result = port ? checkPortDone(root, name) : checkReview(root, name); } catch (error) {
+    return `gate.mjs ${port ? 'port-done' : 'review'} could not check ${name} (${error.message}), so it cannot be archived; run the gate and fix what it reports`;
+  }
   if (result.ok) return null;
   const next = nextSteps(port ? 'port-done' : 'review', result, language(root));
   const shown = result.problems.slice(0, 5).join('; ') + (result.problems.length > 5 ? `; and ${result.problems.length - 5} more` : '');
@@ -207,6 +226,9 @@ export function decide(payload, { pluginRoot = process.env.PLUGIN_ROOT || proces
       if (!root || !enforced(root)) continue;
       if (WRITES.test(command) && (/hook\s+enforcement/i.test(command) || /openspec[\\/]config\.yaml/i.test(command))) {
         return 'openspec/config.yaml holds the person\'s settings, the Hook enforcement line included; ask the person to change it themselves';
+      }
+      if (writesReceipt(command)) {
+        return 'only verify.mjs writes verify.json, the record of the last verify run; run node "<kit>/scripts/verify.mjs" --change <port change> instead';
       }
       for (const call of archiveCalls(command)) {
         const why = archiveDenial(root, call, subagent);

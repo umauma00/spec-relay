@@ -10,5 +10,8 @@
 ## Out of scope
 - <!-- left for a later port -->
 
+## Follow-up
+<!-- empty at first; a TODO(port) the person agreed to leave: - `<path>` - what is left (agreed by <name>) -->
+
 ## Baseline
 - `<!-- capability -->` sha256:<!-- from gate.mjs baseline -->
