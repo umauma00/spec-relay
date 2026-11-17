@@ -91,7 +91,12 @@ artifacts:
         that runs the level in the target root (PowerShell on Windows); for A
         leave it empty to use conventions.md's Test command. Add a
         `Boundary check` row with a command only when conventions.md's does
-        not fit this port. The kit's
+        not fit this port. For B1 with recorded cases, the command is
+        `spec-relay-compare --cases tests/golden/<capability with - for />
+        --driver "<command that runs the driver>"` (docs/COMPARE.md): the
+        kit compares, case by case, the source program's recorded output with
+        the new code's. Every rule in the cases folder's `rules.json` loosens
+        the comparison: list each under Decisions with the reason. The kit's
         `verify.mjs` runs these commands and the boundary check and records the
         result; `gate.mjs port-done` fails without a passing run on the
         current code.
@@ -128,7 +133,11 @@ artifacts:
         scenario with a database effect checks the rows afterwards, on the test
         database of data.md.
         Add tasks for the other levels design.md names: B1 record source
-        outputs and compare, B2 replay, C screenshot comparison.
+        outputs and compare, B2 replay, C screenshot comparison. For B1 with
+        `spec-relay-compare`: one task writes the recorder for the source code
+        (or the conversion of its records) and records the cases, with inputs
+        for every scenario and for the edge cases of the Language mapping; one
+        writes the driver that runs the inputs through the new code.
       - When design.md lists carried files, one task copies them unchanged.
       - The last group runs the boundary check from conventions.md.
       - Order by dependency. A final group may only run integration checks and

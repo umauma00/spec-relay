@@ -33,6 +33,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkFinish } from './finish.mjs';
+import { COMPARE_COMMAND, isCompareCommand, parseOptions, words as commandWords } from './compare.mjs';
 import { checkSurveyCoverage, checkSourceMap, checkTrace, checkAmendSourceMap, checkCoverage, assignment } from './coverage.mjs';
 import { checkLedger } from './sites.mjs';
 
@@ -1030,12 +1031,30 @@ export function verifyPlan(root, change, capability = portCapability(root, chang
     if (!command) { problems.push(missing); return; }
     const chained = chainProblem(command);
     if (chained) problems.push(`${levelName(level)}: ${chained}`);
+    if (isCompareCommand(command)) {
+      const problem = compareCommandProblem(root, command);
+      if (problem) problems.push(`${levelName(level)}: ${problem}`);
+    }
     runs.push({ level, command, from });
   };
   add('A', design.A ?? commands.test, design.A ? 'design.md' : 'conventions.md', 'conventions.md of the archived target design names no Test command (## Commands)');
   add('boundary', design.boundary ?? commands.boundary, design.boundary ? 'design.md' : 'conventions.md', 'conventions.md of the archived target design names no Boundary check command (## Commands)');
   for (const level of levels ?? []) add(level, design[level], 'design.md', `verification.md chose ${level} for context ${context}, but design.md's Verification table gives it no command (| ${level} | covers | command |)`);
   return { runs, levels: levels ?? [], problems };
+}
+
+// What is wrong with a `spec-relay-compare ...` command, or null. Its cases
+// must be inside the target root, so that the target hash covers them and a
+// change to a recorded case voids the verify run like a change to the code.
+function compareCommandProblem(root, command) {
+  const argv = commandWords(command.trim().slice(COMPARE_COMMAND.length));
+  const opts = argv ? parseOptions(argv) : { problem: 'an unclosed quote' };
+  if (opts.problem) return `${opts.problem} in \`${command}\``;
+  if (opts.cwd) return `--cwd is not allowed in \`${command}\`; it runs in the target root`;
+  const target = path.resolve(root, relPath(cleanValue(configValue(root, 'Target root', ''))) || '.');
+  const rel = path.relative(target, path.resolve(target, opts.cases));
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return `the cases folder ${opts.cases} is not inside the target root; keep recorded cases under the target root's tests`;
+  return null;
 }
 
 // Folders that never hold the port's own code: skipped everywhere when the
@@ -1353,7 +1372,9 @@ function checkPortEvidence(root, change, dir, capability, problems) {
 
   // `compared`: the source program ran (B1, B2 or C); `inferred`: only tests from
   // the spec, which an AI wrote from reading the code.
-  return { levels: ['A', ...plan.levels], equivalence: plan.levels.length ? 'compared' : 'inferred', commands: plan.runs, followUp };
+  // How many recorded cases each compare level matched, for the person.
+  const cases = receipt ? plan.levels.map((level) => ({ level, count: receipt.runs.find((r) => r.level === level)?.cases?.count })).filter((c) => typeof c.count === 'number') : [];
+  return { levels: ['A', ...plan.levels], equivalence: plan.levels.length ? 'compared' : 'inferred', commands: plan.runs, followUp, cases };
 }
 
 // The same bytes; a text file may differ only in CRLF and LF line endings.
@@ -1432,6 +1453,7 @@ const NEXT = {
     portArchive: 'Every task is done, the tests and the boundary check pass on the code as it is, and the independent crosscheck confirmed every requirement and screen. Answer whether the port may be archived.',
     inferred: 'Only level A ran: tests from the spec, which an AI wrote from reading the source code. The source program was not run, so that the new code behaves the same is inferred from the code, not compared.',
     compared: (levels) => `The source program was compared as well (${levels}).`,
+    cases: (level, n) => `${level}: ${n} case${n === 1 ? '' : 's'} recorded from the source program, all matching`,
     commands: (list) => `The verify run ran: ${list}.`,
     overridden: (levels) => `For ${levels}, this port's design.md replaced the command of the reviewed conventions.md; check that it is the right one.`,
     followUp: (files) => `TODO(port) left for later with your agreement (proposal.md, Follow-up): ${files}.`,
@@ -1451,6 +1473,7 @@ const NEXT = {
     portArchive: 'すべてのタスクが完了し、今のコードでテストと境界チェックが通り、別の AI による照合ですべての要件と画面が確認できました。実装を archive してよいかを答えてください。',
     inferred: '比べ方は A（仕様のシナリオから作ったテスト）だけです。仕様は AI が元コードを読んで書いたもので、元のプログラムは動かしていません。同じ動きであることは、比べた結果ではなくコードを読んだうえでの推定です。',
     compared: (levels) => `元のプログラムとの比較（${levels}）も通りました。`,
+    cases: (level, n) => `${level}: 元のプログラムから記録した ${n} 件がすべて一致`,
     commands: (list) => `実行したコマンド: ${list}。`,
     overridden: (levels) => `${levels} は、レビュー済みの conventions.md ではなく、この port の design.md のコマンドで実行しました。正しいコマンドかを確かめてください。`,
     followUp: (files) => `了承を得て後の作業に回した TODO(port)（proposal.md の Follow-up）: ${files}。`,
@@ -1496,7 +1519,11 @@ export function nextSteps(command, result, lang = 'en') {
   if (result.ok && command === 'port-done') {
     person.push(words.portArchive);
     const levels = (result.levels ?? []).filter((level) => level !== 'A');
-    person.push(result.equivalence === 'compared' ? words.compared(levels.join(', ')) : words.inferred);
+    const counted = (level) => {
+      const n = (result.cases ?? []).find((c) => c.level === level)?.count;
+      return n === undefined ? level : words.cases(level, n);
+    };
+    person.push(result.equivalence === 'compared' ? words.compared(levels.map(counted).join(', ')) : words.inferred);
     const commands = result.commands ?? [];
     const label = (level) => (level === 'boundary' ? (lang === 'ja' ? '境界チェック' : 'boundary check') : level);
     if (commands.length) person.push(words.commands(commands.map((c) => `${label(c.level)} \`${c.command}\` (${c.from})`).join(', ')));

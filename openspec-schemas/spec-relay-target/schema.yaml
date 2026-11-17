@@ -133,11 +133,18 @@ artifacts:
       program. Ask the person; offer the lightest level that is enough.
       - **A - scenario tests** (every context, required): each spec scenario
         becomes a test in the target language.
-      - **B1 - logic comparison**: call the source code's logic directly,
-        without screens or sign-in (C#: xUnit or NUnit; PHP: PHPUnit; or a
-        small runner script), record inputs and outputs as data files, and run
-        the same inputs through the new code. For contexts with calculations
-        and business rules. Needs the source code to build and run locally.
+      - **B1 - logic comparison**: record what the source program does as
+        cases (input and output) and run the same inputs through the new code,
+        with the kit's compare (docs/COMPARE.md). For contexts with
+        calculations and business rules. The cases come from either a small
+        recorder that calls the source code's logic directly, without screens
+        or sign-in (C#: a console project or test that references the old
+        assemblies; PHP: a CLI script that includes the old files), which needs
+        the source code to build and run locally; or records of the program's
+        real runs brought in when it cannot run here (batch input and output
+        files, report data, rows the program wrote), with personal data masked.
+        Suggest B1 whenever either is possible: it is the level that compares
+        with the source program instead of with what an AI read.
       - **B2 - screen operation replay**: record browser operations with
         Playwright and replay them against the old and the new system. Only for
         important flows; needs both systems running.
@@ -157,12 +164,16 @@ artifacts:
         each level cell as `yes` or `no` only: `gate.mjs review` stops on
         anything else, so an open choice is a question, not a cell.
       - **Running the source program**: what is needed to run it for B1, B2 or
-        C, or "not runnable" (then only A applies).
+        C, or "not runnable". When it is not runnable, say which records of
+        its real runs exist (B1 can still use them) or "none" (then only A
+        applies).
       - **Sign-in**: for B2 and C, the test account comes from environment
         variables the person sets (name the variables). Never write a
         password, token or connection string into any file.
       - **Recorded data**: where recorded inputs, outputs and screenshots live
-        (under the target root's tests), and how to re-record them.
+        (under the target root's tests; B1 cases in
+        `tests/golden/<capability with - for />/`), how to re-record them, and
+        how personal data in records is masked before they are committed.
     requires:
       - architecture
       - ui
