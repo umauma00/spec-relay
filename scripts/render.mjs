@@ -20,13 +20,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkboxes, questionIds, tableRows, changeSchema, archivedChange } from './gate.mjs';
+import { ledgerSummary } from './sites.mjs';
+import { leftoverRows } from './finish.mjs';
 
 // ---------------------------------------------------------------- labels
 
 const LABELS = {
   ja: {
-    kinds: { 'spec-relay-extract': '抽出レビュー', 'spec-relay-survey': '調査レビュー', 'spec-relay-target': '移行先設計レビュー', 'spec-relay-amend': '修正レビュー', 'spec-relay-port': '移植' },
-    groups: { requirements: '要件', screens: '画面', questions: '質問', coverage: '網羅性', contexts: 'コンテキスト', map: 'マップ', architecture: 'アーキテクチャ', conventions: '規約', verification: '検証', impact: '影響' },
+    kinds: { 'spec-relay-extract': '抽出レビュー', 'spec-relay-survey': '調査レビュー', 'spec-relay-target': '移行先設計レビュー', 'spec-relay-amend': '修正レビュー', 'spec-relay-port': '移植', 'spec-relay-finish': '仕上げレビュー' },
+    groups: { requirements: '要件', screens: '画面', questions: '質問', coverage: '網羅性', contexts: 'コンテキスト', map: 'マップ', architecture: 'アーキテクチャ', conventions: '規約', verification: '検証', impact: '影響', databases: 'データベース', data: 'データ', checks: '全体の確認', leftovers: '残りもの', handover: '引き渡し' },
     qkinds: { 'suspected bugs': 'バグの疑い', ambiguities: 'あいまいな点', assumptions: '仮定', 'not migrated': '移行しない' },
     steps: { GIVEN: '前提', WHEN: '操作', THEN: '結果', AND: 'かつ', BUT: 'ただし' },
     deltas: { added: '＋ 追加', removed: '－ 削除', modified: '＊ 変更', renamed: '＊ 名前変更' },
@@ -41,6 +43,9 @@ const LABELS = {
     scenario: 'シナリオ', evidence: '根拠（元コード）', source: '元コード', tests: '既存のテスト', crosscheck: '照合（AI の再確認）', lines: '行',
     noTrace: 'trace.md に記載がありません', unreadable: 'ファイルを読めませんでした', truncated: '長いため先頭のみ表示', encoding: (e) => `文字コード ${e} を変換して表示`, dedent: (n) => `字下げを ${n} 文字詰めて表示`,
     decision: '判断', noDecision: (id) => `未記入 — review.md の ${id} の行に decision: を書きます`,
+    leftoverKind: '種類', leftoverWhere: '場所', leftoverClass: '分類（案）', leftoverReason: '理由', noLeftover: '同じ id の行が leftovers.md にありません',
+    leftoverKinds: { todo: '実装の積み残し TODO(port)', 'follow-up': '後回しの作業', risk: 'リスク', verification: '実行できなかった比較', flow: 'テストのないコンテキスト間の流れ' },
+    leftoverClasses: { 'before-release': '切替の前に直す', 'after-release': '切替の後の課題', 'wont-fix': '直さない' },
     noReviewRow: 'review.md に項目がありません', noReq: '同じ名前の要件が仕様にありません', noScreen: '同じ名前の画面が screens.md にありません', noContext: '同じ id のコンテキストが context-map.md にありません', noQuestion: 'questions.md に本文がありません',
     tickedNoDecision: 'チェック済みですが、判断が未記入です', decisionNoTick: '判断は書かれていますが、チェックされていません',
     was: '旧', now: '新', noBaseline: '現在の仕様（openspec/specs）に同じ名前の要件がありません',
@@ -49,9 +54,14 @@ const LABELS = {
     keysOn: '1 文字キーで移動する', keysList: 'キーの一覧', keys: [['j', 'k', '次／前の項目'], ['n', 'p', '次／前の未確認'], ['o', '', '元コードを開閉'], ['u', '', '未確認のみ表示']],
     generated: '生成', archived: 'archive 済み',
     note: 'この画面は表示用です。正は Markdown のファイルで、判断は review.md に記録します。ファイルを直したら作り直してください。',
+    ledger: '抜けの確認', ledgerTitle: '抜けの確認（箇所台帳）',
+    ledgerFacts: (s) => `箇所 ${s.sites}（${s.files} ファイル）・要件や画面あり ${s.counts.covered}・動作なし ${s.counts['no-behavior']}・別の capability ${s.counts.other}・質問 ${s.counts.question}`,
+    ledgerOpen: (n) => `判定がない、または gap の箇所が ${n} 件あります。gate はまだ通りません。`,
+    ledgerQuestions: '質問に回した箇所', ledgerUnmarked: '「動作なし」としたが、目印（DB 書き込み・例外など）がある箇所。念のため目を通してください',
+    ledgerAll: '台帳のすべての行',
   },
   en: {
-    kinds: { 'spec-relay-extract': 'Extract review', 'spec-relay-survey': 'Survey review', 'spec-relay-target': 'Target design review', 'spec-relay-amend': 'Amend review', 'spec-relay-port': 'Port' },
+    kinds: { 'spec-relay-extract': 'Extract review', 'spec-relay-survey': 'Survey review', 'spec-relay-target': 'Target design review', 'spec-relay-amend': 'Amend review', 'spec-relay-port': 'Port', 'spec-relay-finish': 'Finish review' },
     groups: {}, qkinds: {}, steps: {},
     deltas: { added: '+ Added', removed: '- Removed', modified: '* Modified', renamed: '* Renamed' },
     document: 'Document', requirements: 'Requirements', screens: 'Screens', questions: 'Questions', contexts: 'Contexts', other: 'Other',
@@ -65,6 +75,9 @@ const LABELS = {
     scenario: 'Scenario', evidence: 'Evidence (source code)', source: 'Source', tests: 'Existing tests', crosscheck: 'Crosscheck (second look by the AI)', lines: '',
     noTrace: 'No entry in trace.md', unreadable: 'Could not read the file', truncated: 'long; only the beginning is shown', encoding: (e) => `decoded from ${e}`, dedent: (n) => `indentation reduced by ${n} characters`,
     decision: 'Decision', noDecision: (id) => `blank — write decision: on the ${id} line of review.md`,
+    leftoverKind: 'Kind', leftoverWhere: 'Where', leftoverClass: 'Class (proposed)', leftoverReason: 'Reason', noLeftover: 'No row of this id in leftovers.md',
+    leftoverKinds: { todo: 'TODO(port) left in the code', 'follow-up': 'Work moved to after the migration', risk: 'Risk', verification: 'Comparison that did not run', flow: 'Cross-context flow without a test' },
+    leftoverClasses: { 'before-release': 'Fix before the switch', 'after-release': 'Known issue after the switch', 'wont-fix': 'Accepted as it is' },
     noReviewRow: 'No item in review.md', noReq: 'No requirement of this name in the specs', noScreen: 'No screen of this name in screens.md', noContext: 'No context of this id in context-map.md', noQuestion: 'No text in questions.md',
     tickedNoDecision: 'Ticked, but the decision is blank', decisionNoTick: 'A decision is written, but the item is not ticked',
     was: 'Old', now: 'New', noBaseline: 'No requirement of this name in the current specs (openspec/specs)',
@@ -73,6 +86,11 @@ const LABELS = {
     keysOn: 'Single-key shortcuts', keysList: 'Key list', keys: [['j', 'k', 'next / previous item'], ['n', 'p', 'next / previous open item'], ['o', '', 'fold or unfold the source'], ['u', '', 'open items only']],
     generated: 'Generated', archived: 'archived',
     note: 'This page is a view. The Markdown files are the source of truth and decisions go into review.md. Render again after changing them.',
+    ledger: 'Omission check', ledgerTitle: 'Omission check (site ledger)',
+    ledgerFacts: (s) => `${s.sites} sites in ${s.files} files: ${s.counts.covered} covered, ${s.counts['no-behavior']} no behavior, ${s.counts.other} other capability, ${s.counts.question} questions`,
+    ledgerOpen: (n) => `${n} sites have no verdict or are gaps; the gate does not pass yet.`,
+    ledgerQuestions: 'Sites moved to questions', ledgerUnmarked: 'Sites judged "no behavior" that hold markers (a database write, an error...). Glance over them',
+    ledgerAll: 'Every row of the ledger',
   },
 };
 
@@ -625,6 +643,13 @@ ${q?.text || kind ? `<p class="q-text">${kind}${q?.text && q.text !== it.title ?
 </div>` };
 }
 
+function leftoverBody(it, c) {
+  const { L } = c;
+  const row = it.data;
+  const facts = [[L.leftoverKind, L.leftoverKinds[row.kind] ?? row.kind], [L.leftoverWhere, row.where], [L.leftoverClass, L.leftoverClasses[row.klass] ?? row.klass], [L.leftoverReason, row.reason]];
+  return { tag: '', notes: [], html: `<div class="q-body"><p class="q-text">${inline(row.what)}</p><dl class="facts">${facts.filter(([, v]) => v).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${inline(v)}</dd>`).join('')}</dl></div>` };
+}
+
 function reviewView({ root, dir, schema, L, outDir }) {
   const groups = parseReview(readText(path.join(dir, 'review.md')) ?? '');
   const review = stripComments(readText(path.join(dir, 'review.md')) ?? '');
@@ -651,6 +676,8 @@ function reviewView({ root, dir, schema, L, outDir }) {
   const contexts = blocks(mapText, 'Context');
   const questionsText = readText(path.join(dir, 'questions.md'));
   const questions = parseQuestions(questionsText);
+  const leftoversText = readText(path.join(dir, 'leftovers.md'));
+  const leftovers = new Map(leftoverRows(leftoversText ?? '').map((row) => [row.id, row]));
   const c = { root, L, outDir, amend, baseline, cross, trace: parseTrace(readText(path.join(dir, 'trace.md'))) };
 
   // Tie each review row to the thing it names.
@@ -667,6 +694,9 @@ function reviewView({ root, dir, schema, L, outDir }) {
     } else if (item.letter === 'K' && mapText !== null) {
       item.data = take(contexts, (k) => new RegExp(`^k\\d+\\s*[.:)-]?\\s*${k.name.replace(/[^\w-]/g, '\\$&')}(?![\\w-])`, 'i').test(item.plain));
       if (item.data) item.kind = 'context'; else item.notes.push(L.noContext);
+    } else if (item.letter === 'L' && leftoversText !== null) {
+      item.data = leftovers.get(item.id);
+      if (item.data) item.kind = 'leftover'; else item.notes.push(L.noLeftover);
     } else if (item.letter === 'Q') {
       item.kind = 'q';
       item.data = questions.get(item.id);
@@ -700,6 +730,7 @@ function reviewView({ root, dir, schema, L, outDir }) {
       ids.add(anchor);
       item.anchor = anchor;
       const body = item.kind === 'req' ? requirementBody(item, c) : item.kind === 'screen' ? screenBody(item, c) : item.kind === 'q' ? questionBody(item, c)
+        : item.kind === 'leftover' ? leftoverBody(item, c)
         : item.kind === 'context' ? { tag: '', notes: [], html: `<div class="q-body"><div class="doc">${markdown(item.data.body.join('\n'), { headingOffset: 2 })}</div></div>` } : { tag: '', notes: [], html: '' };
       const notes = [...item.notes, ...body.notes];
       item.name = plainText(item.title) || plainText(item.data?.text ?? '') || item.label;
@@ -710,10 +741,11 @@ ${cautionsHtml(notes)}${body.html}
     }
   });
 
+  const ledger = schema === 'spec-relay-extract' ? ledgerSummary(root, dir) : null;
   const named = reviewer && !/^<.*>$/.test(reviewer);
   const brief = `<header class="brief">
 ${purpose.trim() ? `<div class="purpose"><span class="label">${escapeHtml(L.purpose)}</span>${markdown(purpose)}</div>` : ''}
-<dl class="facts"><dt>${escapeHtml(L.reviewer)}</dt><dd><span class="sign${named ? '' : ' is-blank'}">${named ? inline(reviewer) : escapeHtml(L.notNamed)}</span></dd><dt>${escapeHtml(L.scope)}</dt><dd>${shown.map((g) => `${escapeHtml(g.title)} ${g.items.length}`).join('・')}</dd></dl>
+<dl class="facts"><dt>${escapeHtml(L.reviewer)}</dt><dd><span class="sign${named ? '' : ' is-blank'}">${named ? inline(reviewer) : escapeHtml(L.notNamed)}</span></dd><dt>${escapeHtml(L.scope)}</dt><dd>${shown.map((g) => `${escapeHtml(g.title)} ${g.items.length}`).join('・')}</dd>${ledger ? `<dt>${escapeHtml(L.ledger)}</dt><dd><a href="#doc-coverage-md">${escapeHtml(L.ledgerFacts(ledger))}</a></dd>` : ''}</dl>
 <ol class="howto">${L.howto.map((step) => `<li>${step}</li>`).join('')}</ol>
 </header>`;
 
@@ -725,9 +757,25 @@ ${purpose.trim() ? `<div class="purpose"><span class="label">${escapeHtml(L.purp
     if (rel === 'review.md' || (rel === 'screens.md' && screens.length)) continue;
     let text = readText(file) ?? '';
     if (rel === 'context-map.md' && contexts.length) text = withoutSection(text, /^##\s+Contexts\s*$/i);
+    if (rel === 'coverage.md' && ledger) {
+      docs.push({ id: 'doc-coverage-md', title: L.ledgerTitle, html: ledgerHtml(ledger, text, L) });
+      continue;
+    }
     docs.push({ id: `doc-${rel.replace(/[^\w-]/g, '-')}`, title: rel.replace(/\.md$/, ''), html: `<div class="doc">${markdown(text, { headingOffset: 2 })}</div>` });
   }
   return { groups: shown, docs, brief };
+}
+
+// The omission check as the reviewer needs it: the counts, what is still open,
+// the sites that became questions, and the "no behavior" sites that hold
+// markers. Every row stays one click away.
+function ledgerHtml(sum, text, L) {
+  const list = (rows) => `<ul>${rows.map((r) => `<li><code>${escapeHtml(r.site)}</code>${r.question ? ` → ${escapeHtml(r.question)}` : ''}${r.markers ? ` <span class="mono">[${escapeHtml(r.markers)}]</span>` : ''}${r.evidence ? ` — ${inline(r.evidence)}` : ''}</li>`).join('')}</ul>`;
+  return `<div class="doc"><p>${escapeHtml(L.ledgerFacts(sum))}</p>
+${sum.open.length ? `<p class="caution">${escapeHtml(L.ledgerOpen(sum.open.length))}</p>` : ''}
+${sum.questions.length ? `<h3>${escapeHtml(L.ledgerQuestions)}</h3>${list(sum.questions)}` : ''}
+${sum.unmarked.length ? `<h3>${escapeHtml(L.ledgerUnmarked)}</h3>${list(sum.unmarked)}` : ''}
+<details><summary>${escapeHtml(L.ledgerAll)}</summary>${markdown(text, { headingOffset: 2 })}</details></div>`;
 }
 
 function withoutSection(text, heading) {

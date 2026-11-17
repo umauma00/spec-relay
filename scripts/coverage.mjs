@@ -13,7 +13,7 @@
 // `coverage`, the check over the whole plan.
 import fs from 'node:fs';
 import path from 'node:path';
-import { readIf, tableRows, plain, norm, sourceFiles, archivedChange, baseName, PLAN } from './gate.mjs';
+import { readIf, tableRows, plain, norm, sourceFiles, archivedChange, baseName, PLAN, DATABASE_DIR, checkDatabaseDrift } from './gate.mjs';
 import { parseRefs } from './render.mjs';
 
 const MAX_LISTED = 20;
@@ -192,10 +192,10 @@ export function keptFiles(root, inventory) {
   return files.filter((file) => contextOf(inventory, file) !== 'excluded');
 }
 
-function unknownListings(map, files, problems, where) {
+function unknownListings(map, files, problems, where, skip = () => false) {
   for (const [capability, paths] of map) {
     for (const listed of paths) {
-      if (!files.some((file) => covers(listed, file))) problems.push(`${typeof where === 'string' ? where : where.get(capability)} lists ${listed} under ${capability}, but no source file is there`);
+      if (!skip(listed) && !files.some((file) => covers(listed, file))) problems.push(`${typeof where === 'string' ? where : where.get(capability)} lists ${listed} under ${capability}, but no source file is there`);
     }
   }
 }
@@ -218,6 +218,17 @@ export function checkSurveyCoverage(root, dir, inventory, problems) {
 const SOURCE_FILES = /^##\s+(?:\d+[.)]?\s*)?(?:source\s+files\b|ソースファイル|元ファイル|対象ファイル|ファイル)/i;
 const OUT_OF_SCOPE = /^(no\b|none\b|out\b|excluded\b|範囲外|対象外|なし)/i;
 
+// While the database definitions differ from the ones the survey recorded, the
+// drift problem says what to do (survey-v2); a list of each new or moved
+// definition file would only repeat it.
+const inDatabaseDir = (file) => file.toLowerCase().startsWith(`${DATABASE_DIR.toLowerCase()}/`);
+function databaseDrifted(root, problems = []) {
+  const before = problems.length;
+  checkDatabaseDrift(root, problems);
+  return problems.length > before;
+}
+const unlessDrifted = (drifted, files) => (drifted ? files.filter((file) => !inDatabaseDir(file)) : files);
+
 // The paths in the first column of the source map's "## Source files" table
 // (every table when there is no such heading), so a dependency table is never
 // read as files. A row whose "In scope" cell says it is out of scope does not count.
@@ -225,7 +236,14 @@ export function sourceMapPaths(text, root = null) {
   const all = stripComments(text ?? '').split(/\r?\n/);
   const start = all.findIndex((line) => SOURCE_FILES.test(line.trim()));
   let section = all;
-  if (start >= 0) {
+  if (start < 0) {
+    // No Source files heading: every table but the Database one, which names objects, not files.
+    const db = all.findIndex((line) => /^##\s+database\s*$/i.test(line.trim()));
+    if (db >= 0) {
+      const end = all.findIndex((line, i) => i > db && /^#{1,2}\s/.test(line.trim()));
+      section = [...all.slice(0, db), ...(end < 0 ? [] : all.slice(end))];
+    }
+  } else {
     const end = all.findIndex((line, i) => i > start && /^#{1,2}\s/.test(line.trim()));
     section = all.slice(start + 1, end < 0 ? all.length : end);
   }
@@ -238,7 +256,9 @@ export function sourceMapPaths(text, root = null) {
       if (root && whole && fs.existsSync(path.join(root, whole))) return whole;
       if (!/[`[*_]/.test(p) && !/\s\(|\s[-–—]\s/.test(p)) return whole;
       return itemPath(p) || whole;
-    }).filter((p) => p && !/^path$/i.test(p));
+    }).filter((p) => p && !/^path$/i.test(p))
+    // A folder written without its trailing / is still the folder.
+    .map((p) => { try { return root && !p.endsWith('/') && fs.statSync(path.join(root, p)).isDirectory() ? `${p}/` : p; } catch { return p; } });
 }
 
 // Extract review: the source map exists, every path in it exists, and it holds
@@ -261,7 +281,7 @@ export function checkSourceMap(root, dir, capability, problems) {
     problems.push(`${PLAN} assigns no source file to ${capability}; list its folders or files in indented items under it`);
     return;
   }
-  const missing = owned.filter((file) => !listed.some((p) => covers(p, file)));
+  const missing = unlessDrifted(databaseDrifted(root), owned.filter((file) => !listed.some((p) => covers(p, file))));
   capped(problems, missing, (file) => `source file assigned to ${capability} in ${from.get(capability)} is not in source-map.md: ${file} (add it, or move it to the capability it belongs to in ${PLAN})`);
 }
 
@@ -354,13 +374,14 @@ export function checkCoverage(root) {
   const all = sourceFiles(root);
   if (all === null) return { ok: false, problems: ['the source root in openspec/config.yaml is not a folder inside the repository'] };
   const files = keptFiles(root, inventory);
+  const drifted = databaseDrifted(root, problems);
   const { map, from } = assignment(root, problems);
   const owners = ownerTable(map, files);
-  const unowned = files.filter((file) => owners.get(file).length === 0);
+  const unowned = unlessDrifted(drifted, files.filter((file) => owners.get(file).length === 0));
   capped(problems, unowned, (file) => `source file is in no capability of ${PLAN}: ${file} (list it under its capability, or have the person exclude it)`);
-  const uninventoried = all.filter((file) => contextOf(inventory, file) === null);
+  const uninventoried = unlessDrifted(drifted, all.filter((file) => contextOf(inventory, file) === null));
   capped(problems, uninventoried, (file) => `source file is not in the archived inventory (added after the survey?): ${file}`);
-  unknownListings(map, all, problems, from);
+  unknownListings(map, all, problems, from, (listed) => drifted && inDatabaseDir(listed));
   const pending = [];
   let analyzed = 0;
   for (const capability of map.keys()) {
@@ -370,7 +391,7 @@ export function checkCoverage(root) {
     if (!change) { pending.push(capability); continue; }
     analyzed += 1;
     const listed = capabilitySourceMap(root, capability, change);
-    const missing = owned.filter((file) => !listed.some((p) => covers(p, file)));
+    const missing = unlessDrifted(drifted, owned.filter((file) => !listed.some((p) => covers(p, file))));
     capped(problems, missing, (file) => `source file assigned to ${capability} is not in the source map of ${path.basename(change)} or of an amendment: ${file}`);
   }
   return { ok: problems.length === 0, problems, files: files.length, capabilities: { analyzed, pending } };

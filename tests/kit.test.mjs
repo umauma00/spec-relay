@@ -73,4 +73,12 @@ test('the templates have the headings and columns the gate reads', async () => {
   assert.notEqual(section(design, /^carried files\b/i), null, 'port design template has ## Carried files');
   assert.ok(column(header(section(design, /^screens$/i) ?? ''), /^policy/) >= 0, 'port design template has a Policy column');
   assert.match(read('openspec-schemas/spec-relay-target/templates/review.md'), /^## 4\. Screens\n- \[ \] U1 /m);
+  const database = read('openspec-schemas/spec-relay-survey/templates/database.md');
+  for (const heading of [/^databases$/i, /^logic in the database$/i, /^missing definitions$/i, /^snapshot$/i]) assert.notEqual(section(database, heading), null, `database.md template has ${heading}`);
+  assert.ok(column(header(section(database, /^databases$/i) ?? ''), /^definitions?$/) >= 0, 'database.md template has a Definitions column');
+  const data = read('openspec-schemas/spec-relay-target/templates/data.md');
+  for (const heading of [/^schema policy$/i, /^database logic$/i, /^exceptions$/i, /^data access mapping$/i, /^schema changes$/i, /^test database$/i]) assert.notEqual(section(data, heading), null, `data.md template has ${heading}`);
+  assert.ok(column(header(section(data, /^database logic$/i) ?? ''), /^handling$/) >= 0, 'data.md template has a Handling column');
+  assert.match(read('openspec-schemas/spec-relay-target/templates/review.md'), /^## 5\. Data\n- \[ \] D0 /m);
+  assert.match(read('openspec-schemas/spec-relay-survey/templates/review.md'), /^## 4\. Databases\n- \[ \] D1 [\s\S]*- \[ \] D90 /m);
 });

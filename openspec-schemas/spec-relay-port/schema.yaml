@@ -79,6 +79,12 @@ artifacts:
         goes elsewhere than ui.md says. A file that needs any edit is ported,
         not carried: leave it out here and say why under Decisions. Keep the
         heading and write "None" under it when the port carries nothing.
+      - **Data access**: For each table and database object in the extract
+        change's source-map.md, how the module reaches it, following the
+        target design's data.md: `keep` objects are called or relied on as
+        they are, `move` objects are re-implemented here (name the file). Write
+        "None" when the capability uses no database. Never change the schema or
+        a database object; if the port would need it, stop and ask the person.
       - **Verification**: A table `| Level | Covers | Command |`, one row for
         A and one for each of B1, B2 and C that verification.md chose for this
         context, with what it covers here. Command is the one-line command
@@ -118,7 +124,9 @@ artifacts:
         test carries the tag
         `spec-relay: <capability> | <requirement name> | <scenario name>` in a
         comment, or as its whole test name (the string starts with
-        `spec-relay:`), with the names exactly as in the baseline spec; `gate.mjs port-done` fails for a scenario without a tagged test.
+        `spec-relay:`), with the names exactly as in the baseline spec; `gate.mjs port-done` fails for a scenario without a tagged test. A
+        scenario with a database effect checks the rows afterwards, on the test
+        database of data.md.
         Add tasks for the other levels design.md names: B1 record source
         outputs and compare, B2 replay, C screenshot comparison.
       - When design.md lists carried files, one task copies them unchanged.
@@ -187,9 +195,14 @@ apply:
       and run the boundary check.
     - Copy carried files byte for byte and never edit them. Build each screen
       as design.md's Screens section says for its policy; do not restyle it.
+    - Never change the database schema or a database object, and never run
+      anything against a database other than the test database of the target
+      design's data.md.
     - Leave a `TODO(port)` comment for anything unresolved and list it in your
-      report. The port is not done while one is left, unless the person agrees
-      to leave it as follow-up work.
+      report. A stand-in for a capability that is not ported yet (a call into
+      the old system, a temporary fake) gets one too, so the finish step finds
+      it. The port is not done while one is left, unless the person agrees to
+      leave it as follow-up work (a stand-in usually is).
     - When every task is done: run the kit's `verify.mjs`, then the crosscheck
       artifact, fix what it finds, run `verify.mjs` again, then
       `gate.mjs port-done`.
