@@ -149,7 +149,7 @@ export function checkKit(ctx) {
   const needed = [
     ...ctx.schemas.map((s) => `openspec-schemas/${s}/schema.yaml`),
     'templates/openspec-config.yaml',
-    ...['setup', 'gate', 'status', 'merge', 'render', 'openspec', 'hook', 'finish', 'verify'].map((s) => `scripts/${s}.mjs`),
+    ...['setup', 'gate', 'status', 'merge', 'render', 'openspec', 'hook', 'finish', 'metrics', 'verify'].map((s) => `scripts/${s}.mjs`),
     'com.github.copilot/hooks/hooks.json',
     ...['orchestrator', 'analyst', 'checker', 'implementer'].map((a) => `com.github.copilot/agents/spec-relay-${a}.agent.md`),
     'skills/spec-relay/SKILL.md', 'skills/spec-relay-view/SKILL.md',

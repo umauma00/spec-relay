@@ -2,7 +2,7 @@
 
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) を使って、コードベースを別のプログラミング言語へ移すための GitHub Copilot 用キットです。元のコードから仕様を起こし、人間がその仕様をレビューし、レビュー済みの仕様をもとに新しい言語で実装します。
 
-> **状態：0.13.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
+> **状態：0.14.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
 
 ## 流れ
 
@@ -137,6 +137,7 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 - **並列で進めても、レビューは1本。** 解析・照合・実装はサブエージェントが同時に進め、人のレビューは1つずつです。先に解析しておくのは `--ahead` 件までにして、レビュー待ちを溜めません。サブエージェントは割り当てられたファイルだけを書き、オーケストレーターには短い報告だけを返すので、長い移行でもオーケストレーターの文脈が埋まりにくくなっています（[詳しく](docs/WORKFLOW.md#並列での進め方)）。
 - **工程を飛ばさない。** 次の工程に進む前の確認は `gate.mjs` がします（解析の承認には調査の archive と、調査の一覧にある capability が必要。実装の開始には調査・移行先の設計・確定した仕様が必要）。「飛ばして」と頼まれても、AI は確認を外さず、その工程が守っているものと最短の進め方を説明します。gate を実行するのはオーケストレーターなので、フックが無効の間は AI が指示を守ることが前提です。フックを有効にすると、gate を通らない archive と、元コード・確定仕様・設定への書き込みを Copilot が実行前に拒否します（[下の「止まったとき」](#止まったとき)）。
 - **進捗は Copilot の TODO に出す。** `scripts/status.mjs` が `openspec/` のファイルから進捗を計算し、オーケストレーターが「全体1行 + いまの機能の工程 + 並行して動いている機能」を TODO リストに出します。報告の先頭にも同じ一覧を出します。TODO のチェックは承認になりません（[詳しく](docs/WORKFLOW.md#進捗の表示copilot-の-todo)）。
+- **かかった時間を残す。** 工程ごとに、進行中の時間とレビューなどで人を待っていた時間を分け、サブエージェントの作業時間も記録します。トークン数は Copilot がフックに渡さないので記録せず、`/usage` を貼ったときだけメモに残します（[下の「かかった時間の記録」](#かかった時間の記録)）。
 
 ## 止まったとき
 
@@ -180,13 +181,13 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 - フックはプラグインを入れたすべてのリポジトリで、シェルとファイル編集の前に1回ずつ起動します（node の起動1回分。spec-relay のリポジトリでなければすぐ終わります）。ホストがプラグインの場所（`PLUGIN_ROOT`）を渡さないときは何もしません。
 - チャットでの承認は AI が review.md に書くので、「AI が勝手にチェックを付ける」ことはフックでは区別できません。承認は今も、チャットでのあなたの言葉と gate の合格の両方です。
 
-## 0.12.0 から更新するとき
+## 0.13.0 から更新するとき
 
-0.12.0 より前の版から上げるときは、その版より後の節もすべて読んでください。スキーマの削除と導入スクリプトの再実行は1回で済みます。
+0.13.0 より前の版から上げるときは、その版より後の節もすべて読んでください。スキーマの削除と導入スクリプトの再実行は1回で済みます。
 
-0.13.0 で、実装の完了の確かめ方が強くなりました（`verify.mjs` によるテストの実行記録、シナリオごとのテストの印、`TODO(port)`、照合担当による実装の照合）。port と移行先の設計のスキーマが変わったので、`openspec/schemas/spec-relay-port/` と `openspec/schemas/spec-relay-target/` を削除してから導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。
+0.14.0 で、実装の完了の確かめ方が強くなりました（`verify.mjs` によるテストの実行記録、シナリオごとのテストの印、`TODO(port)`、照合担当による実装の照合）。port と移行先の設計のスキーマが変わったので、`openspec/schemas/spec-relay-port/` と `openspec/schemas/spec-relay-target/` を削除してから導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。
 
-- archive 済みの移行先の設計はそのままです。conventions.md の Test と Boundary check のコマンドは、0.13.0 から移行先のフォルダーで実行します。リポジトリの一番上で動く書き方になっていたら、port の design.md の Verification 表で、A と `Boundary check` の行にコマンドを書けば、そちらを使います。
+- archive 済みの移行先の設計はそのままです。conventions.md の Test と Boundary check のコマンドは、0.14.0 から移行先のフォルダーで実行します。リポジトリの一番上で動く書き方になっていたら、port の design.md の Verification 表で、A と `Boundary check` の行にコマンドを書けば、そちらを使います。
 - archive 済みの verification.md の比べ方の欄は `yes` か `no` で読みます（`はい`・`✓`・`なし`・`-` なども可）。それ以外の言葉があると port-done が止まるので、移行先の設計をやり直す（`target-design-v2`）か、オーケストレーターに相談してください。
 - archive 済みの conventions.md の Test や Boundary check が `npm run build; npm test` のように複数のコマンドをつないでいると、前の失敗が隠れるので port-done が止まります。port の design.md の Verification 表に1つのコマンド（スクリプトやビルドツールのタスク）を書けば、そちらを使います。
 - 進行中の port は、タスクがすべて完了していても `gate.mjs port-done` を通らなくなります。オーケストレーターがテストに印を付け、`verify.mjs` と照合を行ってから、改めて archive してよいかを聞きます。
@@ -280,7 +281,7 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 plugin.json                    プラグイン定義（Agent Plugins 1.0）
 .github/plugin/marketplace.json マーケットプレイス定義
 com.github.copilot/agents/     オーケストレーター・解析担当・照合担当・実装担当
-com.github.copilot/hooks/      実行前に archive と書き込みを確かめるフック（既定は無効）
+com.github.copilot/hooks/      実行前に archive と書き込みを確かめるフック（既定は無効）と、サブエージェントの時間の記録
 skills/spec-relay/SKILL.md     オーケストレーターの手順
 skills/spec-relay-view/        markdown を HTML にして見せるスキル
 openspec-schemas/              移行用の OpenSpec スキーマ
@@ -292,6 +293,7 @@ scripts/sites.mjs              元コードの箇所（メソッドや関数な�
 scripts/hook.mjs               フックの本体（gate を通らない archive と保護されたファイルへの書き込みを拒否）
 scripts/status.mjs             進捗の計算（TODO リスト・チャット用）と、次に並列で始めてよい作業
 scripts/finish.mjs             仕上げの工程（開始の確認、残りものの収集と下書き、移行先のハッシュ、仕上げの gate）
+scripts/metrics.mjs            工程ごとにかかった時間の記録と集計
 scripts/merge.mjs              サブエージェントが分担して書いた表を1つの成果物にまとめる
 scripts/verify.mjs             実装のテスト・境界チェック・比べ方を実行し、結果を記録する（port-done が読む）
 scripts/render.mjs             成果物の markdown をレビュー用の HTML にする（デザイン固定）
