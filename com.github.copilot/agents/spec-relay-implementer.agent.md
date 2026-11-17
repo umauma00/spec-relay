@@ -52,11 +52,18 @@ unspecified behavior you found (below).
   - fix behavior that looks wrong in the spec or the source code (report it:
     it is follow-up work after the migration);
   - add a library or framework that conventions.md and design.md do not name;
-  - refactor, rename or reformat code outside this capability's module.
+  - refactor, rename or reformat code outside this capability's module;
+  - change the database schema or a database object (procedure, trigger,
+    view...), let the data access library create or change the schema, or
+    connect to any database other than the test database of the target
+    design's data.md.
   If the target language cannot do what the spec says and design.md does not
   settle how, stop and report it instead of choosing an alternative.
 - When the source code and the spec disagree, stop and report it instead of
   choosing.
+- Mark anything you leave unresolved with a `TODO(port)` comment in the code,
+  with one line on what is missing, also a stand-in for a capability that is
+  not ported yet. The orchestrator collects these at the end of the migration.
 - When the original code you read does something the spec does not mention
   (a branch, an error case, a write, a message, a rounding or a default),
   do not port it and do not drop it silently: report it as an unspecified

@@ -77,11 +77,12 @@ const stateOf = (s) => `${s.status}${s.waiting ? ':waiting' : ''}`;
 const stepKey = (capability, step) => JSON.stringify([capability ?? null, step]);
 const isOpen = (state) => state === 'in-progress' || /:waiting$/.test(state ?? '');
 
-// The state of every step now, from a status.mjs report: the survey and target
-// design, and each capability's analyze, review and implement steps.
+// The state of every step now, from a status.mjs report: the survey, the target
+// design and the finish step, and each capability's analyze, review and implement steps.
 export function stepStates(report) {
   const states = new Map();
   for (const f of report.foundation ?? []) states.set(stepKey(null, f.id), { capability: null, step: f.id, state: stateOf(f) });
+  if (report.finish) states.set(stepKey(null, 'finish'), { capability: null, step: 'finish', state: stateOf(report.finish) });
   for (const c of report.capabilities ?? []) {
     for (const [step, s] of Object.entries(c.steps ?? {})) states.set(stepKey(c.capability, step), { capability: c.capability, step, state: stateOf(s) });
   }
@@ -119,7 +120,7 @@ export function recordSteps(root, report, now = new Date()) {
 // time can be counted for that change's capability.
 export function namedChanges(text) {
   const names = new Set();
-  for (const m of String(text ?? '').matchAll(/openspec[\\/]+(?:changes|spec-relay[\\/]+work)[\\/]+((?:survey|target-design|(?:extract|port|amend)-[a-z0-9-]+))\b/g)) names.add(m[1]);
+  for (const m of String(text ?? '').matchAll(/openspec[\\/]+(?:changes|spec-relay[\\/]+work)[\\/]+((?:survey|target-design|finish|(?:extract|port|amend|survey|target-design|finish)-[a-z0-9-]+))\b/g)) names.add(m[1]);
   return [...names];
 }
 
@@ -156,9 +157,9 @@ export function hook(kind, input) {
 }
 
 // The capability a change belongs to: extract-billing-invoice -> billing/invoice
-// when the step records name it. The survey and target design belong to the project (null).
+// when the step records name it. The survey, target design and finish belong to the project (null).
 function changeCapability(change, capabilities) {
-  if (/^(survey|target-design)(-v\d+)?$/.test(change)) return null;
+  if (/^(survey|target-design|finish)(-v\d+)?$/.test(change)) return null;
   const key = change.replace(/^(extract|port|amend)-/, '').replace(/-v\d+$/, '');
   return capabilities.find((c) => c.split('/').join('-') === key) ?? key;
 }
@@ -238,7 +239,7 @@ const WORDS = {
     subagents: 'Subagent runs', runs: 'Runs', time: 'Working time', total: 'Total', unknownOwner: '(not attributed)',
     noTokens: 'Copilot gives the kit no token counts. Paste the output of Copilot CLI\'s /usage to keep it as a note.',
     notes: 'Notes', project: '(project)',
-    steps: { survey: 'Survey', target: 'Target design', analyze: 'Analyze', review: 'Review', implement: 'Implement' },
+    steps: { survey: 'Survey', target: 'Target design', analyze: 'Analyze', review: 'Review', implement: 'Implement', finish: 'Finish' },
   },
   ja: {
     title: 'かかった時間',
@@ -248,7 +249,7 @@ const WORDS = {
     subagents: 'サブエージェント', runs: '回数', time: '作業時間', total: '合計', unknownOwner: '（機能を特定できず）',
     noTokens: 'Copilot はキットにトークン数を渡しません。Copilot CLI の /usage の結果を貼ると、メモとして残せます。',
     notes: 'メモ', project: '（プロジェクト全体）',
-    steps: { survey: '調査', target: '移行先の設計', analyze: '解析', review: 'レビュー', implement: '実装' },
+    steps: { survey: '調査', target: '移行先の設計', analyze: '解析', review: 'レビュー', implement: '実装', finish: '仕上げ' },
   },
 };
 

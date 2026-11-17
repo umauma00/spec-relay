@@ -23,6 +23,7 @@ function project({ hooks = 'on', source = 'src', target = 'ts' } = {}) {
   write(dir, `${C}/source-map.md`, '| Path | Role | In scope |\n|---|---|---|\n| src/a.php | invoice | full |\n');
   write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Add two numbers | src/a.php:add:1 | none |\n');
   write(dir, 'src/a.php', '<?php\n');
+  write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n');
   write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/a.php:1 |\n');
   write(dir, `${C}/review.md`, 'Reviewer: Uma\n- [ ] R1 Add two numbers\n');
   return dir;
@@ -93,6 +94,7 @@ test('agents may not write the source, baselines, archives, schemas, settings or
   assert.match(edit(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md'), /record of what was reviewed/);
   assert.match(edit(dir, 'openspec/schemas/spec-relay-extract/schema.yaml'), /installed by setup.mjs/);
   assert.match(edit(dir, 'openspec/spec-relay/tools/package.json'), /pinned OpenSpec/);
+  assert.match(edit(dir, 'openspec/spec-relay/db/sales/dbo/Tables/Orders.sql'), /database definitions are exported/);
   assert.match(edit(dir, 'openspec/config.yaml'), /person's settings/);
   assert.match(edit(dir, path.join(KIT, 'scripts/gate.mjs')), /part of the spec-relay kit/);
   assert.equal(edit(dir, 'ts/billing/invoice.ts'), null);

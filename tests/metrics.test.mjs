@@ -45,6 +45,9 @@ test('step records: one per change of state, time in progress apart from waiting
   assert.equal(row('review').agent, 0);
   // Steps first seen as completed (recording began later) have no row.
   assert.equal(summary.steps.length, 2);
+  // The finish step is the project's.
+  recordSteps(dir, { ...report(steps({ status: 'completed' }, { status: 'completed' }, { status: 'completed' })), finish: { status: 'in-progress' } }, at('2026-11-17T00:00:00Z'));
+  assert.match(markdown(summarize(readEvents(dir), at('2026-11-17T01:00:00Z')), 'ja'), /\| （プロジェクト全体） \| 仕上げ \| 1時間 \| - \|/);
   // Records stay out of git.
   assert.match(fs.readFileSync(path.join(dir, 'openspec/spec-relay/local/.gitignore'), 'utf8'), /^\*$/m);
 });
@@ -124,7 +127,7 @@ test('subagent runs: only the kit\'s agents, paired per session and agent, count
   const [runs] = summarize(events, at('2026-11-16T10:00:00Z')).subagents;
   assert.deepEqual(runs, { capability: 'billing/invoice', attributed: true, runs: 3, ms: 25 * 60000 });
 
-  assert.deepEqual(namedChanges('see openspec/changes/survey/inventory.md and openspec/changes/port-billing-invoice-v2/tasks.md'), ['survey', 'port-billing-invoice-v2']);
+  assert.deepEqual(namedChanges('see openspec/changes/survey/inventory.md, openspec/changes/port-billing-invoice-v2/tasks.md and openspec/changes/finish/checks.md'), ['survey', 'port-billing-invoice-v2', 'finish']);
   assert.equal(hookRecord('other', { agentName: 'spec-relay-analyst' }), null);
   assert.equal(hookRecord('subagent-start', { agentName: 'spec-relay:spec-relay-implementer' }).agent, 'spec-relay-implementer');
   assert.equal(hookRecord('subagent-start', { agentName: '', agentType: 'spec-relay-checker' }).agent, 'spec-relay-checker');

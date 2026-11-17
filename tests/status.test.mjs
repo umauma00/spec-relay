@@ -48,6 +48,7 @@ function repo({ plan = PLAN, review = '- [x] R1 a\n- [ ] R2 b\n- [ ] Q1 c decisi
     write(dir, `${EXTRACT}/source-map.md`, '| Path | Role | In scope |\n|---|---|---|\n| src/invoice.php | invoice | full |\n');
     write(dir, `${EXTRACT}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| a | src/invoice.php:a:1 | none |\n| b | src/invoice.php:b:2 | none |\n');
     write(dir, `${EXTRACT}/screens.md`, '# Screens\nNone\n');
+    write(dir, `${EXTRACT}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n');
     write(dir, `${EXTRACT}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 a | confirmed | x |\n| R2 b | confirmed | x |\n');
     write(dir, `${EXTRACT}/questions.md`, '- Q1. c\n');
     write(dir, `${EXTRACT}/review.md`, review.startsWith('Reviewer') ? review : `Reviewer: Uma\n\n${review}`);
@@ -94,7 +95,7 @@ test('the review step says whether the gate passes, and a waiting step is never 
   const passing = status(repo({ review: PASSING }));
   assert.equal(passing.todoList[2].title, 'billing/invoice: Review [reviewed; waiting for approval to archive]');
   const writing = status(repo({ artifacts: false }));
-  assert.equal(writing.todoList[1].title, 'billing/invoice: Analyze [writing artifacts 0/7]');
+  assert.equal(writing.todoList[1].title, 'billing/invoice: Analyze [writing artifacts 0/8]');
   assert.deepEqual(statuses(writing), ['not-started', 'in-progress', 'not-started', 'not-started']);
   for (const report of [ticked, passing, writing]) {
     assert.equal(report.todoList[2].status, 'not-started');
@@ -108,7 +109,7 @@ test('artifacts are counted from the change schema, so a new artifact needs no c
     .replace('  - id: trace\n', '  - id: notes\n    generates: notes.md  # new\n    requires: []\n    instruction: |\n      generates: not-an-artifact.md\n\n  - id: trace\n');
   write(dir, 'openspec/schemas/spec-relay-extract/schema.yaml', schema);
   const report = status(dir);
-  assert.equal(report.todoList[1].title, 'billing/invoice: Analyze [writing artifacts 7/8]');
+  assert.equal(report.todoList[1].title, 'billing/invoice: Analyze [writing artifacts 8/9]');
   write(dir, `${EXTRACT}/notes.md`, '# notes\n');
   assert.equal(status(dir).todoList[1].status, 'completed');
 });
@@ -134,12 +135,13 @@ test('the port step follows tasks.md and the archive', () => {
   assert.deepEqual(statuses(report), ['not-started', 'not-started', 'not-started', 'not-started']);
 });
 
-test('everything ported leaves one completed line, unless a change is open again', () => {
+test('everything ported leads to the finish step, unless a change is open again', () => {
   const dir = repo({ plan: '## Capabilities\n- `common/base`\n' });
   fs.rmSync(path.join(dir, EXTRACT), { recursive: true });
   const report = status(dir);
-  assert.deepEqual(report.todoList.map(({ title, status: s }) => [title, s]), [['Overall: all 1 capabilities ported', 'completed']]);
-  assert.equal(report.current, null);
+  // Every capability is ported; the finish step (finish.mjs) completes the migration.
+  assert.deepEqual(report.todoList.map(({ title, status: s }) => [title, s]), [['Overall: all 1 capabilities ported; the finish step is next', 'not-started'], ['Finish: check the whole system, list what is left, hand over', 'not-started']]);
+  assert.deepEqual(report.current, { capability: null, step: 'finish', owner: 'agent' });
   write(dir, 'openspec/changes/extract-common-base/source-map.md', '# again\n');
   const reopened = status(dir);
   assert.equal(reopened.todoList[0].status, 'not-started');
@@ -275,9 +277,9 @@ test('the survey and the target design come before any capability', () => {
   write(dir, 'openspec/changes/survey/.openspec.yaml', 'schema: spec-relay-survey\n');
   write(dir, 'openspec/changes/survey/inventory.md', '# i\n');
   let report = status(dir);
-  assert.deepEqual(report.todoList.map((i) => i.title).slice(1), ['Survey: map the bounded contexts [writing artifacts 1/5]', 'Target design: modules, conventions, screens, verification']);
+  assert.deepEqual(report.todoList.map((i) => i.title).slice(1), ['Survey: map the bounded contexts [writing artifacts 1/6]', 'Target design: modules, conventions, screens, verification']);
   assert.deepEqual(statuses(report), ['not-started', 'in-progress', 'not-started']);
-  for (const f of ['context-map.md', 'glossary.md', 'capabilities.md']) write(dir, `openspec/changes/survey/${f}`, '# x\n');
+  for (const f of ['context-map.md', 'glossary.md', 'capabilities.md', 'database.md']) write(dir, `openspec/changes/survey/${f}`, '# x\n');
   write(dir, 'openspec/changes/survey/review.md', 'Reviewer: Uma\n- [ ] K1 billing\n');
   report = status(dir);
   assert.equal(report.todoList[1].title, 'Survey: map the bounded contexts [waiting for review 0/1]');

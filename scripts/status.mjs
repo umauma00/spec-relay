@@ -32,6 +32,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recordSteps } from './metrics.mjs';
 import { checkboxes, readIf, capabilitySegments, checkReview, baseName, archivedChange, baselineHash, configValue, cleanValue, language } from './gate.mjs';
+import { finishState } from './finish.mjs';
 
 export { language };
 
@@ -39,11 +40,12 @@ const PLAN = 'openspec/spec-relay/plan.md';
 // Used when a change's schema file cannot be read. The schema's own list wins,
 // so an artifact added to a schema later is counted without touching this file.
 const DEFAULT_ARTIFACTS = {
-  'spec-relay-survey': ['inventory.md', 'context-map.md', 'glossary.md', 'capabilities.md', 'review.md'],
-  'spec-relay-target': ['architecture.md', 'conventions.md', 'ui.md', 'verification.md', 'review.md'],
-  'spec-relay-extract': ['source-map.md', 'specs/**/*.md', 'screens.md', 'trace.md', 'crosscheck.md', 'questions.md', 'review.md'],
+  'spec-relay-survey': ['inventory.md', 'context-map.md', 'glossary.md', 'capabilities.md', 'database.md', 'review.md'],
+  'spec-relay-target': ['architecture.md', 'conventions.md', 'ui.md', 'verification.md', 'data.md', 'review.md'],
+  'spec-relay-extract': ['source-map.md', 'specs/**/*.md', 'screens.md', 'trace.md', 'crosscheck.md', 'coverage.md', 'questions.md', 'review.md'],
   'spec-relay-amend': ['reason.md', 'specs/**/*.md', 'trace.md', 'crosscheck.md', 'impact.md', 'review.md'],
   'spec-relay-port': ['proposal.md', 'design.md', 'tasks.md'],
+  'spec-relay-finish': ['checks.md', 'leftovers.md', 'handover.md', 'review.md'],
 };
 // Lowercase ASCII kebab-case segments, as the skill asks capabilities to be named.
 const CAPABILITY = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/;
@@ -58,7 +60,11 @@ const WORDS = {
     amendedAfterPort: 'the spec was amended after the port; port it again',
     overall: (done, total, reviewed) => `Overall: ${done} of ${total} capabilities ported (${reviewed} with a reviewed spec)`,
     noPlan: 'Overall: no capability list in the plan yet',
-    allDone: (total) => `Overall: all ${total} capabilities ported`,
+    allDone: (total) => `Overall: all ${total} capabilities ported; the finish step is next`,
+    complete: (total) => `Overall: migration complete (${total} capabilities, handed over)`,
+    finish: 'Finish: check the whole system, list what is left, hand over',
+    finishReview: 'waiting for the hand-over review',
+    changedAfterFinish: 'the code changed after the hand-over; finish again',
     writing: (n, of) => `writing artifacts ${n}/${of}`,
     waitingReview: (n, of) => `waiting for review ${n}/${of}`,
     gateFails: 'all ticked, but gate.mjs review fails',
@@ -79,7 +85,11 @@ const WORDS = {
     amendedAfterPort: '移行後に仕様が修正された・再実装が必要',
     overall: (done, total, reviewed) => `全体: ${total}機能のうち${done}機能が移行済み（仕様確定 ${reviewed}）`,
     noPlan: '全体: 計画に機能の一覧がまだありません',
-    allDone: (total) => `全体: ${total}機能すべて移行済み`,
+    allDone: (total) => `全体: ${total}機能すべて移行済み・次は仕上げ`,
+    complete: (total) => `全体: 移行完了（${total}機能・引き渡し済み）`,
+    finish: '仕上げ: 全体の確認・残りもの・引き渡し',
+    finishReview: '引き渡しのレビュー待ち',
+    changedAfterFinish: '引き渡しの後にコードが変わった・仕上げをやり直す',
     writing: (n, of) => `成果物 ${n}/${of}`,
     waitingReview: (n, of) => `レビュー待ち ${n}/${of}`,
     gateFails: '全項目チェック済み・gate.mjs review 未通過',
@@ -382,9 +392,12 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
   const current = pickCurrent(capabilities, capability);
   const unknown = Boolean(capability && !current);
   if (unknown) problems.push(`capability not found: ${capability}`);
-  const finished = total > 0 && foundation.every((f) => f.status === 'completed') && counted.every((c) => c.finished) && !capabilities.some((c) => c.active) && !(plan && planned === 0) && skipped === 0;
+  const allPorted = total > 0 && foundation.every((f) => f.status === 'completed') && counted.every((c) => c.finished) && !capabilities.some((c) => c.active) && !(plan && planned === 0) && skipped === 0;
+  // Step 6, once for the project: the whole-system checks and the hand-over (finish.mjs).
+  const finish = finishState(root, { checkReview, artifactCount: (dir) => artifactCount(root, dir, 'spec-relay-finish') });
+  const finished = allPorted && finish.status === 'completed';
 
-  const overallTitle = (plan && planned === 0) || total === 0 ? words.noPlan : finished ? words.allDone(total) : words.overall(ported, total, reviewed);
+  const overallTitle = (plan && planned === 0) || total === 0 ? words.noPlan : finished ? words.complete(total) : allPorted ? words.allDone(total) : words.overall(ported, total, reviewed);
   const todoList = [{ id: 1, key: 'overall', title: overallTitle, description: '', status: finished ? 'completed' : 'not-started' }];
   let here = null;
   // Until the survey and the target design are archived, they are the work.
@@ -429,11 +442,18 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
       status: state.status,
     });
   }
+  // The finish line shows once every capability is ported, or while a finish change is open.
+  if (allPorted || finish.status === 'in-progress' || finish.waiting) {
+    const detail = say(words, finish.detail);
+    todoList.push({ id: todoList.length + 1, key: 'finish', title: `${words.finish}${detail ? (lang === 'ja' ? `【${detail}】` : ` [${detail}]`) : ''}`, description: finish.waiting ? words.person : '', status: finish.status });
+    if (!here && finish.status !== 'completed') here = { capability: null, step: 'finish', owner: finish.waiting ? 'person' : 'agent', ...(finish.waiting ? { waiting: true } : {}) };
+  }
   return {
-    plan, total, ported, reviewed,
+    plan, total, ported, reviewed, finished,
     current: here,
     parallel: parallelPlan(root, capabilities, foundation, problems),
     foundation: foundation.map(({ id, status: st, waiting }) => ({ id, status: st, ...(waiting ? { waiting: true } : {}) })),
+    finish: { status: finish.status, ...(finish.waiting ? { waiting: true } : {}) },
     active: capabilities.filter((c) => c.active).map((c) => c.capability),
     todoList,
     capabilities: capabilities.map(({ capability: name, group, counted: isCounted, steps }) => ({ capability: name, group, ...(isCounted ? {} : { counted: false }), steps })),

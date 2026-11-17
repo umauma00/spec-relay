@@ -18,6 +18,7 @@ The kit's own files are two directories above this skill:
 [scripts/status.mjs](../../scripts/status.mjs),
 [scripts/metrics.mjs](../../scripts/metrics.mjs),
 [scripts/merge.mjs](../../scripts/merge.mjs),
+[scripts/finish.mjs](../../scripts/finish.mjs),
 [scripts/doctor.mjs](../../scripts/doctor.mjs), `openspec-schemas/` and
 `docs/WORKFLOW.md`. `<kit>` below stands for the absolute path of that
 directory; resolve it from this file's own location (installed as a plugin it is
@@ -71,8 +72,20 @@ need the reasoning behind a step.
 - **Amend change**: `openspec/changes/amend-<capability>` (schema
   `spec-relay-amend`). Corrects a baseline spec that misread or left out what
   the source code does.
+- **Finish change**: `openspec/changes/finish` (schema `spec-relay-finish`).
+  Once every capability is ported: the whole-system checks, the leftovers and
+  the hand-over report (step 6). Archiving it completes the migration.
+- **Follow-up**: work moved to after the migration (a suspected bug the
+  person wants fixed, an improvement). One top-level item per piece of work
+  under the plan's `## Follow-up` heading, starting with the backticked
+  capability when it belongs to one; the finish step collects them.
 - **Baseline spec**: `openspec/specs/<capability>/spec.md`, created when a
   reviewed extract change is archived.
+- **Database definitions**: `openspec/spec-relay/db/<database>/`, the
+  definitions (tables, views, procedures, triggers, jobs) the person exported
+  from a database whose definitions are not in the repository. Source code
+  like the source root: read-only for every agent, in the inventory, cited by
+  trace.md. See the kit's `docs/DATABASE.md`.
 - **Plan**: `openspec/spec-relay/plan.md`, the capability list and order.
 - **Lessons**: `openspec/spec-relay/lessons.md`, what the person's corrections
   taught that later analyses and ports must follow (see Lessons).
@@ -329,9 +342,23 @@ Read the WHOLE source code base before splitting it, so that the split follows
 the domain, not the folders.
 
 1. `node "<kit>/scripts/openspec.mjs" new change survey --schema spec-relay-survey`.
-2. Write inventory, context-map, glossary and capabilities (schema
+   **Databases first**: ask the person which databases the system uses
+   (product and version) and whether their definitions are in the
+   repository. For each one that is not, ask them to export its definitions
+   into `openspec/spec-relay/db/<database>/` as `docs/DATABASE.md` shows
+   (from a copy or a development database, not production) and to tell you
+   when it is done. Never connect to a database yourself and never ask for a
+   password or connection string; run an export command only when the person
+   asks you to, against the database they name, with the sign-in they set
+   up. Then run `node "<kit>/scripts/gate.mjs" db-hash`: it prints the hash
+   for database.md and lists files saved as UTF-16, which the person converts
+   (docs/DATABASE.md). If the definitions cannot be had, go on and record that
+   under Missing definitions.
+2. Write inventory, context-map, glossary, capabilities and database (schema
    `spec-relay-survey`) in waves (see Working in parallel). Every source file
-   must be in the inventory.
+   must be in the inventory, and so must every file under
+   `openspec/spec-relay/db/`: give those folders to analysts like the source
+   folders.
    - **Inventory**: split the source folders across `spec-relay-analyst`
      subagents. Each writes its rows to
      `openspec/spec-relay/work/<change>/inventory/<n>.md` and its evidence to
@@ -344,7 +371,10 @@ the domain, not the folders.
      inventory, writes context-map.md and corrects the Context column of
      inventory.md to the context ids it chose. You read context-map.md: the
      review needs you to know it.
-   - **Glossary and capabilities**: one wave of two analysts, one file each.
+   - **Glossary, capabilities and database**: one wave of three analysts,
+     one file each. The database analyst reads the evidence, the merged
+     inventory and the definitions, and gets the person's answers about the
+     databases and the hash from `gate.mjs db-hash`.
    - **Carry**: the Handling column says `carry` for files the new system
      uses unchanged (stylesheets, images, fonts, script libraries, report
      templates) and `port` for everything else. Ask the analysts to propose
@@ -369,8 +399,8 @@ the domain, not the folders.
    `## Capabilities` heading in `openspec/spec-relay/plan.md`, keeping the
    `### <context>` headings and the indented source paths under each
    capability. `status.mjs` counts only the top-level items that start with a
-   backticked capability path; put other notes, such as follow-up work, under
-   another `##` heading. From now on the plan is where files belong (once it
+   backticked capability path; put follow-up work under a `## Follow-up`
+   heading (see Words) and other notes under another `##` heading. From now on the plan is where files belong (once it
    lists any source path, the gates read only the plan's paths): when an
    analyst reports that a file belongs to another capability, move its path
    there (a file path under the other capability wins over a folder), tell
@@ -382,11 +412,21 @@ the domain, not the folders.
    has no file, or an analyzed capability's source map lacks one of its files,
    and it lists the capabilities not analyzed yet. Run it also after the last
    extract is archived.
+5. **When the database definitions change later.** A gate that reports
+   "database definitions changed after the survey" stops extract and amend
+   reviews, port-ready and port-done. Ask the person whether they exported
+   again on purpose. If not, they restore `openspec/spec-relay/db/` from git.
+   If so, run the survey again as `survey-v2` (its inventory, capabilities and
+   database.md cover the new definitions, and the person reviews what
+   changed); after it is archived, copy the capability paths of the new or
+   moved definition files into `openspec/spec-relay/plan.md` and run
+   `gate.mjs coverage`. Files under `openspec/spec-relay/db/` are placed only
+   during a survey: one added after the archive is drift too.
 
 ## 2. Target design: decide how the new system is built
 
 1. `node "<kit>/scripts/openspec.mjs" new change target-design --schema spec-relay-target`.
-2. Write architecture, conventions, ui and verification from their instructions.
+2. Write architecture, conventions, ui, verification and data from their instructions.
    The default architecture is a modular monolith in the manner of Spring
    Modulith: one module per context, public API and events only, one owner per
    table, an automated boundary check. Ask the person about anything the code
@@ -399,8 +439,13 @@ the domain, not the folders.
    instruction says which fits which source); the person decides, and you
    never pick `new` yourself. Never write a password, token or connection
    string into a file; sign-in for B2 and C comes from environment variables
-   the person sets. Write architecture.md first (yourself or one analyst),
-   then give conventions.md and ui.md to two analysts in one wave, then
+   the person sets. For data.md, ask how old and new will run during the
+   switch (all at once, or side by side on the same database), whether the
+   database product stays, and whether the defaults for the logic in the
+   database (keep triggers, constraints, views, procedures and functions in
+   the database) fit; never ask for a connection string. Write
+   architecture.md first (yourself or one analyst), then give conventions.md,
+   ui.md and data.md to three analysts in one wave, then
    verification.md (it suggests level C from ui.md's policies), with the
    person's answers in each task.
 3. Write review.md, validate, and run the review (above). While the person
@@ -440,24 +485,50 @@ waves.
    and a new checker check that row again (a part file with a higher number,
    such as `crosscheck-02.md`, merged the same way), or move it to questions.md and write `question Q<n>` as its verdict
    yourself.
-4. **Questions and review.** Write questions.md from the analysts' reported
+4. **Omission check.** In the same wave as the crosscheck (both need only
+   trace.md), run `node "<kit>/scripts/sites.mjs" --change
+   extract-<capability>`. It lists the sites of the source map's files in
+   groups of 40 under `openspec/spec-relay/work/extract-<capability>/sites/`
+   (`--per N` changes the size). Give each group to its own
+   `spec-relay-checker` with the change's specs and screens.md paths, the
+   numbered requirement and screen names, the capabilities that own parts of
+   shared files (from the plan), and the path
+   `openspec/spec-relay/work/extract-<capability>/coverage/<nn>.md` to write.
+   Never give it the analysts' notes. Merge with `merge.mjs --into
+   openspec/changes/extract-<capability>/coverage.md --parts
+   openspec/spec-relay/work/extract-<capability>/coverage --clean`. For every
+   `gap`, have an analyst add the requirement it needs (and its trace) at
+   the END of the spec, so the R numbers the ledger already uses stay the
+   same; have a checker crosscheck the new requirement and judge that site
+   again (give it the site ids from the sites file, and have it write a part
+   file with a higher number, merged the same way); or move it to
+   questions.md and write `question Q<n>` as its verdict yourself. A changed
+   source map or source file means running sites.mjs again and judging the
+   sites of the changed files again (a verdict is tied to a site id, not to
+   its content; an added overload renumbers `#2`): `gate.mjs review` scans the files itself, fails on a site
+   without a row, and names the rows of sites it no longer finds, which you
+   delete from coverage.md. When sites.mjs writes no group (the files hold no
+   code), coverage.md keeps its empty table.
+5. **Questions and review.** Write questions.md from the analysts' reported
    doubts and the rows moved to questions, then review.md (names by search,
    not by reading the spec).
-5. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
+6. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
    analyst fix every error and warning. `gate.mjs review` also checks the
    coverage, so the person does not: source-map.md holds every file the plan
    assigns to the capability, and every requirement has a trace row whose
    paths exist.
-6. **Report** to the person: the number of requirements and screens, what the
-   crosscheck found and fixed, the questions they must decide, the path of the
-   review page, and that step 4 is theirs. Then stop and wait.
+7. **Report** to the person: the number of requirements and screens, what the
+   crosscheck found and fixed, how many sites the omission check judged and
+   the gaps it found and how they were resolved, the questions they must
+   decide, the path of the review page, and that step 4 is theirs. Then stop
+   and wait.
 
 ## 4. Review: the person decides
 
 Run the review (above) on `extract-<capability>`. Archiving makes the spec the
 baseline under `openspec/specs/`. A suspected bug the person chose to fix is
-not fixed during the migration: note it in the plan as follow-up work after the
-port.
+not fixed during the migration: add it to the plan's `## Follow-up` list (see
+Words); the finish step (step 6) lists it in the hand-over.
 
 ## 5. Implement: port the baseline spec
 
@@ -466,7 +537,8 @@ port.
    `toolchain` warning (the target language's build tools) must be fixed
    first. `node "<kit>/scripts/gate.mjs" port-ready --capability <capability>` must
    pass before you create the port change (it also needs the archived survey
-   and target design, and no open amendment).
+   and target design, no open amendment, and database definitions that still
+   match the survey's hash).
 2. `node "<kit>/scripts/openspec.mjs" new change port-<capability> --schema spec-relay-port`, then write
    proposal, design and tasks with `node "<kit>/scripts/openspec.mjs" instructions <artifact> --change
    port-<capability> --json`. Record the baseline hash in the proposal from
@@ -507,7 +579,9 @@ port.
 6. When every task is done and verified, run `node "<kit>/scripts/gate.mjs"
    port-done --change port-<capability>`, report the results, and archive the
    port change after the person agrees: `node "<kit>/scripts/openspec.mjs" archive port-<capability>
-   --yes`.
+   --yes`. Pass the implementers' `TODO(port)` lines on in the report; the
+   finish step collects them from the code.
+7. When this was the last capability of the plan, go on to step 6 (Finish).
 
 ## Amend: correct a baseline spec
 
@@ -529,6 +603,54 @@ fixing a bug, is never an amendment: it is follow-up work after the migration.
    implementation and records the new baseline hash (`gate.mjs port-done`
    fails until it does); an archived port gets a new port change
    (`port-<capability>-v<n>`).
+
+## 6. Finish: check the whole system and hand it over
+
+Once for the project, after the last port. Each port was checked alone; this
+step checks the new system as a whole, lists what the migration leaves open,
+and writes the report someone takes it over with. It writes no code and
+changes no behavior.
+
+1. Run `node "<kit>/scripts/finish.mjs" ready`. It passes when every
+   capability of the plan has an archived port against its current baseline
+   and no other change is open; otherwise do what `problems` says first.
+   Run `node "<kit>/scripts/gate.mjs" coverage` too: a source file that no
+   capability covers was never ported, and the hand-over must not hide it.
+2. `node "<kit>/scripts/openspec.mjs" new change finish --schema
+   spec-relay-finish` (a second hand-over, after more ports: `finish-v2`),
+   then `node "<kit>/scripts/finish.mjs" draft --change finish`. The draft
+   writes checks.md and leftovers.md from the files: every `TODO(port)` under
+   the target root, every `## Follow-up` item of the plan, every risk of the
+   archived ports, the commands of conventions.md, the levels of
+   verification.md and the relationships of the context map. Never retype
+   these lists; run `finish.mjs collect` to see them again.
+3. **Checks.** Run every command of checks.md over the whole target root, and
+   every chosen verification level for every context, and write the results
+   as the schema says (`pass`, `fail`, `not-run: <reason>`). For each
+   cross-context flow, name the test that covers it, or `none`. A
+   failure is fixed, never accepted: show it to the person and fix it through
+   a new port change (`port-<capability>-v<n>`; `finish.mjs ready` then
+   waits for it), then run every check again. After the last run, write the
+   hash `node "<kit>/scripts/finish.mjs" hash` prints into checks.md.
+4. **Leftovers.** Add a `verification` row for each `not-run` level and a
+   `flow` row for each flow without a test. Propose a class and a reason for
+   every row: `before-release`, `after-release` or `wont-fix`. Fix nothing
+   here: a `TODO(port)` the person wants fixed now goes through a port change,
+   then the draft is made again (delete leftovers.md first).
+5. **Handover and review.** Write handover.md and review.md from their
+   instructions, validate (`node "<kit>/scripts/openspec.mjs" validate finish
+   --strict`) and run the review (above). Show the leftovers grouped by
+   class, so that the person can accept a whole class at once, and put the
+   `before-release` items first. `gate.mjs review --change finish` also fails
+   when the code changed after the checks, when a `TODO(port)` in the code has
+   no row or a row lists one that is gone, and when a plan follow-up is
+   missing.
+6. Archive after the person agrees. Archiving the finish change completes the
+   migration: report the verdict, the `before-release` items and the
+   "Before the switch" list of handover.md. Deployment, moving the data and
+   the switch from the old system to the new one are not part of the kit.
+   If code changes after that, `status.mjs` shows the finish step as open
+   again: run it again as `finish-v<n>`.
 
 ## Progress in the TODO list
 
@@ -655,7 +777,9 @@ person asks to skip a step, a review or a check:
   no archived target design - step 2. A capability's step: no extract change -
   not started; active extract change - step 3 or 4 (check review.md); archived
   extract - baseline exists; active port - step 5; archived port - ported; an
-  active amendment holds the capability in review.
+  active amendment holds the capability in review. When every capability is
+  ported: no finish change - step 6; active finish change - step 6 (check
+  review.md); archived finish change - the migration is complete.
 - `node "<kit>/scripts/status.mjs" --format markdown` shows every capability's
   phase in one table.
 - A project started on kit 0.1.0 has baselines but no survey or target design.

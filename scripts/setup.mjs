@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { runOpenspec, probeOpenspec, findNpm, runCommand, trackedModules, TOOLS_DIR } from './openspec.mjs';
 
 export const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const SCHEMAS = ['spec-relay-survey', 'spec-relay-target', 'spec-relay-extract', 'spec-relay-amend', 'spec-relay-port'];
+export const SCHEMAS = ['spec-relay-survey', 'spec-relay-target', 'spec-relay-extract', 'spec-relay-amend', 'spec-relay-port', 'spec-relay-finish'];
 export const CONFIG_MARKER = '# spec-relay: managed';
 // The first line of a config this script wrote before init finished. A run
 // that stops on the way leaves it, and the next run starts over.
