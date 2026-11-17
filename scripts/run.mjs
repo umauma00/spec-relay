@@ -11,7 +11,7 @@ import { spawn, spawnSync } from 'node:child_process';
 const KEEP_BYTES = 256 * 1024;
 // The most stdout a caller may ask to keep whole (compare.mjs reads a driver's
 // output this way).
-export const MAX_STDOUT_BYTES = 512 * 1024 * 1024;
+export const MAX_STDOUT_BYTES = 256 * 1024 * 1024;
 
 // Stops a command and everything it started: a test runner's own children
 // (dotnet, java, node) would otherwise keep running and hold files open.
@@ -28,16 +28,17 @@ const GRACE_MS = 2000;
 const running = new Set();
 
 // The PowerShell script that runs a command and exits with its status.
-export const windowsScript = (command) => `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ${command}; $ok = $?; if ($LASTEXITCODE) { exit $LASTEXITCODE }; if (-not $ok) { exit 1 }`;
+export const windowsScript = (command) => `[Console]::OutputEncoding = [Text.Encoding]::UTF8; [Console]::InputEncoding = [Text.Encoding]::UTF8; ${command}; $ok = $?; if ($LASTEXITCODE) { exit $LASTEXITCODE }; if (-not $ok) { exit 1 }`;
 
 // Runs one command line in cwd and resolves to
 // { exitCode, timedOut, seconds, output, stdout? }: output is the last part of
 // stdout and stderr together; with { captureStdout: true } stdout is also kept
-// whole (up to MAX_STDOUT_BYTES, then the command is stopped and fails). With
+// whole, as bytes (up to MAX_STDOUT_BYTES, then the command is stopped and fails). With
 // { input } that text is written to the command's stdin.
 export function runCommand(command, cwd, { timeoutMs, platform = process.platform, exec = spawn, input, captureStdout = false } = {}) {
   // UTF-8 output, so the printed tail of a failure is readable on a Japanese
-  // (CP932) console too. Input reaches the program as the bytes written.
+  // (CP932) console too, and a .NET program reads its redirected input as
+  // UTF-8.
   // `-Command` alone exits 1 for any failure, so the exit code of a program is
   // passed on, and a failed cmdlet exits 1.
   const [file, args, extra] = platform === 'win32'
@@ -79,12 +80,12 @@ export function runCommand(command, cwd, { timeoutMs, platform = process.platfor
       const failed = timedOut || tooLong || typeof exitCode !== 'number';
       resolve({
         exitCode: failed ? -1 : exitCode, timedOut, seconds: Math.round((Date.now() - started) / 100) / 10, output,
-        ...(captureStdout ? { stdout: tooLong ? '' : Buffer.concat(out).toString('utf8') } : {}),
+        ...(captureStdout ? { stdout: tooLong ? Buffer.alloc(0) : Buffer.concat(out) } : {}),
       });
     };
     try {
       child = exec(file, args, { cwd, env: process.env, windowsHide: true, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], ...extra });
-    } catch (error) { resolve({ exitCode: -1, timedOut: false, seconds: 0, output: error.message, ...(captureStdout ? { stdout: '' } : {}) }); return; }
+    } catch (error) { resolve({ exitCode: -1, timedOut: false, seconds: 0, output: error.message, ...(captureStdout ? { stdout: Buffer.alloc(0) } : {}) }); return; }
     running.add(child);
     if (timeoutMs) {
       timer = setTimeout(() => {

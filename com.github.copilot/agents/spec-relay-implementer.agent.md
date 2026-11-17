@@ -83,8 +83,12 @@ unspecified behavior you found (below).
   values come from the source program only: write the recorder for the old
   code (or the conversion of its records) and the driver for the new code,
   and never edit an expected value or add a rule to `rules.json` to make a
-  case pass. When a case differs, fix the new code; when you believe the
-  recording is wrong, record it again from the source program and report why. Tick a task
+  case pass. The driver calls the same entry point the new code's callers
+  use (the module's public function or service, not a copy or a stub), reads
+  the cases only from its standard input, never opens the case files, and
+  writes logs to stderr. When a case differs, fix the new code; when you
+  believe the recording is wrong, record it again from the source program
+  and report why. Tick a task
   only after its verification passes, and run the boundary check before you
   report.
 - When a task gives you crosscheck rows to fix, fix the code or the test so it

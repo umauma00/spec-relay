@@ -132,11 +132,14 @@ When design.md's Verification gives B1 as `spec-relay-compare --cases <dir>
 check them as part of every item they cover: the recorder that wrote them (or
 the conversion of production records) calls the source code or reads its real
 output, not the new code; a few expected values, traced through the source
-code by hand, are right; and every rule in the folder's `rules.json` (ignored
+code by hand, are right; the driver passes each input to the new code's
+real entry point (the one its callers use) and does not read the case files
+or return anything taken from them; and every rule in the folder's `rules.json` (ignored
 paths, tolerance, unordered arrays, numbers as text, trimming, missing as
 null) is one design.md's Decisions explains. An expected value that agrees
-with the new code but not with the source code, or a rule nothing explains,
-makes the items it touches `mismatch`.
+with the new code but not with the source code, a driver that reads the
+expected values or skips the new code, or a rule nothing explains, makes the
+items it touches `mismatch`.
 
 Write the verdict file and report as above, with `src-path:line vs
 target-path:line - evidence` in the Evidence cell. Never write any other file,
