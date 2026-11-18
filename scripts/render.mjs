@@ -254,7 +254,11 @@ function list(items) {
 
 // ---------------------------------------------------------------- reading
 
+// While view() builds a page, every Markdown file it reads must be inside the
+// repository (a change folder or a file in it may be a symbolic link elsewhere).
+let readRoot = null;
 function readText(file) {
+  if (readRoot && !insideRoot(readRoot, path.relative(path.resolve(readRoot), path.resolve(file)))) return null;
   try { return fs.readFileSync(file, 'utf8').replace(/^﻿/, ''); } catch { return null; }
 }
 
@@ -1503,7 +1507,13 @@ const specHref = (capability) => encodeURIComponent(specFile(capability));
 // `at` is where the page is taken to be; images are linked relative to it.
 // { change } is a change's page, { spec: 'all' } the list of specs, { spec } one
 // capability's page, { file } one Markdown file.
-export function view({ root = process.cwd(), change, spec, file, lang, now = new Date(), at, nav = '' }) {
+export function view(options) {
+  const before = readRoot;
+  readRoot = options.root ?? process.cwd();
+  try { return buildView(options); } finally { readRoot = before; }
+}
+
+function buildView({ root = process.cwd(), change, spec, file, lang, now = new Date(), at, nav = '' }) {
   const code = pickLang(root, lang);
   const L = LABELS[code];
   const stamp = `${L.generated} ${timeStamp(now)}`;
@@ -1531,7 +1541,8 @@ export function view({ root = process.cwd(), change, spec, file, lang, now = new
     return { ok: true, title: change, html };
   }
   if (file) {
-    const text = readText(path.resolve(root, file));
+    // --file may name a file outside the repository on purpose; only what it links stays inside.
+    const text = (() => { const r = readRoot; readRoot = null; try { return readText(path.resolve(root, file)); } finally { readRoot = r; } })();
     if (text === null) return { ok: false, problems: [`file not found: ${file}`] };
     const name = path.basename(file).replace(/\.md$/i, '');
     const html = withImages(root, path.dirname(path.resolve(root, file)), resolved, () => page({ title: name, kind: L.document, meta: stamp, docs: [{ id: 'doc', title: name, html: `<div class="doc">${markdown(text, { headingOffset: 2 })}</div>` }], L, lang: code, nav }));
@@ -1581,7 +1592,7 @@ export function render({ root = process.cwd(), change, file, spec, out, lang, no
   if (spec) return renderSpecs({ root, spec, out, lang, now });
   if (!change && !file) return { ok: false, problems: ['pass --change NAME, --file PATH or --spec CAPABILITY|all'] };
   const name = change ?? path.basename(file).replace(/\.md$/i, '');
-  const resolved = path.resolve(root, out ?? path.join(root, VIEWS, `${name}.html`));
+  const resolved = path.resolve(root, out ?? path.join(path.resolve(root, VIEWS), `${name}.html`));
   const built = view({ root, change, file, lang, now, at: resolved });
   if (!built.ok) return built;
   writeView(root, resolved, built.html);

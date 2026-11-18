@@ -287,9 +287,10 @@ you assist. This gate is the point of the kit.
    this kit, see docs/CANVAS.md), also offer to show the page there:
    `open_canvas` with canvasId `spec-relay`, instanceId `spec-relay` and input
    `{ "view": "review", "name": "<change>" }`, or move an open canvas with
-   `invoke_canvas_action` (action `open_review`, input `{ "name": "<change>" }`).
-   Other views are `progress`, `specs` and `spec` (name: the capability). The
-   canvas follows the files by itself; it never records a decision.
+   `invoke_canvas_action` (instanceId `spec-relay`, actionName `open_review`,
+   input `{ "name": "<change>" }`). Other views are `progress`, `specs` and
+   `spec` (name: the capability); `list_canvas_capabilities` lists the actions.
+   The canvas follows the files by itself; it never records a decision.
 2. Ask how they want to review: here in the conversation, one item at a time,
    or in the files or a pull request on their own (they tell you when done,
    and you check what they ticked). Both are fine; never pick for them.

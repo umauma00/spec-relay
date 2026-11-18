@@ -493,3 +493,19 @@ test('two amendments of one requirement each show their wording; only pages --sp
   assert.match(page, /id="R1"[\s\S]*?amend-a, amend-b[\s\S]*?amend-a<\/p>[\s\S]*?ALPHA[\s\S]*?amend-b<\/p>[\s\S]*?BETA[\s\S]*?id="R2"/);
   assert.equal(fs.existsSync(path.join(dir, 'openspec/spec-relay/views/spec-notes.html')), true, 'a page of --file is not removed');
 });
+
+test('a relative --root writes the page inside that root; a change folder linked from outside is not read', () => {
+  const dir = repo();
+  const parent = path.dirname(dir);
+  const cwd = process.cwd();
+  process.chdir(parent);
+  try {
+    assert.equal(render({ root: path.basename(dir), change: 'extract-billing-invoice' }).out, 'openspec/spec-relay/views/extract-billing-invoice.html');
+  } finally { process.chdir(cwd); }
+  assert.equal(fs.existsSync(path.join(dir, 'openspec/spec-relay/views/extract-billing-invoice.html')), true);
+  const outside = tempDir();
+  write(outside, 'review.md', 'Reviewer: SECRET\n\n## 1. Requirements\n- [ ] R1 SECRET\n');
+  try { fs.symlinkSync(outside, path.join(dir, 'openspec/changes/extract-evil'), 'junction'); } catch { return; }
+  render({ root: dir, change: 'extract-evil' });
+  assert.doesNotMatch(html(dir, 'extract-evil'), /SECRET/);
+});
