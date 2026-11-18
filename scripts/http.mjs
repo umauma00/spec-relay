@@ -382,7 +382,8 @@ export function viewResponse({ status, headers, bytes, requestUrl }, { base, cha
   }
   const contentType = headers.get('content-type') ?? '';
   const type = contentType.split(';')[0].trim().toLowerCase();
-  if (type) out.type = type;
+  // The type of an empty body says nothing (PHP names text/html on every redirect).
+  if (type && bytes.length) out.type = type;
   const filename = (headers.get('content-disposition') ?? '').match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i)?.[1];
   if (filename) { try { out.filename = decodeURIComponent(filename); } catch { out.filename = filename; } }
   if (!bytes.length) return out;
@@ -393,7 +394,8 @@ export function viewResponse({ status, headers, bytes, requestUrl }, { base, cha
   if (html) {
     const view = htmlView(read());
     if (session) session.hidden = view.hidden;
-    if (view.title !== null) out.title = view.title;
+    // An empty title shows nothing, like no title.
+    if (view.title) out.title = view.title;
     out.text = view.text;
     out.fields = Object.fromEntries(Object.entries(view.fields).map(([k, v]) => [map.back.fields[k] ?? k, v]));
   } else if (type === 'application/json' || type.endsWith('+json')) {
@@ -415,6 +417,13 @@ export async function exchange(cases, { base, charset = 'utf-8', map = NO_MAP, e
   const outputs = new Map();
   const problems = [];
   const encode = encoderFor(charset);
+  // Nothing is sent while a request cannot be built: with the sign-in left out
+  // (a variable that is not set), the requests after it would act signed out.
+  for (const c of cases) {
+    const request = buildRequest(c.input, { base, session: newSession(), env, encode, map });
+    if (request.problem) problems.push(`case ${c.id}: ${request.problem}`);
+  }
+  if (problems.length) { problems.push('no request was sent'); return { outputs, problems }; }
   let sessions = new Map();
   let file;
   for (const c of cases) {

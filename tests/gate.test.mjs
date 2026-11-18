@@ -244,6 +244,59 @@ test('the survey gate checks contexts, the inventory and the capability list', (
   assert.match(caps, /"Billing" is not <context>\/<name>/);
 });
 
+test('the survey keeps the fixed review items, and an excluded file needs a reason', () => {
+  // Dropping the items for the map, the owners, the order, the carried and the excluded files hid them from the person.
+  const dropped = survey({ review: 'Reviewer: Uma\n\n- [x] K1 platform\n- [x] K2 billing\n- [x] M1 map\n- [x] M3 glossary\n' });
+  assert.deepEqual(checkReview(dropped, 'survey').problems, [
+    'review.md has no M2 item for the owners of shared data (keep the template\'s items)',
+    'review.md has no M4 item for the capability list and its order (keep the template\'s items)',
+    'review.md has no M5 item for the files marked carry (keep the template\'s items)',
+    'review.md has no C1 item for the files marked excluded (keep the template\'s items)',
+  ]);
+  // An item that is there but not ticked is the ordinary "unchecked" failure, not a missing one.
+  const unticked = checkReview(survey({ review: 'Reviewer: Uma\n\n- [x] K1 platform\n- [x] K2 billing\n- [x] M1 map\n- [x] M2 owners\n- [x] M3 glossary\n- [x] M4 capabilities\n- [x] M5 carry\n- [ ] C1 coverage\n' }), 'survey').problems.join('\n');
+  assert.doesNotMatch(unticked, /has no C1 item/);
+  assert.match(unticked, /C1/);
+  // M10 is not M1.
+  assert.match(checkReview(survey({ review: 'Reviewer: Uma\n\n- [x] K1 platform\n- [x] K2 billing\n- [x] M10 map\n- [x] M2 o\n- [x] M3 g\n- [x] M4 c\n- [x] M5 c\n- [x] C1 c\n' }), 'survey').problems.join('\n'), /has no M1 item/);
+
+  const inventory = (notes) => `| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | port | |\n| src/common/db.php | platform | port | |\n| vendor/ | excluded | | ${notes} |\n`;
+  for (const empty of ['', '-', 'TBD', '<!-- library -->']) {
+    assert.deepEqual(checkReview(survey({ inventory: inventory(empty) }), 'survey').problems, ['inventory row "vendor/" is excluded with no reason in Notes (generated code, vendored library, build output, dead code...)'], empty);
+  }
+  assert.deepEqual(checkReview(survey({ inventory: inventory('Composer が入れたライブラリ') }), 'survey').problems, []);
+  // A row that is not excluded needs no note; a translated header is read by name.
+  assert.deepEqual(checkReview(survey({ inventory: '| パス | コンテキスト | 扱い | 備考 |\n|---|---|---|---|\n| src/ | billing | port | |\n| src/common/db.php | platform | port | |\n| vendor/ | excluded | | ライブラリ |\n' }), 'survey').problems, []);
+});
+
+test('the target design keeps the fixed review items', () => {
+  const dir = survey();
+  fs.mkdirSync(path.join(dir, 'openspec/changes/archive'));
+  fs.renameSync(path.join(dir, SURVEY), path.join(dir, 'openspec/changes/archive/2026-11-01-survey'));
+  const T = 'openspec/changes/target-design';
+  write(dir, `${T}/.openspec.yaml`, 'schema: spec-relay-target\n');
+  write(dir, `${T}/ui.md`, UI);
+  write(dir, `${T}/architecture.md`, '| Context | Module path |\n|---|---|\n| platform | ts/platform |\n| billing | ts/billing |\n');
+  write(dir, `${T}/verification.md`, '| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| platform | yes | no | no | no |\n| billing | yes | no | no | no |\n');
+  write(dir, `${T}/conventions.md`, '## Commands\n| Purpose | Command |\n|---|---|\n| Test | `npm.cmd test` |\n| Boundary check | `npx.cmd depcruise src` |\n');
+  write(dir, `${T}/data.md`, '# Data\n\n## Schema policy\nNone\n');
+  // Only the per-context items: the conventions, the commands, sign-in and the shared look were never put to the person.
+  write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform: levels\n- [x] E2 billing: levels\n- [x] U1 platform: screens\n- [x] U2 billing: screens\n');
+  assert.deepEqual(checkReview(dir, 'target-design').problems, [
+    'review.md has no A0 item for the style (keep the template\'s items)',
+    'review.md has no A90 item for data ownership (keep the template\'s items)',
+    'review.md has no A91 item for the boundary check (keep the template\'s items)',
+    'review.md has no V1 item for runtime and frameworks (keep the template\'s items)',
+    'review.md has no V2 item for the language mapping (keep the template\'s items)',
+    'review.md has no V3 item for the coding conventions (keep the template\'s items)',
+    'review.md has no V4 item for the commands (keep the template\'s items)',
+    'review.md has no E90 item for sign-in and recorded data (keep the template\'s items)',
+    'review.md has no U90 item for the shared look, carried files and client-side scripts (keep the template\'s items)',
+  ]);
+  write(dir, `${T}/review.md`, `Reviewer: Uma\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform: levels\n- [x] E2 billing: levels\n${UI_BOXES}`);
+  assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
+});
+
 const UI = '# UI\n\n## Screens\n| Context | Screens | Source kind | Target | Policy | Why |\n|---|---|---|---|---|---|\n| platform | all | PHP pages | Thymeleaf | same | |\n| billing | all | WinForms | React | layout | |\n| billing | printed reports | Crystal Reports | PDF | same | |\n\n## Carried files\nNone\n';
 // The items every target design has, whatever its contexts.
 const FIXED_BOXES = '- [x] A0 style\n- [x] A90 ownership\n- [x] A91 boundary\n- [x] V1 runtime\n- [x] V2 mapping\n- [x] V3 coding\n- [x] V4 commands\n- [x] E90 sign-in\n';

@@ -191,6 +191,9 @@ test('a response: status, redirect, and the body by its type', () => {
   assert.deepEqual(view(302, { location: 'login.php?next=%2Flist' }, ''), { status: 302, redirect: '/login.php?next=%2Flist' });
   assert.deepEqual(view(302, { location: 'http://localhost:8080/app/orders' }, '', { map: readMap('{"paths": {"/order_list.php": "/orders"}}') }), { status: 302, redirect: '/order_list.php' });
   assert.deepEqual(view(302, { location: 'https://sso.example.test/login' }, ''), { status: 302, redirect: 'https://sso.example.test/login' });
+  // What a user cannot see is no difference: the type of an empty body (PHP names one on every redirect), an empty title.
+  assert.deepEqual(view(302, { location: '/app/login.php', 'content-type': 'text/html; charset=UTF-8' }, ''), { status: 302, redirect: '/login.php' });
+  assert.deepEqual(view(200, { 'content-type': 'text/html' }, '<title> </title><p>a</p>'), { status: 200, type: 'text/html', text: ['a'], fields: {} });
   const session = { cookies: new Map(), hidden: {} };
   // Shift_JIS named only in the page, as old pages do.
   const sjis = Buffer.concat([Buffer.from('<meta http-equiv="Content-Type" content="text/html; charset=Shift_JIS"><title>'), Buffer.from([0x92, 0x8d, 0x95, 0xb6]), Buffer.from('</title><input type=hidden name=t value=1><input name="name" value="x">')]);
@@ -213,10 +216,11 @@ test('record: the old system answers the requests, and the cases keep the placeh
   try {
     write(dir, 'tests/golden/inputs/orders.jsonl', `${INPUTS}\n`);
     const opts = parseHttpOptions(['--base', `http://127.0.0.1:${port}`, '--inputs', 'tests/golden/inputs/orders.jsonl', '--out', 'tests/golden/shop-orders/recorded.jsonl', '--charset', 'shift_jis'], 'record');
-    // Without the variable nothing is sent past that case, and nothing is written.
+    // Without the variable no request is sent at all (the ones after the sign-in would act signed out), and nothing is written.
     let r = await record(opts, { cwd: dir, env: {} });
     assert.equal(r.ok, false);
-    assert.match(r.problems.join(), /case sign-in: the environment variable SR_TEST_PASS is not set/);
+    assert.equal(r.count, 0);
+    assert.deepEqual(r.problems, ['case sign-in: the environment variable SR_TEST_PASS is not set (the person sets it; never write its value into a file)', 'no request was sent']);
     assert.equal(fs.existsSync(path.join(dir, 'tests/golden/shop-orders/recorded.jsonl')), false);
 
     r = await record(opts, { cwd: dir, env: { SR_TEST_PASS: 'secret' } });
@@ -225,9 +229,9 @@ test('record: the old system answers the requests, and the cases keep the placeh
     const text = fs.readFileSync(path.join(dir, 'tests/golden/shop-orders/recorded.jsonl'), 'utf8');
     assert.doesNotMatch(text, /secret/);
     const cases = Object.fromEntries(text.trim().split('\n').map((line) => { const c = JSON.parse(line); return [c.id, c]; }));
-    assert.deepEqual(cases['list-signed-out'].expected, { status: 302, redirect: '/login.php', type: 'text/html' });
+    assert.deepEqual(cases['list-signed-out'].expected, { status: 302, redirect: '/login.php' });
     assert.equal(cases['sign-in'].input.form.pass, '${env:SR_TEST_PASS}');
-    assert.deepEqual(cases['sign-in'].expected, { status: 302, redirect: '/order_list.php', type: 'text/html' });
+    assert.deepEqual(cases['sign-in'].expected, { status: 302, redirect: '/order_list.php' });
     assert.deepEqual(cases.list.expected, { status: 200, type: 'text/html', title: '注文一覧', text: ['注文一覧', '1', '山田', '1件', '登録'], fields: { ctl00$name: '' } });
     // The hidden token went back with the form, and the Shift_JIS name arrived whole.
     assert.deepEqual(cases.add.expected.text, ['注文一覧', '1', '山田', '2', '鈴木', '2件', '登録']);
