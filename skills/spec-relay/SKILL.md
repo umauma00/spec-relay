@@ -768,8 +768,9 @@ reads it and it approves nothing. See docs/GUIDE.md.
 4. Run `node "<kit>/scripts/guide.mjs" stamp` (it writes the file's hash under
    each heading that has none), then `node "<kit>/scripts/guide.mjs" check`.
    Give the `problems` back to the writer of that file (a name not in the
-   file, a line that does not exist, a handler that is gone, a module path
-   with no code), and a module with `unexplained` files too, then stamp and
+   file, a line that does not exist, a handler that is gone), and a module
+   with `unexplained` files too (`noCode` marks a module not ported yet: no
+   writer for it), then stamp and
    check again. A hash that is there changes only with `--file <path>` (one
    per file written again) or `--file all`: never pass them for a file whose
    explanation was not rewritten, or its out-of-date warning disappears.

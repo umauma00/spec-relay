@@ -137,8 +137,13 @@ test('a module path may be written from the target root; code under no module an
   assert.deepEqual(started.unassigned, ['new/Main.java', 'new/sales/OrderApi.java']);
   assert.deepEqual(started.modules.find((m) => m.module === 'billing').code, ['new/billing/InvoiceController.java', 'new/billing/InvoiceService.java']);
   const result = check(dir);
-  assert.ok(result.problems.some((p) => /module sales-orders: no code files under its module path "new\/nothing"/.test(p)));
+  assert.deepEqual(result.problems, [], 'a module not ported yet is no problem');
+  assert.equal(result.ok, true);
+  assert.equal(result.modules.find((m) => m.module === 'sales-orders').noCode, true);
   assert.deepEqual(result.unassigned, ['new/Main.java', 'new/sales/OrderApi.java']);
+  // A folder of the same name at the repository root (the old code, source root ".") does not hide the target's.
+  write(dir, 'billing/Legacy.php', '<?php\n');
+  assert.equal(modules(dir).find((m) => m.key === 'billing').path, 'new/billing');
   const empty = repo();
   write(empty, td, '# Architecture\n\n## Modules\n| Context | Module path | Public API | Events published | Depends on |\n|---|---|---|---|---|\n| x | new/none | - | - | - |\n');
   init(empty);
@@ -217,6 +222,20 @@ test('the command line runs init, stamp and check', () => {
   assert.equal(quiet(() => main(['nothing'])), 2);
 });
 
+test('an answer with an open code fence never swallows the next saved answer', () => {
+  const dir = repo();
+  init(dir);
+  write(dir, 'openspec/spec-relay/guide/code/billing.md', BILLING);
+  const file = 'new/billing/InvoiceService.java';
+  saveQa(dir, { module: 'billing', file, question: 'one', answer: '```total(a, b)``` returns the sum.' });
+  saveQa(dir, { module: 'billing', file, question: 'two', answer: 'Like this:\n```java\nint x = total(1, 2);' });
+  saveQa(dir, { module: 'billing', file, question: 'three', answer: 'x'.repeat(19990) + '\n~~~\nlong' });
+  saveQa(dir, { module: 'billing', file, question: 'four', answer: 'Fine.' });
+  const qa = parseQa(read(dir, 'openspec/spec-relay/guide/qa/billing.md'));
+  assert.deepEqual(qa.map((e) => e.question), ['one', 'two', 'three', 'four']);
+  assert.equal(qa[1].answer, 'Like this:\n```java\nint x = total(1, 2);\n```', 'an open fence is closed on save');
+});
+
 test('the guide reads and appends only inside the repository', (t) => {
   const dir = repo();
   init(dir);
@@ -231,6 +250,10 @@ test('the guide reads and appends only inside the repository', (t) => {
   } catch { t.skip('cannot make links here'); return; }
   assert.match(saveQa(dir, { module: 'billing', file: 'new/billing/InvoiceService.java', question: 'q', answer: 'a' }).problem, /link or outside/);
   assert.equal(read(outside, 'qa.md'), 'theirs\n');
+  fs.rmSync(path.join(dir, 'openspec/spec-relay/guide/qa/billing.md'));
+  fs.symlinkSync(path.join(outside, 'new.md'), path.join(dir, 'openspec/spec-relay/guide/qa/billing.md'));
+  assert.match(saveQa(dir, { module: 'billing', file: 'new/billing/InvoiceService.java', question: 'q', answer: 'a' }).problem, /link or outside/, 'a link to a file not there yet too');
+  assert.equal(fs.existsSync(path.join(outside, 'new.md')), false);
   render({ root: dir, guide: 'sales-orders' });
   assert.doesNotMatch(read(dir, 'openspec/spec-relay/views/guide-sales-orders.html'), /SECRET/);
 });

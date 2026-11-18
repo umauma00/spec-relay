@@ -57,6 +57,14 @@ function inRepo(root, file) {
 const hashOf = (root, file) => { const real = inRepo(root, file); try { return real ? fileHash(fs.readFileSync(real)) : null; } catch { return null; } };
 const read = (root, file) => { const real = inRepo(root, file); try { return real ? fs.readFileSync(real, 'utf8').replace(/^\uFEFF/, '') : null; } catch { return null; } };
 const stripComments = (text) => text.replace(/<!--[\s\S]*?-->/g, '');
+// Code fences as Markdown reads them: an opening run of three or more ` or ~ (a
+// backtick run with no backtick after it), closed by a run of the same character,
+// at least as long, with nothing after it. `open` is the opening run, or null.
+function fence(line, open) {
+  if (open) { const m = line.match(/^ {0,3}(`{3,}|~{3,})\s*$/); return m && m[1][0] === open[0] && m[1].length >= open.length ? null : open; }
+  const m = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+  return m && !(m[1][0] === '`' && m[2].includes('`')) ? m[1] : null;
+}
 
 // A module's file name: its context in lower case, words joined by hyphens.
 export const moduleKey = (context) => plain(String(context)).toLowerCase().normalize('NFKC').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -78,7 +86,8 @@ function modulePath(root, written) {
   const p = rel(written);
   const target = targetRoot(root);
   if (!p || !target || target === '.' || fold(p) === fold(target) || fold(p).startsWith(`${fold(target)}/`)) return p;
-  return fs.existsSync(path.join(root, p)) || !fs.existsSync(path.join(root, target, p)) ? p : `${target}/${p}`;
+  // Target files all start with the target root, so a path outside it would match nothing.
+  return fs.existsSync(path.join(root, target, p)) ? `${target}/${p}` : p;
 }
 
 // The modules of architecture.md's "## Modules" table.
@@ -138,7 +147,7 @@ export function parseCodeGuide(text) {
   let block = null;
   let fenced = false;
   for (const line of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    fenced = fence(line, fenced);
     const head = fenced ? null : line.match(/^###\s+File:\s*(.+?)\s*$/i);
     if (head) { block = { file: rel(head[1].replace(/`/g, '')), hash: null, body: [] }; out.files.push(block); continue; }
     if (!fenced && /^#{1,3}\s/.test(line)) { block = null; continue; }
@@ -179,7 +188,7 @@ export function parseQa(text) {
     const field = fields && line.match(/^-\s+(File|Hash|Saved):\s*(.*)$/i);
     if (field) { entry[field[1].toLowerCase()] = field[2].trim().replace(/^`|`$/g, ''); continue; }
     fields = false;
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    fenced = fence(line, fenced);
     entry.answer.push(line);
   }
   for (const e of out) e.answer = e.answer.join('\n').trim();
@@ -250,7 +259,7 @@ function stampQa(root, key) {
       continue;
     }
     if (fields) { fill(); target = null; empty = -1; fields = false; }
-    if (/^\s*(```|~~~)/.test(lines[i])) fenced = !fenced;
+    fenced = fence(lines[i], fenced);
   }
   fill();
   if (filled) fs.writeFileSync(file, lines.join(eol));
@@ -271,7 +280,7 @@ export function stamp(root, { module, files = [] } = {}) {
     let fenced = false;
     let stamped = 0;
     for (let i = 0; i < lines.length; i += 1) {
-      if (/^\s*(```|~~~)/.test(lines[i])) fenced = !fenced;
+      fenced = fence(lines[i], fenced);
       const head = !fenced && lines[i].match(/^###\s+File:\s*(.+?)\s*$/i);
       if (!head) continue;
       const named = rel(head[1].replace(/`/g, ''));
@@ -306,7 +315,6 @@ export function check(root) {
     const guideFile = `${CODE}/${m.key}.md`;
     const guide = parseCodeGuide(read(root, guideFile));
     const own = moduleFiles(root, m, files);
-    if (!own.some(isCode)) problems.push(`module ${m.key}: no code files under its module path "${m.path || '(none)'}" in architecture.md (a path from the repository root or from the target root)`);
     const explained = new Set(guide.files.map((b) => fold(b.file)));
     const stale = [];
     const gone = [];
@@ -325,7 +333,8 @@ export function check(root) {
     }
     const qa = parseQa(read(root, `${QA}/${m.key}.md`));
     return {
-      module: m.key, guide: fs.existsSync(path.join(root, guideFile)),
+      // A module with no code yet (not ported) is no problem: it is shown, not failed.
+      module: m.key, path: m.path, noCode: !own.some(isCode), guide: fs.existsSync(path.join(root, guideFile)),
       files: own.filter(isCode).length, explained: own.filter((f) => isCode(f) && explained.has(fold(f))).length,
       unexplained: own.filter((f) => isCode(f) && !explained.has(fold(f))), stale, gone,
       qa: qa.length, staleQa: qa.filter((q) => q.hash && hashOf(root, q.file) !== q.hash).length,
@@ -375,14 +384,16 @@ export function saveQa(root, { module, file, question, answer, now = new Date() 
   // Only a "### Q:" line outside a code fence would start another entry: it stays as text.
   let fenced = false;
   const a = String(answer ?? '').replace(/\r\n?/g, '\n').trim().slice(0, 20000).split('\n').map((line) => {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    fenced = fence(line, fenced);
     return !fenced && /^###\s+Q:/.test(line) ? `\\${line}` : line;
-  }).join('\n');
+  }).join('\n') + (fenced ? `\n${fenced}` : '');
   if (!q || !a) return { ok: false, problem: 'the question and the answer are both needed' };
   const out = path.join(root, QA, `${key}.md`);
   fs.mkdirSync(path.dirname(out), { recursive: true });
   // Never append through a link out of the repository.
-  if (!inRepo(root, QA) || (fs.existsSync(out) && (fs.lstatSync(out).isSymbolicLink() || !inRepo(root, `${QA}/${key}.md`)))) return { ok: false, problem: `${QA}/${key}.md is a link or outside the repository` };
+  let link = false;
+  try { const st = fs.lstatSync(out); link = st.isSymbolicLink() || !inRepo(root, `${QA}/${key}.md`); } catch { /* not there yet */ }
+  if (!inRepo(root, QA) || link) return { ok: false, problem: `${QA}/${key}.md is a link or outside the repository` };
   const head = fs.existsSync(out) ? '' : `# Questions and answers: ${mod.context}\n\n<!-- Saved from the canvas when the person found an answer helpful. -->\n`;
   fs.appendFileSync(out, `${head}\n### Q: ${q}\n- File: ${block.file}\n- Hash: ${hashOf(root, block.file) ?? ''}\n- Saved: ${now.toISOString().slice(0, 10)}\n\n${a}\n`);
   return { ok: true, file: `${QA}/${key}.md` };
