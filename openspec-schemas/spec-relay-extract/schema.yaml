@@ -242,8 +242,14 @@ artifacts:
         requirements' scenarios or these screens. Name the requirement of
         each effect line: the gate accepts the verdict only when the trace
         of a named requirement reaches every effect line of the site (a
-        named screen may stand for a redirect, never for a write, a mail or
-        an error).
+        named screen may stand for a redirect and the exit that ends it,
+        never for a write, a mail or an error). Markers are words, so a
+        line may hold one and no effect (text of the page, script that runs
+        in the browser, a word inside a string): only then add `; no effect
+        <lines>` after the names (`covered R1, S1; no effect 6, 9`) and say
+        per line in the evidence what the line is. The person confirms
+        those lines in the review (C1). Never use it for a line that does
+        something.
       - `no behavior`: the site has no effect a user or caller could notice
         (a plain getter, a constructor that only stores its arguments, a
         log line nobody reads). Say why in the evidence. When the site
@@ -271,8 +277,10 @@ artifacts:
       When the gate reports an effect line no named requirement reaches: if a
       requirement's scenarios really describe that line, an analyst adds the
       line to that requirement's trace row and a checker crosschecks the
-      requirement again; if none does, the site is a `gap`. Never widen a
-      trace row to lines its requirement does not describe.
+      requirement again; if the line holds no effect at all, the checker
+      adds it to `; no effect <lines>`; if none of these, the site is a
+      `gap`. Never widen a trace row to lines its requirement does not
+      describe.
     requires:
       - trace
 
@@ -316,13 +324,14 @@ artifacts:
       - One checkbox per question: `- [ ] Q<n> <short title>: decision: ...`
         under `## 3. Questions`. Leave the decision blank.
       - Under `## 4. Coverage`, only when coverage.md judges sites that hold
-        marker lines as `no behavior`: one checkbox
-        `- [ ] C1 The <n> sites judged no behavior although they hold marker
-        lines have nothing to migrate`, with the number of such sites
-        (`gate.mjs review` names it and fails while the item is missing or
-        states another number; the review page lists the sites). When the
-        number changes, write the new one and untick the item. Without such
-        sites, leave the heading out.
+        marker lines as `no behavior`, or sets marker lines aside with `no
+        effect`: one checkbox, with the text `gate.mjs review` gives:
+        `- [ ] C1 The marker lines of <n> sites are judged to hold nothing
+        to migrate (list <code>)`. The code names the list as it is now
+        (the review page shows the list and the same code); the gate fails
+        while the item is missing or names another list. When the list
+        changes, write the new text and leave the item unticked. Without
+        such sites, leave the heading out.
 
       Do not tick any box. Only the reviewer decides; see the apply instruction.
     requires:

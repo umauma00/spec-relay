@@ -43,7 +43,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCommand, MAX_TIMEOUT_MS, stopAllOnSignal } from './run.mjs';
 import { chainProblem } from './gate.mjs';
-import { HTTP_DRIVER, isHttpDriver, parseHttpOptions, runHttpDriver } from './http.mjs';
+import { HTTP_DRIVER, isHttpDriver, parseHttpOptions, readMapFile, runHttpDriver } from './http.mjs';
 
 export const COMPARE_COMMAND = 'spec-relay-compare';
 const RULE_KEYS = ['ignore', 'tolerance', 'numbersAsText', 'trim', 'unordered', 'missingIsNull'];
@@ -338,13 +338,27 @@ export function readOutputs(content, label, problems) {
 
 // --- running ----------------------------------------------------------------
 
+// The hash a verify run records for a compare level: the cases and rules.json,
+// and for the HTTP driver its map, which loosens the comparison like a rule
+// (port-done computes it again, so a map edited after the run is seen even
+// where git ignores the cases folder).
+export function casesDigest(sha256, driver, cwd) {
+  if (sha256 === null || !driver || !isHttpDriver(driver)) return sha256;
+  const opts = httpDriverOptions(driver);
+  if (opts.problem || !opts.map) return sha256;
+  const read = readMapFile(cwd, opts.map);
+  return crypto.createHash('sha256').update(`${sha256}\n${read.problem ? 'no map' : read.text.replace(/\r\n?/g, '\n')}`).digest('hex');
+}
+
 // Compares the cases of a folder with the new code's outputs. Resolves to
 // { ok, count, passed, failed: [{ id, file, line, diffs }], problems, sha256, seconds, timedOut, driverExit, output }.
 export async function compare({ cases: casesDir, driver, actual, cwd = process.cwd(), timeoutMs, run = runCommand, http = runHttpDriver }) {
   const started = Date.now();
   const problems = [];
   const dir = path.resolve(cwd, casesDir);
-  const { cases, rules, sha256 } = readCases(dir, problems, cwd);
+  const read = readCases(dir, problems, cwd);
+  const { cases, rules } = read;
+  const sha256 = casesDigest(read.sha256, driver, cwd);
   let rulesText = rules.text;
   const result = (extra = {}) => {
     const failed = extra.failed ?? [];
@@ -362,7 +376,8 @@ export async function compare({ cases: casesDir, driver, actual, cwd = process.c
     problems.push(...ran.problems);
     // The map loosens the comparison like a rule, so it is shown with the rules.
     rulesText = [...rulesText, ...(ran.rules ?? [])];
-    if (ran.problems.length) return result({ unrun: cases.length - ran.outputs.size, ...(ran.output ? { output: ran.output } : {}) });
+    // Nothing was compared: a run that stopped half way has no cases that match.
+    if (ran.problems.length) return result({ unrun: cases.length, timedOut: Boolean(ran.timedOut), ...(ran.output ? { output: ran.output } : {}) });
     outputs = ran.outputs;
   } else if (driver) {
     const input = cases.map((c) => JSON.stringify({ id: c.id, input: c.input })).join('\n') + '\n';
@@ -415,7 +430,12 @@ export function portOptionProblem(opts) {
   if (opts.cwd) return '--cwd is not allowed in a port command; it runs in the target root';
   if (opts.actual) return '--actual is not allowed in a port command: give a --driver that runs the new code, so the verify run compares the code as it is now';
   // A system someone started earlier may run older code than the files hold.
-  if (isHttpDriver(opts.driver) && !httpDriverOptions(opts.driver).start) return `the ${HTTP_DRIVER} driver of a port command needs --start "<command>": the verify run starts the new system itself, so it compares the code as it is now`;
+  if (isHttpDriver(opts.driver)) {
+    const http = httpDriverOptions(opts.driver);
+    if (!http.start) return `the ${HTTP_DRIVER} driver of a port command needs --start '<command>': the verify run starts the new system itself, so it compares the code as it is now`;
+    // The run starts the new system on this machine, so no other host is ever needed.
+    if (http.allow?.length) return `--allow-host is not allowed in a port command: the verify run starts the new system on this machine and sends the recorded requests only there`;
+  }
   return null;
 }
 

@@ -93,7 +93,11 @@ unspecified behavior you found (below).
   recorder: `tests/golden/inputs/<capability>.jsonl`, one
   `{"id", "input": {"path", "form", ...}}` per line in the order a user
   would act, for every scenario and edge case, signing in with
-  `${env:NAME}` values and never a real password. Record them only when the
+  `{{env:NAME}}` values and never a real password (write the file with
+  the edit tool, not with a shell command: a shell may fill a variable in
+  while it writes). A form that needs the hidden fields of the page before
+  it (`__VIEWSTATE`, a CSRF token) gets `"hidden": true`, or the number of
+  the form on that page when several forms differ. Record them only when the
   task says the person confirmed the test copy of the old system runs:
   `node "<kit>/scripts/http.mjs" record --base <its address> --inputs
   tests/golden/inputs/<capability>.jsonl --out tests/golden/<capability

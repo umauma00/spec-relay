@@ -90,7 +90,13 @@ lines for any requirement, so read each one first and expect a `gap`.
   (the analyst then adds the line to its trace); when you cannot point to a
   scenario that states what the line does, the site is a `gap`. One
   requirement that only lists or shows something never covers a page's
-  writes, mails and redirects.
+  writes, mails and redirects. A marker is a word, so a line may hold one
+  and no effect: text of the page ("to delete, press..."), script that runs
+  in the browser, a word inside a string. Only for such a line, add
+  `; no effect <lines>` after the names (`covered R1, S1; no effect 6, 9`)
+  and say per line in the evidence what the line is (`6: script for the
+  browser`). The person reads these lines, so never use it for a line that
+  writes, sends, fails, ends the request or redirects.
 - `no behavior`: nothing to notice. Say why in the evidence.
 - `other capability <path>`: the task names that capability as an owner of
   this file, and this site is that capability's part.

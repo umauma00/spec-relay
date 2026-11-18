@@ -11,9 +11,14 @@
 //   node sites.mjs --change extract-<capability> [--per N] [--root DIR]
 //
 // Writes openspec/spec-relay/work/<change>/sites/<nn>.md, tables of at most N
-// sites (default 40) with their lines and markers, so each omission checker gets
-// one file, and prints { ok, change, sites, files, parts, problems } as JSON.
-// `gate.mjs review` scans again and needs one row per site in coverage.md.
+// sites (default 40) with their lines, their markers and the effect lines no
+// trace row reaches yet (Untraced), so each omission checker gets one file,
+// and prints { ok, change, sites, files, untraced, parts, problems } as JSON.
+// `gate.mjs review` scans again and needs one row per site in coverage.md. A
+// row that says `covered` must name requirements whose trace reaches every
+// effect line of the site (a screen may stand for a redirect and its exit);
+// `; no effect <lines>` sets aside a marker line that holds none, and those
+// sites, like `no behavior` sites with markers, need the person's C1 item.
 //
 // The scanner reads text, not syntax trees: it blanks out comments and string
 // literals, follows braces, and takes the declarations it recognizes. Only
@@ -34,7 +39,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readIf, sourceFiles, archivedChange, headedRows, PLACEHOLDER, inventoryRows as handledRows, inventoryRowFor } from './gate.mjs';
+import crypto from 'node:crypto';
+import { readIf, sourceFiles, archivedChange, headedRows, PLACEHOLDER, inventoryRows as handledRows, inventoryRowFor, specRequirements } from './gate.mjs';
 import { sourceMapPaths, covers, contextOf, inventoryRows, ownersOf, traceRefs } from './coverage.mjs';
 
 // ---------------------------------------------------------------- reading
@@ -949,7 +955,8 @@ export function lineText(site) {
 
 // A symbol as trace.md and the scanner may both write it: without the overload
 // number and the parameter list, with `.` for `::`, `->` and `\`, in lowercase.
-const symbolKey = (s) => s.replace(/#\d+$/, '').replace(/\(.*\)$/, '').replace(/::|->|\\/g, '.').replace(/\s+/g, '').toLowerCase();
+// SQL brackets and quotes and a generic type's parameters are not part of the name.
+const symbolKey = (s) => s.replace(/#\d+$/, '').replace(/\(.*\)$/, '').replace(/<[^<>]*>/g, '').replace(/[[\]"'`]/g, '').replace(/::|->|\\/g, '.').replace(/\s+/g, '').toLowerCase();
 
 // Whether a trace reference reaches a line of a site. A reference with lines
 // reaches those lines; one with a symbol alone reaches the member of that name
@@ -987,6 +994,18 @@ export function parseVerdict(text) {
   const v = text.replace(/<!--[\s\S]*?-->/g, '').replace(/[*_`]/g, '').trim().replace(/[.。]$/, '').trim();
   let m = v.match(/^covered\s*:?\s*(.+)$/i);
   if (m) {
+    // "covered R1; no effect 6, 9": the marker on those lines is not an effect
+    // (page text, script that runs in the browser). The person confirms them.
+    const dismissed = [];
+    const tail = m[1].match(/^(.*?)[\s,;、]*\bno[\s-]+effect\s*:?\s*(\d[\d\s,、\-–]*)$/i);
+    if (tail) {
+      for (const part of tail[2].split(/[\s,、]+/).filter(Boolean)) {
+        const span = part.match(/^(\d+)(?:[-–](\d+))?$/);
+        if (!span || Number(span[2] ?? span[1]) < Number(span[1]) || Number(span[2] ?? span[1]) - Number(span[1]) > 2000) return { kind: 'invalid' };
+        for (let k = Number(span[1]); k <= Number(span[2] ?? span[1]); k += 1) dismissed.push(k);
+      }
+      m = [m[0], tail[1]];
+    }
     const tokens = m[1].replace(/\s*([-–~〜])\s*/g, '$1').split(/[\s,、;/]+|\band\b/i).filter(Boolean);
     const refs = [];
     for (const token of tokens) {
@@ -997,7 +1016,7 @@ export function parseVerdict(text) {
         for (let k = Number(span[2]); k <= Number(span[4]); k += 1) refs.push(`${span[1].toUpperCase()}${k}`);
       } else return { kind: 'invalid' };
     }
-    return refs.length ? { kind: 'covered', refs } : { kind: 'invalid' };
+    return refs.length ? { kind: 'covered', refs, dismissed } : { kind: 'invalid' };
   }
   if (/^no[\s-]+behaviou?r$/i.test(v)) return { kind: 'no-behavior' };
   m = v.match(/^other[\s-]+capability\s*:?\s*([a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)+)$/i);
@@ -1069,7 +1088,7 @@ export function checkLedger(root, dir, { requirements, screens, asked, assignmen
   const bad = [];
   const others = new Map();
   const traced = traceRefs(dir);
-  const refsOf = (ref) => traced.get(requirements[Number(ref.slice(1)) - 1]?.replace(/[*_`[\]()]/g, '').replace(/\s+/g, ' ').trim().toLowerCase() ?? '') ?? [];
+  const refsOf = (ref) => traced.get(traceKey(requirements[Number(ref.slice(1)) - 1])) ?? [];
   const quiet = [];
   for (const site of sites) {
     const row = rows.get(ledgerKey(site.id));
@@ -1085,12 +1104,14 @@ export function checkLedger(root, dir, { requirements, screens, asked, assignmen
       // "covered" is a claim about every effect of the site. The trace says where each
       // requirement lives, so an effect line no named requirement's trace reaches is
       // either a line that requirement never read or behavior the spec left out.
-      // A screen describes where its actions lead, so it may stand for a redirect.
+      // A screen describes where its actions lead, so it may stand for a redirect
+      // and for the exit that ends it (`header('Location: ...'); exit;`).
       if (known) {
         const cited = v.refs.filter((ref) => ref[0] === 'R');
         const onScreen = v.refs.some((ref) => ref[0] === 'S');
-        const missing = untracedEffects(site, cited.flatMap(refsOf)).filter((m) => !(onScreen && m.kind === 'redirect'));
-        if (missing.length) bad.push(`coverage of ${site.id} is "covered ${v.refs.join(', ')}", but no trace of ${cited.length ? cited.join(', ') : 'a requirement'} reaches its effect lines (${markerText(missing)}): name the requirement that specifies each line (its trace row must cite the line or the member), or write gap`);
+        const { missing, waived } = settle(site, v, cited.flatMap(refsOf), onScreen);
+        if (missing.length) bad.push(`coverage of ${site.id} is "covered ${v.refs.join(', ')}", but no trace of ${cited.length ? cited.join(', ') : 'a requirement'} reaches its effect lines (${markerText(missing)}): name the requirement that specifies each line (its trace row must cite the line or the member), or write gap. Only when a line holds no effect at all (page text, script that runs in the browser), add "; no effect <lines>" to the verdict, for the person to confirm`);
+        if (waived.length) quiet.push(`${site.id} no effect ${[...new Set(waived.map((m) => m.line))].join(',')}`);
       }
     } else if (v.kind === 'other') {
       const paths = assignment.get(v.capability);
@@ -1123,11 +1144,32 @@ export function checkLedger(root, dir, { requirements, screens, asked, assignmen
   // item goes stale (and the gate stops) when another such site appears.
   if (boxes && quiet.length) {
     const item = boxes.find((b) => /^C1\b/i.test(b.plain));
-    const stated = item ? Number(item.plain.replace(/^C1\b/i, '').match(/\d+/)?.[0] ?? NaN) : NaN;
-    if (!item) problems.push(`review.md has no C1 item: ${quiet.length} site${quiet.length === 1 ? '' : 's'} with marker lines ${quiet.length === 1 ? 'is' : 'are'} judged "no behavior" (${quiet.slice(0, 3).join(', ')}${quiet.length > 3 ? ', ...' : ''}); add "- [ ] C1 The ${quiet.length} sites judged no behavior although they hold marker lines have nothing to migrate" under "## 4. Coverage", for the person to decide`);
-    else if (stated !== quiet.length) problems.push(`review item C1 ${Number.isNaN(stated) ? 'states no number of sites' : `says ${stated}`}, but ${quiet.length} site${quiet.length === 1 ? '' : 's'} with marker lines ${quiet.length === 1 ? 'is' : 'are'} judged "no behavior"; write the number ${quiet.length} in the item and untick it, so the person sees the list again`);
+    const code = listCode(quiet);
+    const n = `${quiet.length} site${quiet.length === 1 ? '' : 's'}`;
+    const wording = `C1 The marker lines of ${n} are judged to hold nothing to migrate (list ${code})`;
+    if (!item) problems.push(`review.md has no C1 item: ${n} with marker lines ${quiet.length === 1 ? 'is' : 'are'} judged "no behavior" or "no effect" (${quiet.slice(0, 3).join('; ')}${quiet.length > 3 ? '; ...' : ''}); add "- [ ] ${wording}" under "## 4. Coverage", for the person to decide`);
+    else if (!new RegExp(`(^|[^0-9a-z])${code}([^0-9a-z]|$)`, 'i').test(item.plain)) problems.push(`review item C1 is not for the list as it is now (${n} with marker lines judged "no behavior" or "no effect"); write "- [ ] ${wording}" and leave it unticked, so the person sees the list again`);
   }
 }
+
+// A requirement's name as traceRefs keys it.
+const traceKey = (name) => name?.replace(/[*_`[\]()]/g, '').replace(/\s+/g, ' ').trim().toLowerCase() ?? '';
+
+// What is left of a covered site's effect lines: `missing` no trace reaches,
+// `waived` the checker set aside with "no effect" (the person confirms those).
+function settle(site, verdict, refs, onScreen) {
+  const open = untracedEffects(site, refs);
+  // A redirect a screen stands for, and the exit on its line or the next one.
+  const led = new Set(onScreen ? open.filter((m) => m.kind === 'redirect').map((m) => m.line) : []);
+  const byScreen = (m) => (m.kind === 'redirect' && led.has(m.line)) || (m.kind === 'exit' && (led.has(m.line) || led.has(m.line - 1)));
+  const left = open.filter((m) => !byScreen(m));
+  const set = new Set(verdict.dismissed ?? []);
+  return { missing: left.filter((m) => !set.has(m.line)), waived: left.filter((m) => set.has(m.line)) };
+}
+
+// A short code for the list the person confirms with C1: the item names it, so a
+// list that changed (even to one of the same length) needs a new look.
+export const listCode = (entries) => crypto.createHash('sha256').update([...entries].sort().join('\n')).digest('hex').slice(0, 6);
 
 // What the review page shows: counts per verdict, the sites that went to
 // questions, and the sites judged "no behavior" although they hold markers.
@@ -1135,16 +1177,23 @@ export function ledgerSummary(root, dir) {
   const { text, sites, rows } = readLedger(root, dir);
   if (text === null) return null;
   const counts = { covered: 0, 'no-behavior': 0, other: 0, question: 0, gap: 0, open: 0 };
-  const questions = []; const unmarked = []; const open = [];
+  const questions = []; const unmarked = []; const open = []; const quiet = [];
+  const traced = traceRefs(dir);
+  const names = specRequirements(dir, []).map((r) => r.name);
   for (const site of sites) {
     const row = rows.get(ledgerKey(site.id));
     const kind = row ? row.parsed.kind : 'missing';
     if (kind in counts) counts[kind] += 1; else { counts.open += 1; open.push(site.id); }
     if (kind === 'gap') open.push(site.id);
     if (kind === 'question') questions.push({ site: site.id, question: row.parsed.question, evidence: row.evidence });
-    if (kind === 'no-behavior' && site.markers.length) unmarked.push({ site: site.id, markers: markerText(site.markers), evidence: row.evidence });
+    if (kind === 'no-behavior' && site.markers.length) { unmarked.push({ site: site.id, markers: markerText(site.markers), evidence: row.evidence }); quiet.push(site.id); }
+    if (kind === 'covered' && row.parsed.dismissed.length) {
+      const refs = row.parsed.refs.filter((ref) => ref[0] === 'R').flatMap((ref) => traced.get(traceKey(names[Number(ref.slice(1)) - 1])) ?? []);
+      const { waived } = settle(site, row.parsed, refs, row.parsed.refs.some((ref) => ref[0] === 'S'));
+      if (waived.length) { unmarked.push({ site: site.id, markers: `no effect: ${markerText(waived)}`, evidence: row.evidence }); quiet.push(`${site.id} no effect ${[...new Set(waived.map((m) => m.line))].join(',')}`); }
+    }
   }
-  return { sites: sites.length, files: new Set(sites.map((s) => s.file)).size, counts, questions, unmarked, open };
+  return { sites: sites.length, files: new Set(sites.map((s) => s.file)).size, counts, questions, unmarked, open, code: quiet.length ? listCode(quiet) : null };
 }
 
 export function writeParts(root, change, per = 40) {

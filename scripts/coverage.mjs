@@ -307,8 +307,9 @@ export function traceRefs(dir) {
   return refs;
 }
 
-// The number of lines of a file, read as bytes so that any encoding counts the
-// same (LF, CRLF or CR ends a line), or null when it cannot be read.
+// The number of lines of a file (LF, CRLF or CR ends a line; a last line break
+// starts no line), or null when it cannot be read. Bytes are enough for every
+// encoding old sources use except UTF-16, which is read by its byte order mark.
 const lineCounts = new Map();
 function lineCount(root, file) {
   const full = path.join(root, file);
@@ -319,9 +320,9 @@ function lineCount(root, file) {
   let count = null;
   try {
     const buffer = fs.readFileSync(full);
-    let lf = 0; let cr = 0;
-    for (let i = 0; i < buffer.length; i += 1) { if (buffer[i] === 0x0a) lf += 1; else if (buffer[i] === 0x0d && buffer[i + 1] !== 0x0a) cr += 1; }
-    count = lf + cr + 1;
+    const wide = buffer[0] === 0xff && buffer[1] === 0xfe ? 'utf-16le' : buffer[0] === 0xfe && buffer[1] === 0xff ? 'utf-16be' : null;
+    const parts = (wide ? new TextDecoder(wide).decode(buffer) : buffer.toString('latin1')).split(/\r\n|\r|\n/);
+    count = parts.length - (parts.at(-1) === '' ? 1 : 0);
   } catch { /* unreadable: no check */ }
   lineCounts.set(key, count);
   return count;

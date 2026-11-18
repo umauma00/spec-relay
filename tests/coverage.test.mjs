@@ -295,7 +295,7 @@ test('trace lines must exist in the file', () => {
   const trace = (source) => { write(dir, `${C}/trace.md`, `| Requirement | Source | Existing tests |\n|---|---|---|\n| Total | ${source} | none |\n`); const problems = []; checkTrace(dir, path.join(dir, C), ['Total'], problems); return problems; };
   assert.deepEqual(trace('src/a.php:2-3'), []);
   assert.deepEqual(trace('src/a.php:total:3'), []);
-  assert.deepEqual(trace('src/a.php:total:3-40'), ['the trace of "Total" gives src/a.php the lines 3-40, but the file has 4 lines']);
+  assert.deepEqual(trace('src/a.php:total:3-40'), ['the trace of "Total" gives src/a.php the lines 3-40, but the file has 3 lines']);
   assert.deepEqual(trace('src/a.php:9-2'), ['the trace of "Total" gives src/a.php the lines 9-2, which is not a range']);
   assert.deepEqual(trace('src/a.php:0-2'), ['the trace of "Total" gives src/a.php the lines 0-2, which is not a range']);
 });

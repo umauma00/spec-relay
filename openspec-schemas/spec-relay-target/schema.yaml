@@ -185,7 +185,7 @@ artifacts:
         point at production.
       - **Sign-in**: for B1 over HTTP, B2 and C, the test account comes from
         environment variables the person sets (name the variables; a recorded
-        request holds `${env:NAME}` in their place). Never write a
+        request holds `{{env:NAME}}` in their place). Never write a
         password, token or connection string into any file.
       - **Recorded data**: where recorded inputs, outputs and screenshots live
         (under the target root's tests; B1 cases in

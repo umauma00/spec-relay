@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { scanText, scanFile, decode, parseVerdict, writeParts, markerText, checkLedger } from '../scripts/sites.mjs';
+import { scanText, scanFile, decode, parseVerdict, writeParts, markerText, checkLedger, ledgerSummary, listCode, refReaches } from '../scripts/sites.mjs';
 import { checkReview } from '../scripts/gate.mjs';
 import { render } from '../scripts/render.mjs';
 import { spawnSync } from 'node:child_process';
@@ -143,8 +143,8 @@ test('Shift_JIS source is decoded first, so 「ソ」 does not escape a closing 
 });
 
 test('verdicts', () => {
-  assert.deepEqual(parseVerdict('covered R1, R03 S2'), { kind: 'covered', refs: ['R1', 'R3', 'S2'] });
-  assert.deepEqual(parseVerdict('**Covered**: R2.'), { kind: 'covered', refs: ['R2'] });
+  assert.deepEqual(parseVerdict('covered R1, R03 S2'), { kind: 'covered', refs: ['R1', 'R3', 'S2'], dismissed: [] });
+  assert.deepEqual(parseVerdict('**Covered**: R2.'), { kind: 'covered', refs: ['R2'], dismissed: [] });
   assert.equal(parseVerdict('covered R1 and maybe R2').kind, 'invalid');
   assert.equal(parseVerdict('No behaviour').kind, 'no-behavior');
   assert.deepEqual(parseVerdict('other capability `billing/tax`'), { kind: 'other', capability: 'billing/tax' });
@@ -386,8 +386,14 @@ test('UTF-16 without a byte order mark is read; other binary content is one (fil
 });
 
 test('verdicts: the cell holds the verdict only, with ranges and colons read', () => {
-  assert.deepEqual(parseVerdict('covered R1-R3, S2'), { kind: 'covered', refs: ['R1', 'R2', 'R3', 'S2'] });
-  assert.deepEqual(parseVerdict('covered: R4'), { kind: 'covered', refs: ['R4'] });
+  assert.deepEqual(parseVerdict('covered R1-R3, S2'), { kind: 'covered', refs: ['R1', 'R2', 'R3', 'S2'], dismissed: [] });
+  assert.deepEqual(parseVerdict('covered: R4'), { kind: 'covered', refs: ['R4'], dismissed: [] });
+  // Marker lines the checker found to hold no effect, for the person to confirm.
+  assert.deepEqual(parseVerdict('covered R1, S1; no effect 6, 9-11'), { kind: 'covered', refs: ['R1', 'S1'], dismissed: [6, 9, 10, 11] });
+  assert.deepEqual(parseVerdict('covered R2 no-effect: 14'), { kind: 'covered', refs: ['R2'], dismissed: [14] });
+  assert.deepEqual(parseVerdict('covered R2; no effect'), { kind: 'invalid' });
+  assert.deepEqual(parseVerdict('covered R2; no effect 9-3'), { kind: 'invalid' });
+  assert.deepEqual(parseVerdict('covered; no effect 3'), { kind: 'invalid' });
   assert.equal(parseVerdict('covered R3-S4').kind, 'invalid');
   assert.deepEqual(parseVerdict('question: Q01'), { kind: 'question', question: 'Q1' });
   // Notes go to the Evidence cell, so none can take a verdict back.
@@ -680,7 +686,7 @@ test('effect lines: a covered site needs a named requirement whose trace reaches
   trace('src/orders.php:7', 'src/orders.php:audit');
   ledger('covered R1');
   assert.deepEqual(problems(), [
-    'coverage of src/orders.php:(file) is "covered R1", but no trace of R1 reaches its effect lines (exit 2; redirect 2; db-write 4; mail 5): name the requirement that specifies each line (its trace row must cite the line or the member), or write gap',
+    'coverage of src/orders.php:(file) is "covered R1", but no trace of R1 reaches its effect lines (exit 2; redirect 2; db-write 4; mail 5): name the requirement that specifies each line (its trace row must cite the line or the member), or write gap. Only when a line holds no effect at all (page text, script that runs in the browser), add "; no effect <lines>" to the verdict, for the person to confirm',
   ]);
   // The sites file already tells the checker which effect lines no trace reaches.
   const parts = writeParts(dir, 'extract-shop-orders');
@@ -690,10 +696,20 @@ test('effect lines: a covered site needs a named requirement whose trace reaches
   // Naming more requirements is not enough: their traces must reach the lines.
   ledger('covered R1, R2');
   assert.match(problems().join(), /no trace of R1, R2 reaches its effect lines \(exit 2; redirect 2; db-write 4; mail 5\)/);
-  // A screen stands for a redirect (where an action leads), never for a write or a mail.
+  // A screen stands for a redirect (where an action leads) and the exit that ends it, never for a write or a mail.
+  ledger('covered R1, S1');
+  assert.match(problems().join(), /no trace of R1 reaches its effect lines \(db-write 4; mail 5\)/);
   trace('src/orders.php:7', 'src/orders.php:3-6<br>src/orders.php:audit');
+  ledger('covered R1, R2');
+  assert.match(problems().join(), /no trace of R1, R2 reaches its effect lines \(exit 2; redirect 2\)/);
   ledger('covered R1, R2, S1');
-  assert.deepEqual(problems(), ['coverage of src/orders.php:(file) is "covered R1, R2, S1", but no trace of R1, R2 reaches its effect lines (exit 2): name the requirement that specifies each line (its trace row must cite the line or the member), or write gap']);
+  assert.deepEqual(problems(), []);
+  // Several lines after one path are lines, not a symbol.
+  ledger('covered R1, R2');
+  trace('src/orders.php:2, 7', 'src/orders.php:3-4, 5<br>src/orders.php:audit');
+  assert.deepEqual(problems(), []);
+  trace('src/orders.php:2, 7', 'src/orders.php:3-4, 500-600<br>src/orders.php:audit');
+  assert.deepEqual(problems(), ['the trace of "Delete an order" gives src/orders.php the lines 500-600, but the file has 9 lines', 'coverage of src/orders.php:(file) is "covered R1, R2", but no trace of R1, R2 reaches its effect lines (mail 5): name the requirement that specifies each line (its trace row must cite the line or the member), or write gap. Only when a line holds no effect at all (page text, script that runs in the browser), add "; no effect <lines>" to the verdict, for the person to confirm']);
   trace('src/orders.php:2<br>src/orders.php:7', 'src/orders.php:3-6<br>src/orders.php:audit');
   assert.deepEqual(problems(), []);
   // The requirement must be the one the row names, and a symbol reaches its own member only.
@@ -725,18 +741,92 @@ test('"no behavior" on a site with marker lines needs the person\'s C1 item with
   const review = (extra = '') => write(dir, `${C}/review.md`, `Reviewer: Uma\n- [x] R1 Name\n${extra}`);
   const problems = () => checkReview(dir, 'extract-shop-orders').problems;
   review();
-  assert.deepEqual(problems(), ['review.md has no C1 item: 2 sites with marker lines are judged "no behavior" (src/log.php:audit, src/log.php:stamp); add "- [ ] C1 The 2 sites judged no behavior although they hold marker lines have nothing to migrate" under "## 4. Coverage", for the person to decide']);
-  review('- [x] C1 The 1 site judged no behavior has nothing to migrate\n');
-  assert.deepEqual(problems(), ['review item C1 says 1, but 2 sites with marker lines are judged "no behavior"; write the number 2 in the item and untick it, so the person sees the list again']);
-  review('- [x] C1 動作なしと判断した箇所\n');
-  assert.match(problems().join(), /review item C1 states no number of sites/);
-  review('- [ ] C1 動作なしと判断した 2 箇所は移行しなくてよい\n');
-  assert.deepEqual(problems(), ['not ticked: C1 動作なしと判断した 2 箇所は移行しなくてよい']);
-  review('- [x] C1 動作なしと判断した 2 箇所は移行しなくてよい\n');
+  const code = listCode(['src/log.php:audit', 'src/log.php:stamp']);
+  assert.match(code, /^[0-9a-f]{6}$/);
+  const item = `C1 The marker lines of 2 sites are judged to hold nothing to migrate (list ${code})`;
+  assert.deepEqual(problems(), [`review.md has no C1 item: 2 sites with marker lines are judged "no behavior" or "no effect" (src/log.php:audit; src/log.php:stamp); add "- [ ] ${item}" under "## 4. Coverage", for the person to decide`]);
+  // An item for another list (an older one, or one of the same length) is not this list's.
+  const stale = [`review item C1 is not for the list as it is now (2 sites with marker lines judged "no behavior" or "no effect"); write "- [ ] ${item}" and leave it unticked, so the person sees the list again`];
+  review('- [x] C1 The 2 sites judged no behavior have nothing to migrate\n');
+  assert.deepEqual(problems(), stale);
+  review(`- [x] C1 動作なしと判断した 2 箇所は移行しなくてよい（list ${listCode(['src/log.php:audit', 'src/log.php:name'])}）\n`);
+  assert.deepEqual(problems(), stale);
+  review(`- [ ] C1 目印があるのに動作なしと判断した 2 箇所は移行しなくてよい（list ${code}）\n`);
+  assert.deepEqual(problems(), [`not ticked: C1 目印があるのに動作なしと判断した 2 箇所は移行しなくてよい（list ${code}）`]);
+  review(`- [x] C1 目印があるのに動作なしと判断した 2 箇所は移行しなくてよい（list ${code}）\n`);
   assert.deepEqual(problems(), []);
+  assert.equal(ledgerSummary(dir, path.join(dir, C)).code, code);
   // Without such a site the item is not needed.
   write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/log.php:audit` | question Q1 | 2 |\n| `src/log.php:stamp` | question Q1 | 3 |\n| `src/log.php:name` | covered R1 | 4 |\n');
   write(dir, `${C}/questions.md`, '- Q1. Are audit and stamp still used?\n');
   review('- [x] Q1 audit: decision: keep\n');
   assert.deepEqual(problems(), []);
+  assert.equal(ledgerSummary(dir, path.join(dir, C)).code, null);
+});
+
+test('a marker line that holds no effect is set aside in the verdict, and the person confirms it', () => {
+  const dir = tempDir();
+  const C = 'openspec/changes/extract-shop-orders';
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only): src\n');
+  // Page text and script for the browser trip the markers of a page with code outside functions.
+  write(dir, 'src/orders.php', [
+    '<?php',
+    '$rows = mysql_query("SELECT * FROM orders");',
+    '?>',
+    '<script>try { initCalendar(); } catch (e) {}</script>',
+    '<p>Commit your changes before leaving. To delete from the list, press the button.</p>',
+    '<?php mail("admin@example.com", "seen", ""); ?>',
+    '',
+  ].join('\n'));
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/inventory.md', '| Path | Context |\n|---|---|\n| src/ | shop |\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md', '1. `shop/orders`\n   - `src/orders.php`\n');
+  write(dir, `${C}/.openspec.yaml`, 'schema: spec-relay-extract\n');
+  write(dir, `${C}/specs/shop/orders/spec.md`, '## Purpose\n\nOrders.\n\n## ADDED Requirements\n\n### Requirement: List orders\nThe system SHALL list.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n');
+  write(dir, `${C}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/orders.php | all | full |\n');
+  write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| List orders | src/orders.php:2 | none |\n');
+  write(dir, `${C}/screens.md`, 'None\n');
+  write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 List orders | confirmed | x |\n');
+  write(dir, `${C}/questions.md`, 'None\n');
+  const review = (extra = '') => write(dir, `${C}/review.md`, `Reviewer: Uma\n- [x] R1 List orders\n${extra}`);
+  const ledger = (verdict) => write(dir, `${C}/coverage.md`, `| Site | Verdict | Evidence |\n|---|---|---|\n| \`src/orders.php:(file)\` | ${verdict} | 4: script for the browser; 5: page text |\n`);
+  const problems = () => checkReview(dir, 'extract-shop-orders').problems;
+  review();
+  ledger('covered R1');
+  const open = problems().join();
+  assert.match(open, /no trace of R1 reaches its effect lines \(([^)]*4[^)]*5[^)]*mail 6)\)/);
+  // Setting aside the page text does not set aside the mail: that line still needs a requirement.
+  ledger('covered R1; no effect 4, 5');
+  assert.match(problems().join(), /no trace of R1 reaches its effect lines \(mail 6\)/);
+  write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| List orders | src/orders.php:2, 6 | none |\n');
+  // What was set aside is the person's to confirm, and the item names this list.
+  const code = listCode(['src/orders.php:(file) no effect 4,5']);
+  assert.deepEqual(problems(), [`review.md has no C1 item: 1 site with marker lines is judged "no behavior" or "no effect" (src/orders.php:(file) no effect 4,5); add "- [ ] C1 The marker lines of 1 site are judged to hold nothing to migrate (list ${code})" under "## 4. Coverage", for the person to decide`]);
+  review(`- [x] C1 The marker lines of 1 site are judged to hold nothing to migrate (list ${code})\n`);
+  assert.deepEqual(problems(), []);
+  // Another line set aside is another list: the tick no longer counts.
+  ledger('covered R1; no effect 4-6');
+  write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| List orders | src/orders.php:2 | none |\n');
+  assert.match(problems().join(), /review item C1 is not for the list as it is now/);
+  // The review page shows what was set aside, with the code the item must name.
+  const summary = ledgerSummary(dir, path.join(dir, C));
+  assert.equal(summary.code, listCode(['src/orders.php:(file) no effect 4,5,6']));
+  assert.equal(summary.unmarked.length, 1);
+  assert.match(summary.unmarked[0].markers, /^no effect: .*mail 6/);
+  // A line that a trace reaches, or that holds no effect marker, sets nothing aside.
+  ledger('covered R1; no effect 1, 2');
+  write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| List orders | src/orders.php:2-6 | none |\n');
+  review();
+  assert.deepEqual(problems(), []);
+});
+
+test('a trace symbol reaches its member however the two write the name', () => {
+  const site = (symbol) => ({ file: 'src/a.cs', symbol });
+  const ref = (symbol) => ({ file: 'SRC/A.cs', symbol, from: null, to: null });
+  for (const [written, found] of [['[dbo].[usp_Save]', 'dbo.usp_Save'], ['"dbo"."usp_Save"', 'dbo.usp_Save'], ['Repo<T>.Get', 'Repo.Get'], ['App\\Models\\Order::save()', 'App.Models.Order.save'], ['Order->save', 'Order.save'], ['Save#2', 'OrderService.Save'], ['OrderService', 'OrderService.Save']]) {
+    assert.equal(refReaches(ref(written), site(found), 10), true, `${written} -> ${found}`);
+  }
+  assert.equal(refReaches(ref('Service.Save'), site('OrderService.Save'), 10), false);
+  assert.equal(refReaches(ref('page code'), site('(file)'), 10), false);
+  assert.equal(refReaches({ file: 'src/a.cs', symbol: '', from: 3, to: 12 }, site('(file)'), 10), true);
+  assert.equal(refReaches({ file: 'src/b.cs', symbol: '', from: 3, to: 12 }, site('(file)'), 10), false);
 });

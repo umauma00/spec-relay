@@ -33,7 +33,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkFinish } from './finish.mjs';
-import { COMPARE_COMMAND, isCompareCommand, parseOptions, portOptionProblem, readCases, words as commandWords } from './compare.mjs';
+import { COMPARE_COMMAND, casesDigest, isCompareCommand, parseOptions, portOptionProblem, readCases, words as commandWords } from './compare.mjs';
 import { checkSurveyCoverage, checkSourceMap, checkTrace, checkAmendSourceMap, checkCoverage, assignment } from './coverage.mjs';
 import { checkLedger } from './sites.mjs';
 
@@ -223,7 +223,7 @@ function checkCrosscheck(dir, requirements, screens, problems, questions = null)
   }
 }
 
-function specRequirements(dir, problems) {
+export function specRequirements(dir, problems) {
   const specs = walk(path.join(dir, 'specs')).filter((f) => f.endsWith('.md'));
   if (specs.length === 0) problems.push('the change has no spec files');
   const found = [];
@@ -1094,12 +1094,15 @@ export function verifyPlan(root, change, capability = portCapability(root, chang
   return { runs, levels: levels ?? [], problems };
 }
 
-// The cases folder of a `spec-relay-compare ...` command, as an absolute path, or null.
-function compareCases(root, command) {
+// The hash of what a `spec-relay-compare ...` command compares with, as the
+// verify run recorded it (cases, rules.json and the HTTP driver's map), or null.
+function compareDigest(root, command) {
   const argv = commandWords(command.trim().slice(COMPARE_COMMAND.length));
   const opts = argv ? parseOptions(argv) : {};
   if (!opts.cases) return null;
-  return path.resolve(root, relPath(cleanValue(configValue(root, 'Target root', ''))) || '.', opts.cases);
+  const target = path.resolve(root, relPath(cleanValue(configValue(root, 'Target root', ''))) || '.');
+  const dir = path.resolve(target, opts.cases);
+  return casesDigest(readCases(dir, [], dir).sha256, opts.driver, target);
 }
 
 // What is wrong with a `spec-relay-compare ...` command, or null. Its cases
@@ -1439,9 +1442,8 @@ function checkPortEvidence(root, change, dir, capability, problems) {
     if (!isCompareCommand(command) || !receipt) continue;
     const ran = receipt.runs.find((r) => r.level === level && r.command === command && r.exitCode === 0);
     if (!ran) continue;
-    const dir = compareCases(root, command);
-    const now = dir ? readCases(dir, [], dir).sha256 : null;
-    if (!ran.cases || ran.cases.sha256 !== now) problems.push(`the recorded cases or rules.json of ${levelName(level)} changed after the last verify run: ${again}`);
+    const now = compareDigest(root, command);
+    if (!ran.cases || ran.cases.sha256 !== now) problems.push(`the recorded cases, rules.json or the map of ${levelName(level)} changed after the last verify run: ${again}`);
     else cases.push({ level, count: ran.cases.count, rules: Array.isArray(ran.cases.rules) ? ran.cases.rules : [] });
   }
   return { levels: ['A', ...plan.levels], equivalence: plan.levels.length ? 'compared' : 'inferred', commands: plan.runs, followUp, cases };

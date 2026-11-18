@@ -5,8 +5,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { htmlView, encoderFor, baseUrl, parseHttpOptions, buildRequest, viewResponse, readMap, exchange, record, runHttpDriver, isHttpDriver } from '../scripts/http.mjs';
-import { compare, report, runCompareCommand, parseOptions, portOptionProblem } from '../scripts/compare.mjs';
+import { htmlView, encoderFor, baseUrl, parseHttpOptions, buildRequest, viewResponse, readMap, exchange, record, runHttpDriver, isHttpDriver, startSystem, withoutSecrets } from '../scripts/http.mjs';
+import { casesDigest, compare, report, runCompareCommand, parseOptions, portOptionProblem } from '../scripts/compare.mjs';
 import { tempDir, write } from './helpers.mjs';
 
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -78,7 +78,7 @@ http.createServer((req, res) => {
 
 const INPUTS = [
   { id: 'list-signed-out', input: { path: '/order_list.php' } },
-  { id: 'sign-in', input: { path: '/login.php', form: { user: 'clerk', pass: '${env:SR_TEST_PASS}' } } },
+  { id: 'sign-in', input: { path: '/login.php', form: { user: 'clerk', pass: '{{env:SR_TEST_PASS}}' } } },
   { id: 'list', input: { path: '/order_list.php' } },
   { id: 'add', input: { path: '/order_list.php', hidden: true, form: { ctl00$name: '鈴木' } } },
   { id: 'csv', input: { path: '/export.php' } },
@@ -106,11 +106,31 @@ test('a page is read as a user reads it: blocks of text, the fields, never marku
     text: ['注文一覧', '合計 1,080 円', '次', 'ID', '名前', '1', '山田 編集', '一', '二', 'A', 'B', 'a', 'b', 'c', '検索 & 表示', '戻る', 'logo'],
     fields: { q: 'a&b', c: '1', r: 'y', s: '2', t: 'A', m: ['a', 'c'], memo: 'line1\nline2' },
     hidden: { __VIEWSTATE: 'abc' },
+    forms: [{ hidden: { __VIEWSTATE: 'abc' }, names: ['q', 'c', 'd', 'r', 'p', 's', 't', 'm', 'memo'] }],
   });
   // The same words in other markup read the same.
   assert.deepEqual(htmlView('<table><tr><td><font color=red>山田</font></td><td>1,080 円</td></tr></table>').text, htmlView('<ul><li><strong>山田</strong></li><li>1,080&#x20;円</li></ul>').text);
   assert.deepEqual(htmlView('plain &lt;b&gt; &#12354; &unknown;').text, ['plain <b> あ &unknown;']);
   assert.deepEqual(htmlView('<?xml version="1.0"?><!DOCTYPE html><p>a<![CDATA[b]]></p>').text, ['ab']);
+  // Entities old pages use; &#150; is a dash in every browser.
+  assert.deepEqual(htmlView('<p>a &rarr; b &bull; &ldquo;c&rdquo; 1&#150;2 &constructor;</p>').text, ['a → b • “c” 1–2 &constructor;']);
+});
+
+test('text the page hides is not text a user reads, and names from the page are only names', () => {
+  // A WebForms validator that did not fire, a panel that is closed, the fallback for no script.
+  const view = htmlView('<p>名前<span id="v1" style="color:Red;visibility:hidden;">必須です</span></p><div hidden><p>閉じたパネル<div>中</div></p></div><p>住所<span style="color:red">必須です</span></p>'
+    + '<noscript>JavaScript を有効にしてください</noscript><div style="display: none"><input type=hidden name=__EVENTTARGET value=""><input name=shadow value=1></div><br hidden><p>末尾</p>');
+  assert.deepEqual(view.text, ['名前', '住所必須です', '末尾']);
+  assert.deepEqual(view.hidden, { __EVENTTARGET: '' });
+  assert.deepEqual(view.fields, {});
+  // A field called like a property of every object is a field like any other.
+  const odd = htmlView('<form><input name=constructor value=a><input name=toString value=b><input name=__proto__ value=c><input type=hidden name=valueOf value=d></form>');
+  assert.deepEqual(Object.entries(odd.fields), [['constructor', 'a'], ['toString', 'b'], ['__proto__', 'c']]);
+  assert.deepEqual(Object.entries(odd.hidden), [['valueOf', 'd']]);
+  // Markup that never closes a tag is read in a time that grows with its length, not its square.
+  const started = Date.now();
+  htmlView('<a '.repeat(60000));
+  assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
 });
 
 test('form values are written in the old system\'s encoding', () => {
@@ -122,6 +142,12 @@ test('form values are written in the old system\'s encoding', () => {
   assert.equal(encoderFor('big5'), null);
   assert.equal(encoderFor('no-such-encoding'), null);
   assert.throws(() => encoderFor('shift_jis')('한'), /cannot be written in shift_jis/);
+  // As a browser sends them: the yen sign and the overline as single bytes, the minus sign as the fullwidth one, the IBM rows for 髙 and 﨑.
+  assert.equal(encoderFor('shift_jis')('¥‾−髙﨑').toString('hex'), '5c7e817cfbfcfab1');
+  assert.equal(encoderFor('euc-jp')('¥−').toString('hex'), '5ca1dd');
+  // The names PHP and Java give the same encodings.
+  assert.equal(encoderFor('CP932')('山').toString('hex'), '8e52');
+  assert.equal(encoderFor('eucJP-win')('山').toString('hex'), 'bbb3');
 });
 
 test('the base URL is this machine unless the person named the host', () => {
@@ -146,8 +172,8 @@ test('the base URL is this machine unless the person named the host', () => {
 test('a request: placeholders from the environment, the form in its encoding, hidden fields, the map', () => {
   const base = new URL('http://localhost:8080/app/');
   const session = { cookies: new Map([['sid', 'ok']]), hidden: { __VIEWSTATE: 'abc', token: 't1' } };
-  const build = (input, extra = {}) => buildRequest(input, { base, session, env: { PASS: 'p&w' }, ...extra });
-  let r = build({ path: '/login.php?x=1', query: { q: '山田' }, form: { user: 'clerk', pass: '${env:PASS}', tags: ['a', 'b'] } }, { encode: encoderFor('shift_jis') });
+  const build = (input, extra = {}) => buildRequest(input, { base, session, env: { PASS: 'p&w', EMPTY: '' }, ...extra });
+  let r = build({ path: '/login.php?x=1', query: { q: '山田' }, form: { user: 'clerk', pass: '{{env:PASS}}', tags: ['a', 'b'] } }, { encode: encoderFor('shift_jis') });
   assert.equal(r.url.href, 'http://localhost:8080/app/login.php?x=1&q=%8ER%93c');
   assert.equal(r.method, 'POST');
   assert.equal(r.body.toString('latin1'), 'user=clerk&pass=p%26w&tags=a&tags=b');
@@ -156,7 +182,7 @@ test('a request: placeholders from the environment, the form in its encoding, hi
   // Hidden fields of the last page go first; a given value of the same name wins.
   r = build({ path: '/save.aspx', hidden: true, form: { token: 'mine', name: 'x y' } });
   assert.equal(r.body.toString('latin1'), '__VIEWSTATE=abc&token=mine&name=x+y');
-  r = build({ path: '/a', json: { key: '${env:PASS}' }, headers: { 'X-Token': '${env:PASS}' } });
+  r = build({ path: '/a', json: { key: '{{env:PASS}}' }, headers: { 'X-Token': '{{env:PASS}}' } });
   assert.deepEqual([r.body.toString(), r.headers['content-type'], r.headers['x-token']], ['{"key":"p&w"}', 'application/json', 'p&w']);
   r = build({ path: '/a', method: 'put', body: '<x/>', contentType: 'application/xml' });
   assert.deepEqual([r.method, r.body.toString(), r.headers['content-type']], ['PUT', '<x/>', 'application/xml']);
@@ -167,14 +193,47 @@ test('a request: placeholders from the environment, the form in its encoding, hi
   assert.equal(r.url.href, 'http://localhost:8080/app/orders?page=2&name=a');
   assert.equal(r.body.toString('latin1'), 'name=b&other=c');
 
-  assert.match(build({ path: '/a', form: { p: '${env:NOPE}' } }).problem, /environment variable NOPE is not set/);
+  assert.match(build({ path: '/a', form: { p: '{{env:NOPE}}' } }).problem, /environment variable NOPE is not set/);
   assert.match(build({ path: 'http://evil.test/a' }).problem, /"path" that starts with one \//);
   assert.match(build({ path: '//evil.test/a' }).problem, /"path" that starts with one \//);
   assert.match(build({ path: '/a', form: {}, json: {} }).problem, /form and json; give one body/);
   assert.match(build({ path: '/a', method: 'GET', form: { a: '1' } }).problem, /GET request cannot carry a body/);
   assert.match(build({ path: '/a', url: 'x' }).problem, /unknown key "url"/);
-  assert.match(build({ path: '/a', hidden: true, json: {} }).problem, /"hidden": true goes with "form"/);
+  assert.match(build({ path: '/a', hidden: true, json: {} }).problem, /"hidden" goes with "form"/);
+  assert.match(build({ path: '/a', hidden: true, body: 'x' }).problem, /"hidden" goes with "form"/);
+  assert.match(build({ path: '/a', hidden: 0 }).problem, /"hidden" must be true, false or the number of a form/);
   assert.match(build({ path: '/a', form: { n: '한' } }, { encode: encoderFor('shift_jis') }).problem, /cannot be written in shift_jis/);
+  // A character from a variable's value is not shown.
+  assert.equal(build({ path: '/a', form: { n: '{{env:PASS}}한' } }, { encode: encoderFor('shift_jis') }).problem, 'a value holds a character the --charset cannot write');
+  // The values put in are reported, so that an answer that repeats them can be cleaned.
+  assert.deepEqual([...build({ path: '/a', form: { p: '{{env:PASS}}' } }).used], [['PASS', 'p&w']]);
+  // PowerShell's own syntax would be filled in by the shell that writes the file; a mistyped name would be sent as it is.
+  for (const typo of ['${env:PASS}', '$env:PASS', '{{ env:PASS }}', '{{env:OLD-PASS}}', '{{ENV:PASS}}']) assert.match(build({ path: '/a', form: { p: typo } }).problem, /something like a placeholder that is none; write \{\{env:NAME\}\}/, typo);
+  assert.match(build({ path: '/a', form: { p: '{{env:EMPTY}}' } }).problem, /environment variable EMPTY is not set/);
+  // What fetch would refuse is refused before anything is sent.
+  assert.match(build({ path: '/a', headers: { 'X-Name': '山田' } }).problem, /the header X-Name holds characters a header cannot carry/);
+  assert.match(build({ path: '/a', headers: { 'X Name': 'a' } }).problem, /the header X Name holds characters/);
+  // A field called like a property of every object is a name like any other.
+  assert.equal(build({ path: '/a', form: { constructor: 'a', __proto__x: 'b' } }).body.toString(), 'constructor=a&__proto__x=b');
+
+  // Hidden fields are those of one form: the one that holds a field of the request, or the numbered one.
+  const page = (html) => { const s = { cookies: new Map() }; viewResponse({ status: 200, headers: new Headers({ 'content-type': 'text/html' }), bytes: Buffer.from(html), requestUrl: new URL('http://localhost:8080/app/x') }, { base, session: s }); return s; };
+  const two = page('<form><input type=hidden name=mode value=search><input name=q></form><form><input type=hidden name=mode value=delete><input type=hidden name=id value=7><button name=del>削除</button></form>');
+  const hidden = (input, s) => { const b = buildRequest(input, { base, session: s }); return b.problem ?? b.body.toString(); };
+  assert.equal(hidden({ path: '/s', hidden: true, form: { q: 'x' } }, two), 'mode=search&q=x');
+  assert.equal(hidden({ path: '/s', hidden: true, form: { del: '' } }, two), 'mode=delete&id=7&del=');
+  assert.equal(hidden({ path: '/s', hidden: 2, form: { other: '1' } }, two), 'mode=delete&id=7&other=1');
+  assert.match(hidden({ path: '/s', hidden: true, form: { other: '1' } }, two), /2 forms with hidden fields and none holds a field of this request; write "hidden": <the number/);
+  assert.match(hidden({ path: '/s', hidden: 3 }, two), /"hidden": 3 asks for form 3, but the last page of this session has 2 forms/);
+  // A delete button per row: the same field in every form, another id in each.
+  const rows = page('<form><input type=hidden name=id value=1><button name=del>x</button></form><form><input type=hidden name=id value=2><button name=del>x</button></form>');
+  assert.match(hidden({ path: '/s', hidden: true, form: { del: '' } }, rows), /2 forms of the last page hold a field of this request, with different hidden fields/);
+  assert.equal(hidden({ path: '/s', hidden: 2, form: { del: '' } }, rows), 'id=2&del=');
+  // One form (WebForms), or fields outside any form: nothing to choose.
+  assert.equal(hidden({ path: '/s', hidden: true, form: { a: '1' } }, page('<form><input type=hidden name=__VIEWSTATE value=v></form>')), '__VIEWSTATE=v&a=1');
+  assert.equal(hidden({ path: '/s', hidden: true }, page('<input type=hidden name=t value=1>')), 't=1');
+  // Before anything is sent there is no last page: the check then leaves the choice alone.
+  assert.equal(buildRequest({ path: '/s', hidden: 3, form: { a: '1' } }, { base, session: { cookies: new Map(), forms: [] }, dry: true }).body.toString(), 'a=1');
   assert.match(build('GET /a').problem, /not a request object/);
 
   assert.match(readMap('[]').problem, /one JSON object/);
@@ -230,7 +289,7 @@ test('record: the old system answers the requests, and the cases keep the placeh
     assert.doesNotMatch(text, /secret/);
     const cases = Object.fromEntries(text.trim().split('\n').map((line) => { const c = JSON.parse(line); return [c.id, c]; }));
     assert.deepEqual(cases['list-signed-out'].expected, { status: 302, redirect: '/login.php' });
-    assert.equal(cases['sign-in'].input.form.pass, '${env:SR_TEST_PASS}');
+    assert.equal(cases['sign-in'].input.form.pass, '{{env:SR_TEST_PASS}}');
     assert.deepEqual(cases['sign-in'].expected, { status: 302, redirect: '/order_list.php' });
     assert.deepEqual(cases.list.expected, { status: 200, type: 'text/html', title: '注文一覧', text: ['注文一覧', '1', '山田', '1件', '登録'], fields: { ctl00$name: '' } });
     // The hidden token went back with the form, and the Shift_JIS name arrived whole.
@@ -301,7 +360,9 @@ test('compare: the new system, started by the run, answers the recorded requests
       assert.equal(r.ok, true, report(r));
     } finally { await stale(); }
     r = await compare({ cases: 'tests/golden/shop-orders', driver: `spec-relay-http --base http://127.0.0.1:${port}`, cwd: dir });
-    assert.match(r.problems.join('\n'), /got no answer from[^\n]+\n[^\n]*give --start "<command>"/);
+    assert.match(r.problems.join('\n'), /got no answer from[^\n]+\n[^\n]*give --start '<command>'/);
+    // Nothing was compared, so no case counts as matching.
+    assert.deepEqual([r.count, r.passed, r.timedOut], [6, 0, false]);
   } finally { delete process.env.SR_TEST_PASS; }
 });
 
@@ -311,8 +372,10 @@ test('a port command needs --start, and the options are checked before anything 
   assert.equal(isHttpDriver('spec-relay-http --base http://localhost:1'), true);
   assert.equal(isHttpDriver('node spec-relay-http.js'), false);
   const port = (driver) => portOptionProblem(parseOptions(['--cases', 'tests/golden/x', '--driver', driver]));
-  assert.match(port('spec-relay-http --base http://localhost:3000'), /needs --start "<command>"/);
-  assert.equal(port('spec-relay-http --base http://localhost:3000 --start "npm --silent start"'), null);
+  assert.match(port('spec-relay-http --base http://localhost:3000'), /needs --start '<command>'/);
+  assert.equal(port("spec-relay-http --base http://localhost:3000 --start 'npm --silent start'"), null);
+  // The run starts the new system here, so a port command never names another host.
+  assert.match(port("spec-relay-http --base http://staging.example.test --allow-host staging.example.test --start 'npm start'"), /--allow-host is not allowed in a port command/);
   assert.equal(port('node driver.mjs'), null);
   assert.match(parseOptions(['--cases', 'x', '--driver', 'spec-relay-http --base http://prod.example.test --start x']).problem, /the driver spec-relay-http: --base http:\/\/prod\.example\.test is not this machine/);
   assert.match(parseOptions(['--cases', 'x', '--driver', 'spec-relay-http --start x']).problem, /no --base URL/);
@@ -340,7 +403,73 @@ test('exchange stops at the time limit and keeps sessions apart', async () => {
   assert.deepEqual(ran.outputs.get('a1'), { status: 200, type: 'text/plain', body: 'ok' });
   const late = await exchange(cases, { base, send, deadline: Date.now() - 1 });
   assert.match(late.problems.join(), /case a1: the run's time limit passed/);
-  assert.equal(late.outputs.size, 0);
+  assert.deepEqual([late.outputs.size, late.timedOut, ran.timedOut], [0, true, false]);
+  // The comparison reports a run that stopped half way as timed out, with no case passed.
+  const dir = tempDir();
+  write(dir, 'cases/a.jsonl', '{"id":"a","input":{"path":"/"},"expected":{"status":200}}\n{"id":"b","input":{"path":"/"},"expected":{"status":200}}\n');
+  const half = await compare({ cases: 'cases', driver: 'spec-relay-http --base http://localhost:9', cwd: dir, http: async () => ({ outputs: new Map([['a', { status: 200 }]]), problems: ['case b: the run\'s time limit passed'], timedOut: true }) });
+  assert.deepEqual([half.ok, half.passed, half.timedOut], [false, 0, true]);
+
+  // A request that cannot be built stops everything before the first one is sent.
+  seen.length = 0;
+  const unsent = await exchange([{ id: 'ok', file: 'a.jsonl', input: { path: '/delete', form: { id: '1' } } }, { id: 'bad', file: 'a.jsonl', input: { path: '/x', headers: { 'X-Name': '山田' } } }], { base, send });
+  assert.deepEqual([seen.length, unsent.problems.at(-1)], [0, 'no request was sent']);
+  // One that cannot be built from the page it follows stops the rest.
+  const pages = async (url) => new Response(url.pathname === '/list' ? '<form><input type=hidden name=id value=1><button name=del>x</button></form><form><input type=hidden name=id value=2><button name=del>x</button></form>' : 'ok', { headers: [['content-type', 'text/html']] });
+  const row = await exchange([{ id: 'list', file: 'a.jsonl', input: { path: '/list' } }, { id: 'del', file: 'a.jsonl', input: { path: '/list', hidden: true, form: { del: '' } } }, { id: 'after', file: 'a.jsonl', input: { path: '/list' } }], { base, send: pages });
+  assert.deepEqual([...row.outputs.keys()], ['list']);
+  assert.match(row.problems.join(), /case del: 2 forms of the last page hold a field of this request.*; this request and the ones after it were not sent/);
+});
+
+test('what an answer repeats or issues as a secret never reaches the cases', async () => {
+  const base = new URL('http://localhost:9');
+  const env = { OLD_USER: 'clerk01', OLD_PASS: 'hunter2 & co' };
+  // A sign-in page that echoes the form, a JSON sign-in that issues a token, a session id in the address.
+  const send = async (url, init) => {
+    const form = new URLSearchParams(init.body?.toString() ?? '');
+    if (url.pathname === '/echo') return new Response(`<p>ログインできません: ${form.get('pass').replace(/&/g, '&amp;')}</p><form><input name="user" value="${form.get('user')}"><input name="csrf_token" value="abc123"></form>`, { headers: [['content-type', 'text/html'], ['set-cookie', 'PHPSID=s3cr3t; Path=/']] });
+    if (url.pathname === '/api/login') return Response.json({ user: 'clerk01', token: 'eyJhbGciOi.SERVER', profile: { apiKey: 'k-1', sessionId: 42, name: 'x', note: null } });
+    return new Response(null, { status: 302, headers: [['location', `/home.php;jsessionid=ABC?PHPSID=s3cr3t&next=${new URLSearchParams({ n: 'hunter2 & co' }).toString().slice(2)}&again=${encodeURIComponent('hunter2 & co')}&page=2`]] });
+  };
+  const cases = [
+    { id: 'echo', file: 'a.jsonl', input: { path: '/echo', form: { user: '{{env:OLD_USER}}', pass: '{{env:OLD_PASS}}' } } },
+    { id: 'api', file: 'a.jsonl', input: { path: '/api/login', json: { user: '{{env:OLD_USER}}', pass: '{{env:OLD_PASS}}' } } },
+    { id: 'go', file: 'a.jsonl', input: { path: '/go' } },
+  ];
+  const ran = await exchange(cases, { base, send, env });
+  assert.deepEqual(ran.problems, []);
+  const text = JSON.stringify([...ran.outputs]);
+  for (const secret of ['clerk01', 'hunter2', 'eyJhbGciOi', 'k-1', 's3cr3t', 'abc123', 'ABC']) assert.doesNotMatch(text, new RegExp(secret), secret);
+  assert.deepEqual(ran.outputs.get('echo'), { status: 200, type: 'text/html', text: ['ログインできません: {{env:OLD_PASS}}'], fields: { user: '{{env:OLD_USER}}', csrf_token: '(left out)' } });
+  assert.deepEqual(ran.outputs.get('api').json, { user: '{{env:OLD_USER}}', token: '(left out)', profile: { apiKey: '(left out)', sessionId: '(left out)', name: 'x', note: null } });
+  assert.equal(ran.outputs.get('go').redirect, '/home.php?PHPSID=(left%20out)&next={{env:OLD_PASS}}&again={{env:OLD_PASS}}&page=2');
+  // The new system's answers go through the same, so the two still compare equal; without a value nothing changes.
+  assert.deepEqual(withoutSecrets({ a: ['x clerk01 y'], n: 1 }, new Map([['U', 'clerk01']])), { a: ['x {{env:U}} y'], n: 1 });
+  assert.deepEqual(withoutSecrets({ a: 'b' }, new Map()), { a: 'b' });
+});
+
+test('a system that outlives its start command is reported, and the map is part of what a verify run records', async () => {
+  const dir = tempDir();
+  write(dir, 'idle.cjs', 'setInterval(() => {}, 1000);\n');
+  // Nothing answers before the start, then something does, and still does after the stop.
+  let calls = 0;
+  const send = async () => { calls += 1; if (calls === 1) throw new Error('refused'); return new Response('ok'); };
+  const system = await startSystem(`"${process.execPath}" idle.cjs`, dir, new URL('http://localhost:9'), { send, settleMs: 300 });
+  assert.equal(system.problem, undefined);
+  assert.equal(await system.stop(), true);
+
+  write(dir, 'tests/golden/http-map.json', '{"paths": {"/a.php": "/a"}}\n');
+  const driver = "spec-relay-http --base http://localhost:9 --start 'x' --map tests/golden/http-map.json";
+  const first = casesDigest('abc', driver, dir);
+  assert.notEqual(first, 'abc');
+  assert.equal(casesDigest('abc', 'node driver.mjs', dir), 'abc');
+  assert.equal(casesDigest('abc', "spec-relay-http --base http://localhost:9 --start 'x'", dir), 'abc');
+  assert.equal(casesDigest(null, driver, dir), null);
+  // Line endings are not a change; another mapping of the same size is.
+  write(dir, 'tests/golden/http-map.json', '{"paths": {"/a.php": "/a"}}\r\n');
+  assert.equal(casesDigest('abc', driver, dir), first);
+  write(dir, 'tests/golden/http-map.json', '{"paths": {"/a.php": "/b"}}\n');
+  assert.notEqual(casesDigest('abc', driver, dir), first);
 });
 
 test('the CLI records, and exits 2 on bad usage', async () => {

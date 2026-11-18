@@ -560,7 +560,11 @@ waves.
    every effect line of the site. Then decide per line with the checker's
    evidence: when a requirement's scenarios state what the line does, have
    an analyst add the line to that requirement's trace row and a checker
-   crosscheck the requirement again; when none does, it is a gap as above.
+   crosscheck the requirement again; when the line holds no effect at all
+   (text of the page, script that runs in the browser, a word in a string),
+   the checker writes it into the verdict (`covered R1; no effect 6, 9`)
+   and the person confirms it with C1; when neither, it is a gap as above.
+   Write several lines of one file as `path:3-6, 9`.
    Never widen a trace row, and never have an analyst do it, to make the
    gate pass: that hides the omission the check exists to find. A changed
    source map or source file means running sites.mjs again and judging the
@@ -572,11 +576,12 @@ waves.
 5. **Questions and review.** Write questions.md from the analysts' reported
    doubts and the rows moved to questions, then review.md (names by search,
    not by reading the spec). When `gate.mjs review` says that sites with
-   marker lines are judged `no behavior`, add `## 4. Coverage` with the item
-   `- [ ] C1 ...` and the number it names; the review page lists those
-   sites under the omission check, and the person decides whether they may
-   be left out. When the number changes later, write the new one and untick
-   the item.
+   marker lines are judged `no behavior` or `no effect`, add `## 4.
+   Coverage` with the item `- [ ] C1 ...` in the words it gives (they end
+   with a code that names the list); the review page lists those sites
+   under the omission check with the same code, and the person decides
+   whether they may be left out. When the list changes later, the gate
+   gives new words: write them and leave the item unticked.
 6. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
    analyst fix every error and warning. `gate.mjs review` also checks the
    coverage, so the person does not: source-map.md holds every file the plan
@@ -664,7 +669,11 @@ Words); the finish step (step 6) lists it in the hand-over.
    test copy runs at the address in verification.md, that its database is at
    the starting state, and that the sign-in variables are set in this
    terminal. Only the person may name a host other than this machine
-   (`--allow-host`); never add it yourself, and never record from production.
+   (`--allow-host`, for recording only; a port command never takes it);
+   never add it yourself, and never record from production. Sign-in values
+   are written `{{env:NAME}}` in the requests; the recording puts the
+   placeholder back where an answer repeats a value, and leaves out values
+   under names like token or session id.
 7. **Port crosscheck.** Number the baseline spec's requirements (`R1 <name>`)
    and the archived extract change's screens (`S1 <name>`) by search, as in
    step 3, and give them to `spec-relay-checker` subagents as a **port
