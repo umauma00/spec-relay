@@ -848,12 +848,14 @@ const logSize = (root) => { try { return fs.statSync(path.join(root, CANVAS_LOG)
 export function guardSave(root, name) {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(name)) return { ok: false, problems: [`not a snapshot name: ${name} (letters, digits and hyphens)`] };
   const warnings = [];
+  // The mark first: a canvas edit made while the files are hashed is then still counted as the person's.
+  const mark = logSize(root);
   const files = guardFiles(root, warnings);
   const file = snapshotFile(root, name);
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(logMark(root, name), `${mark}\n`);
     fs.writeFileSync(file, `${JSON.stringify(files, null, 1)}\n`);
-    fs.writeFileSync(logMark(root, name), `${logSize(root)}\n`);
   } catch (error) { return { ok: false, problems: [`could not write ${GUARD_DIR}/${name}.json: ${error.message}`] }; }
   return { ok: true, snapshot: `${GUARD_DIR}/${name}.json`, files: Object.keys(files).length, ...(warnings.length ? { warnings } : {}) };
 }
@@ -871,9 +873,9 @@ export function guardCompare(root, name) {
   // canvas edits logged after the snapshot, replayed in order, lead without a gap
   // from the snapshot's hash to today's. Any other change breaks the chain.
   let mark = null;
-  try { mark = Number(fs.readFileSync(logMark(root, name), 'utf8').trim()); } catch { /* an older snapshot: no canvas edits count */ }
+  try { const text = fs.readFileSync(logMark(root, name), 'utf8').trim(); if (/^\d+$/.test(text)) mark = Number(text); } catch { /* an older snapshot: no canvas edits count */ }
   const chains = new Map();
-  if (Number.isInteger(mark) && mark >= 0) {
+  if (mark !== null) {
     let entries = [];
     try {
       const buffer = fs.readFileSync(path.join(root, CANVAS_LOG));

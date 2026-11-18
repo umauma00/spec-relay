@@ -442,10 +442,10 @@ test('guard --compare counts a review.md the person changed in the canvas as the
   writeReview(dir, 'extract-b', { action: 'untick', id: 'R1', hash: sha256(file('extract-b')) });
   write(dir, 'openspec/changes/extract-b/review.md', ticked.toString());
   assert.deepEqual(guardCompare(dir, 'wave-3').changed, ['openspec/changes/extract-b/review.md']);
-  // A snapshot from before 0.18.0 has no mark: no canvas edit counts.
+  // A snapshot from before 0.18.0 has no mark (or an empty one): no canvas edit counts.
   write(dir, 'openspec/changes/extract-b/review.md', open.toString());
   guardSave(dir, 'wave-4');
-  fs.rmSync(path.join(dir, 'openspec/spec-relay/work/guard/wave-4.canvas-log'));
+  fs.writeFileSync(path.join(dir, 'openspec/spec-relay/work/guard/wave-4.canvas-log'), '\n');
   writeReview(dir, 'extract-b', { action: 'tick', id: 'R1', hash: sha256(file('extract-b')) });
   assert.deepEqual(guardCompare(dir, 'wave-4').changed, ['openspec/changes/extract-b/review.md']);
 });

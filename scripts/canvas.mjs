@@ -46,7 +46,8 @@ const WORDS = {
     decisionTitle: '判断を書く', reviewerTitle: 'レビュー担当の名前',
     editHint: 'review.md に書き込みます。あなたが自分でファイルを直したのと同じ扱いです。変更を完了（アーカイブ）してよいかは、チャットで伝えてください。',
     saving: '保存しています…', saved: 'review.md に保存しました。', changed: 'review.md がほかで変わっていたので、読み直しました。もう一度操作してください。', saveFailed: '保存できませんでした', emptyValue: '書いてから保存してください。',
-    needDecision: '先に判断を書いてください。', notUtf8: 'review.md が UTF-8 ではないため書き込めません。UTF-8 で保存し直してください。',
+    needDecision: '先に判断を書いてください。', placeholder: '「TBD」や「-」のような書きかけは判断になりません。判断を書いてください。',
+    noFile: 'この画面の review.md が見つかりません。', bad: 'この操作はできません。', notUtf8: 'review.md が UTF-8 ではないため書き込めません。UTF-8 で保存し直してください。',
     busy: 'ほかのプログラムが review.md を使っていて書き込めませんでした。閉じてからもう一度押してください。', noLine: 'review.md にこの項目の行が見つかりません。',
     howto: '正しければ「確認済みにする」を押す（review.md に書き込まれます）',
     send: '送る', cancel: 'やめる', sending: '送っています…', sent: 'チャットに送りました。', failed: '送れませんでした', empty: '質問を書いてください。',
@@ -69,7 +70,8 @@ const WORDS = {
     decisionTitle: 'Write the decision', reviewerTitle: 'Reviewer name',
     editHint: 'This writes to review.md, the same as editing the file yourself. Whether the change may be completed (archived) you tell in the chat.',
     saving: 'Saving…', saved: 'Saved to review.md.', changed: 'review.md had changed elsewhere, so the page was reloaded. Try again.', saveFailed: 'Could not save', emptyValue: 'Write something first.',
-    needDecision: 'Write the decision first.', notUtf8: 'review.md is not UTF-8, so it cannot be written. Save it again as UTF-8.',
+    needDecision: 'Write the decision first.', placeholder: 'A placeholder such as "TBD" or "-" is not a decision. Write the decision.',
+    noFile: 'This page has no review.md.', bad: 'This cannot be done.', notUtf8: 'review.md is not UTF-8, so it cannot be written. Save it again as UTF-8.',
     busy: 'Another program is using review.md, so it could not be written. Close it and try again.', noLine: 'review.md has no line for this item.',
     howto: 'If it is right, press "Mark confirmed" (it is written to review.md)',
     send: 'Send', cancel: 'Cancel', sending: 'Sending…', sent: 'Sent to the chat.', failed: 'Could not send', empty: 'Write a question first.',
@@ -284,9 +286,10 @@ const CANVAS_SCRIPT = String.raw`(() => {
       esave.disabled = false;
     });
     let draft = null;
-    try { draft = JSON.parse(store('spec-relay-canvas-draft') || 'null'); } catch (e) { draft = null; }
-    if (draft) {
-      store('spec-relay-canvas-draft', null);
+    const kept = store('spec-relay-canvas-draft');
+    if (kept) store('spec-relay-canvas-draft', null);
+    try { draft = JSON.parse(kept || 'null'); } catch (e) { draft = null; }
+    if (draft && typeof draft === 'object') {
       if (draft.page === cfg.page && (draft.kind === 'reviewer' || R.items.some((it) => it.id === draft.id))) {
         edit(draft.kind, draft.id, draft.value, draft.then || undefined);
         emsg.textContent = W.changed;
@@ -340,7 +343,7 @@ export function interactive(html, { lang, pagePath, title, version, seq, nonce, 
   const nav = `<nav class="canvas-nav" aria-label="${escapeHtml(W.nav)}"><a href="progress.html"${current === 'progress.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.progress)}</a><a href="specs.html"${current === 'specs.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.specs)}</a></nav>
 <p class="ask-row ask-page"><button type="button" class="ask" id="ask-page">${escapeHtml(W.askPage)}</button>${review ? ` <button type="button" class="ask mark" id="edit-reviewer">${escapeHtml(review.reviewer ? `${W.reviewer}: ${review.reviewer}` : W.reviewerSet)}</button>` : ''}</p>`;
   const words = Object.fromEntries(['ask', 'askAbout', 'sending', 'sent', 'failed', 'empty', 'noLink', 'gone',
-    ...(review ? ['tick', 'untick', 'decide', 'decideTick', 'decisionTitle', 'reviewerTitle', 'saving', 'saved', 'changed', 'saveFailed', 'emptyValue', 'needDecision', 'notUtf8', 'busy', 'noLine'] : [])].map((k) => [k, W[k]]));
+    ...(review ? ['tick', 'untick', 'decide', 'decideTick', 'decisionTitle', 'reviewerTitle', 'saving', 'saved', 'changed', 'saveFailed', 'emptyValue', 'needDecision', 'notUtf8', 'busy', 'noLine', 'placeholder', 'noFile', 'bad'] : [])].map((k) => [k, W[k]]));
   const config = JSON.stringify({ page: pagePath, title, version, seq, words, review }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const dialog = `<dialog class="ask-box" id="ask-box" aria-labelledby="ask-title" aria-describedby="ask-about"><form method="dialog"><h2 id="ask-title">${escapeHtml(W.askTitle)}</h2><p class="about" id="ask-about"></p>
 <textarea id="ask-text" maxlength="4000" aria-labelledby="ask-title" aria-describedby="ask-about ask-hint ask-msg"></textarea>

@@ -13,7 +13,7 @@
 //     openspec/schemas/, openspec/spec-relay/tools/ (the pinned OpenSpec), openspec/spec-relay/db/ (the
 //     exported database definitions), of openspec/config.yaml, and inside the kit itself;
 //   - any agent edit of a change's verify.json (verify.mjs writes it) or of
-//     openspec/spec-relay/canvas-log.jsonl (the canvas writes it);
+//     openspec/spec-relay/local/canvas-log.jsonl (the canvas writes it);
 //   - subagent edits of review.md, questions.md, crosscheck.md, a port's proposal.md and design.md, the plan and the lessons;
 //   - shell commands that write a verify.json or the canvas log;
 //   - shell commands that mention the "Hook enforcement" setting.

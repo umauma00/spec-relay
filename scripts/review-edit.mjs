@@ -68,7 +68,7 @@ function reviewerLine(lines) {
 
 // The reviewer's name as the gate reads it, or null.
 export function reviewerOf(text) {
-  const m = withoutComments(text).match(/^Reviewer:[ \t]*(.*)$/m);
+  const m = withoutComments(text.replace(/^\uFEFF/, '')).match(/^Reviewer:[ \t]*(.*)$/m);
   const name = m ? m[1].trim() : '';
   return name && !PLACEHOLDER.test(name) ? name : null;
 }
@@ -81,17 +81,19 @@ export function editReview(text, { action, id, value }) {
   const done = () => ({ text: bom + join(doc) });
   if (action === 'reviewer') {
     const name = oneLine(value, 80);
-    if (!name) return { problem: 'empty name', code: 'empty' };
+    if (!name) return { problem: 'empty name', code: 'emptyValue' };
     const at = reviewerLine(lines);
     if (at >= 0) { lines[at] = `Reviewer: ${name}`; return done(); }
     // No Reviewer line: put one under the title (outside fences and front matter), or at the top.
+    // The title is looked for outside comments too, so the line never lands inside one.
+    const bare = masked(lines.join('\n')).split('\n');
     let fenced = false;
     let front = lines[0] === '---';
     let after = -1;
     for (let i = 0; i < lines.length; i += 1) {
       if (front) { if (i > 0 && lines[i] === '---') { front = false; after = i; } continue; }
-      if (FENCE.test(lines[i])) { fenced = !fenced; continue; }
-      if (!fenced && /^#\s/.test(lines[i])) { after = i; break; }
+      if (FENCE.test(bare[i])) { fenced = !fenced; continue; }
+      if (!fenced && /^#\s/.test(bare[i])) { after = i; break; }
     }
     const eol = ends[0] ?? '\n';
     const add = after >= 0 ? ['', `Reviewer: ${name}`] : [`Reviewer: ${name}`, ''];
@@ -114,7 +116,8 @@ export function editReview(text, { action, id, value }) {
   if (action === 'decision') {
     if (!id.startsWith('Q')) return { problem: 'only questions (Q) take a decision', code: 'bad' };
     const decision = oneLine(value, 500);
-    if (!decision) return { problem: 'empty decision', code: 'empty' };
+    if (!decision) return { problem: 'empty decision', code: 'emptyValue' };
+    if (PLACEHOLDER.test(plain(decision))) return { problem: 'a placeholder is not a decision', code: 'placeholder' };
     const at = masked(rest).search(DECISION);
     const head = (at < 0 ? rest : rest.slice(0, at)).replace(/\s+$/, '');
     lines[item.index] = `${open}${mark}${close}${head}${/[\p{L}\p{N}]$/u.test(head) ? ':' : ''} decision: ${decision}`;

@@ -26,6 +26,7 @@ test('ticks, unticks, decisions and the reviewer change only their own line', ()
   assert.match(editReview(decided.text, { action: 'tick', id: 'Q1' }).text, /^- \[x\] Q1 Rounding: decision: Round half up/m);
   assert.match(editReview(REVIEW, { action: 'decision', id: 'Q2', value: 'none' }).text, /^- \[ \] Q2 Tax: decision: none$/m);
   assert.equal(editReview(REVIEW, { action: 'decision', id: 'R1', value: 'x' }).code, 'bad', 'only questions take a decision');
+  for (const blank of ['N/A', 'TBD', '-', '<see chat>']) assert.equal(editReview(REVIEW, { action: 'decision', id: 'Q1', value: blank }).code, 'placeholder', blank);
   assert.match(editReview(REVIEW, { action: 'reviewer', value: ' Uma\u2028 Tanaka ' }).text, /^Reviewer: Uma Tanaka$/m);
   for (const bad of [{ action: 'reviewer', value: ' ' }, { action: 'decision', id: 'Q1', value: '' }, { action: 'tick', id: 'R1; rm' }, { action: 'delete', id: 'R1' }]) assert.ok(editReview(REVIEW, bad).problem, JSON.stringify(bad));
 });
@@ -49,6 +50,8 @@ test('the Reviewer line is the one the gate reads', () => {
   assert.equal(name('- [ ] R1 a\n'), 'Reviewer: Uma\n\n- [ ] R1 a\n');
   assert.equal(reviewerOf('<!-- Reviewer: x -->\nReviewer: <name>\n'), null);
   assert.equal(reviewerOf('Reviewer: Uma\n'), 'Uma');
+  assert.equal(reviewerOf('\uFEFFReviewer: Uma\r\n'), 'Uma', 'a byte order mark before the line');
+  assert.equal(name('<!--\n# Example\n-->\n# Review\n'), '<!--\n# Example\n-->\n# Review\n\nReviewer: Uma\n', 'never inside a comment');
 });
 
 test('line ends, the byte order mark and the encoding are kept', () => {
