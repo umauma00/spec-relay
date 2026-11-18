@@ -2,6 +2,7 @@
   "name": "spec-relay",
   "version": "0.20.0",
   "private": true,
+  "license": "MIT",
   "description": "Spec-driven language migration kit for GitHub Copilot, built on OpenSpec.",
   "type": "module",
   "engines": { "node": ">=22.12" },

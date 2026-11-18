@@ -361,6 +361,12 @@ npm test
 
 通しのテストは、一時フォルダーに `npm ci` で OpenSpec を入れて動かします（npm のレジストリへの接続が必要です）。npm がない端末では、その部分だけ skip と表示されます（CI では skip せず失敗にします）。OpenSpec の版を上げるときは、`templates/openspec-tools/package.json` の版を変えて、そのフォルダーで `npm install --package-lock-only --ignore-scripts` を実行し、lock ファイルを作り直します。`scripts/openspec.mjs` の `OPENSPEC_VERSION` と `scripts/doctor.mjs` の `OPENSPEC_TESTED` も合わせます（テストが3つの一致を確かめます）。移行中のリポジトリでは、新しいキットの導入スクリプトが古い package.json と package-lock.json を衝突として止めるので、その2つを消してから導入スクリプトを実行し直すよう、更新の手順に書いてください。テストは一時フォルダーの設定を使うので、手元の OpenSpec の設定は変わりません。CI は Windows と Ubuntu の Node.js 22・24 で実行しています。
 
-ライセンスはまだ決めていません（LICENSE は未配置）。
+## ライセンス
+
+[MIT License](LICENSE) です。
+
+- キットのスクリプトは外部のパッケージを使わず、ほかのプロジェクトのコードも同梱していません。
+- OpenSpec（`@fission-ai/openspec`、MIT License）は同梱していません。導入スクリプトが npm から移行対象のリポジトリに入れます。固定している 2.0.0 と、それが使うパッケージを合わせた 57 個のライセンスは、MIT 50、ISC 6、BSD-3-Clause 1 です（`templates/openspec-tools/package-lock.json` で 2026-11-18 に確認）。OpenSpec の版を上げるときは、この内訳も確かめ直します。
+- 参考にした code-migration-kit-with-github-copilot は Apache-2.0 です。参考にしたのは構成と考え方で、ファイルは写していません。
 
 構成と考え方は [code-migration-kit-with-github-copilot](https://github.com/umauma00/code-migration-kit-with-github-copilot) を参考にしています。違いは [docs/WORKFLOW.md](docs/WORKFLOW.md#先行例code-migration-kit-with-github-copilotから引き継いだこと) にあります。

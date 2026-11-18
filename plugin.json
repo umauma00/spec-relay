@@ -6,5 +6,6 @@
   "author": { "name": "umauma00", "url": "https://github.com/umauma00" },
   "homepage": "https://github.com/umauma00/spec-relay",
   "repository": "https://github.com/umauma00/spec-relay",
+  "license": "MIT",
   "keywords": ["migration", "language-migration", "openspec", "spec-driven", "copilot-cli", "agent-plugins"]
 }

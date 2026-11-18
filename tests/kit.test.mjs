@@ -25,6 +25,20 @@ test('plugin, marketplace and package versions match', () => {
   }
 });
 
+test('the license is stated the same everywhere, and the README counts the pinned OpenSpec packages as the lockfile does', () => {
+  assert.match(read('LICENSE'), /^MIT License\n\nCopyright \(c\) \d{4} /);
+  assert.equal(JSON.parse(read('plugin.json')).license, 'MIT');
+  assert.equal(JSON.parse(read('package.json')).license, 'MIT');
+  // What the kit has npm install next to a migration: no license outside the permissive ones the README names.
+  const counts = {};
+  for (const [name, pkg] of Object.entries(JSON.parse(read('templates/openspec-tools/package-lock.json')).packages)) {
+    if (name) counts[pkg.license ?? 'none'] = (counts[pkg.license ?? 'none'] ?? 0) + 1;
+  }
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const said = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([license, n]) => `${license} ${n}`).join('、');
+  assert.ok(read('README.md').includes(`${total} 個のライセンスは、${said} です`), `README should say: ${total} 個のライセンスは、${said} です`);
+});
+
 test('agents have names matching their files and valid relative links', () => {
   const dir = 'com.github.copilot/agents';
   const files = fs.readdirSync(path.join(KIT_ROOT, dir));
