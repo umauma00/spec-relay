@@ -406,6 +406,26 @@ test('guard hashes review.md of active changes, baseline specs and the config, n
   assert.notEqual(guardHash(dir).sha256, before.sha256, 'a tick changes the hash');
 });
 
+test('guard --compare counts a review.md the person changed in the canvas as theirs', async () => {
+  const { guardSave, guardCompare, nextSteps } = await import('../scripts/gate.mjs');
+  const { writeReview, sha256 } = await import('../scripts/review-edit.mjs');
+  const dir = tempDir();
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root: src\n');
+  write(dir, 'openspec/changes/extract-a/review.md', '- [ ] R1 a\n- [ ] Q1 b\n');
+  write(dir, 'openspec/changes/extract-b/review.md', '- [ ] R1 a\n');
+  guardSave(dir, 'wave-1');
+  const file = (name) => fs.readFileSync(path.join(dir, `openspec/changes/${name}/review.md`));
+  assert.equal(writeReview(dir, 'extract-a', { action: 'tick', id: 'R1', hash: sha256(file('extract-a')) }).ok, true);
+  assert.equal(writeReview(dir, 'extract-a', { action: 'decision', id: 'Q1', value: 'keep', hash: sha256(file('extract-a')) }).ok, true);
+  const result = guardCompare(dir, 'wave-1');
+  assert.deepEqual(result, { ok: true, changed: [], added: [], removed: [], canvas: ['openspec/changes/extract-a/review.md'] }, 'two canvas edits in a row are the person\'s');
+  assert.match(nextSteps('guard', result).agent.join(), /changed openspec\/changes\/extract-a\/review\.md in the canvas/);
+  // A subagent's edit after the canvas's (or before it) breaks the chain.
+  write(dir, 'openspec/changes/extract-a/review.md', `${file('extract-a')}- [x] R2 sneaked\n`);
+  write(dir, 'openspec/changes/extract-b/review.md', '- [x] R1 a\n');
+  assert.deepEqual(guardCompare(dir, 'wave-1').changed, ['openspec/changes/extract-a/review.md', 'openspec/changes/extract-b/review.md']);
+});
+
 test('guard --save and --compare list only the protected files that changed', async () => {
   const { guardSave, guardCompare } = await import('../scripts/gate.mjs');
   const dir = tempDir();
@@ -552,7 +572,7 @@ const DB_CAPABILITIES = '# Capabilities\n\n### platform\n1. `platform/db` DB\n  
 function databaseSurvey() {
   const dir = survey({ inventory: DB_INVENTORY, review: DB_REVIEW, capabilities: DB_CAPABILITIES });
   write(dir, `${DB}/sales/dbo/Procedures/usp_Close.sql`, 'CREATE PROCEDURE usp_Close AS SELECT 1\r\nGO\r\n');
-  write(dir, `${DB}/sales/dbo/Triggers/trg_Audit.sql`, '﻿CREATE TRIGGER trg_Audit ON Orders AFTER UPDATE AS INSERT INTO Log VALUES (1)\n');
+  write(dir, `${DB}/sales/dbo/Triggers/trg_Audit.sql`, '\uFEFFCREATE TRIGGER trg_Audit ON Orders AFTER UPDATE AS INSERT INTO Log VALUES (1)\n');
   write(dir, `${DB}/sales/desktop.ini`, '[x]');
   write(dir, `${SURVEY}/database.md`, WITH_DATABASE(databaseHash(dir)));
   return dir;

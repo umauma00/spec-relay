@@ -103,6 +103,11 @@ need the reasoning behind a step.
   here. It is a question, never an approval or a decision: do not tick
   `review.md`, write a `decision:`, or archive because of it. Ask in the chat
   when it sounds like one.
+- **Canvas edit**: a tick, an untick, a `decision:` or the `Reviewer:` line the
+  person wrote in `review.md` with the canvas buttons. It is their own edit of
+  the file, the same as typing it there; the canvas records each one in
+  `openspec/spec-relay/canvas-log.jsonl` (never write that file). It is not an
+  approval to archive.
 - **Work folder**: `openspec/spec-relay/work/<change>/`, scratch files that
   subagents write in parallel (table parts, survey evidence) before
   `merge.mjs` puts them into an artifact.
@@ -248,8 +253,10 @@ not wash out these instructions.
    lesson, an archive), run `--compare` first: if that path already changed, a subagent
    changed it; otherwise write, then `--save wave-<n>` again. For any change
    you did not make, stop, tell the person what changed, and do not use that
-   wave's results until they decide. If `--save` prints `warnings`, tell the
-   person which files are not guarded.
+   wave's results until they decide. A `canvas` list in the result names the
+   `review.md` files the person changed in the canvas during the wave: those
+   are theirs, not a subagent's; read them again before you use them. If
+   `--save` prints `warnings`, tell the person which files are not guarded.
    In a git repository, also compare `git status --porcelain
    --untracked-files=all` before and after, for files outside those (such as
    kit or host folders).
@@ -290,13 +297,19 @@ you assist. This gate is the point of the kit.
    `invoke_canvas_action` (instanceId `spec-relay`, actionName `open_review`,
    input `{ "name": "<change>" }`). Other views are `progress`, `specs` and
    `spec` (name: the capability); `list_canvas_capabilities` lists the actions.
-   The canvas follows the files by itself; it never records a decision.
+   The canvas follows the files by itself. On an active change's page the
+   person can tick items, write decisions and their name there: the canvas
+   writes them to `review.md` as the person's own edit. You cannot write
+   through it. `invoke_canvas_action` `get_review_edits` lists what they
+   changed there.
 2. Ask how they want to review: here in the conversation, one item at a time,
    or in the files or a pull request on their own (they tell you when done,
    and you check what they ticked). Both are fine; never pick for them.
 3. Follow the change's apply instruction (`node "<kit>/scripts/openspec.mjs" instructions apply --change
    <change> --json`). Tick a box only when the person accepts that item in this
-   conversation, or when they ticked it in the file themselves. Write their
+   conversation, or when they ticked it in the file or the canvas themselves.
+   Read `review.md` again before you edit it, since the person may have changed
+   it in the canvas meanwhile. Write their
    decision after `decision:` and their name after `Reviewer:`. When they ask
    for a change, edit the artifacts, untick every item you changed, validate,
    render again and ask again.
@@ -304,7 +317,8 @@ you assist. This gate is the point of the kit.
    <change>`. `node "<kit>/scripts/openspec.mjs" archive --yes` checks none of what the gate checks, so
    never archive while the gate fails; report the failure as When something
    stops says. Then ask whether to archive, and archive only on an explicit
-   yes: `node "<kit>/scripts/openspec.mjs" archive <change> --yes`. Extract and amend changes also need
+   yes in this conversation (boxes ticked in the file or the canvas are not
+   that yes): `node "<kit>/scripts/openspec.mjs" archive <change> --yes`. Extract and amend changes also need
    the archived survey with the capability in its list or in the plan.
 5. When the person corrects something that could recur, propose the lesson
    (below) right then, not after the review.

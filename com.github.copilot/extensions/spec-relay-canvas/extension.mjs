@@ -1,5 +1,8 @@
 // spec-relay canvas: shows the migration's progress, review pages and approved
-// specs in a Copilot canvas, with an "ask about this" button on every item.
+// specs in a Copilot canvas, with an "ask about this" button on every item. On
+// the page of an active change the person can also tick items, write decisions
+// and the reviewer's name: the canvas writes them to review.md as their own edit.
+// The agent's actions only read and move the canvas; none of them writes.
 //
 // The only file that touches the Copilot SDK (the canvas API is experimental and
 // may change). Everything else is in the kit's scripts/canvas.mjs, which runs and
@@ -11,6 +14,7 @@ const kit = new URL('../../../scripts/', import.meta.url);
 const { startServer, pageName, activeChanges } = await import(new URL('canvas.mjs', kit));
 const { status, checklist } = await import(new URL('status.mjs', kit));
 const { language } = await import(new URL('gate.mjs', kit));
+const { canvasEdits } = await import(new URL('review-edit.mjs', kit));
 
 let session = null;
 // One server per repository, shared by the canvases open on it: root key -> { root, starting, instances }.
@@ -72,7 +76,7 @@ session = await joinSession({
     createCanvas({
       id: 'spec-relay',
       displayName: 'spec-relay',
-      description: 'Shows the spec-relay migration: progress, review pages and approved specs, with a button to ask about any item. Read-only: it never records a decision.',
+      description: 'Shows the spec-relay migration: progress, review pages and approved specs, with a button to ask about any item. On the page of an active change the person can tick items, write decisions and the reviewer in review.md (their own edit; never an approval to archive). The agent cannot write through it.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -90,6 +94,17 @@ session = await joinSession({
             const root = key ? servers.get(key)?.root ?? rootOf(ctx) : rootOf(ctx);
             const report = status(root, { language: language(root) });
             return { todo: checklist(report, { problems: true }), current: report.current, changes: activeChanges(root), problems: report.problems };
+          },
+        },
+        {
+          name: 'get_review_edits',
+          description: 'What the person changed in review.md from the canvas (ticks, decisions, the reviewer), oldest first. Read review.md again after any of them.',
+          inputSchema: { type: 'object', additionalProperties: false, properties: { since: { type: 'string', description: 'Only edits after this ISO time.' } } },
+          handler: async (ctx) => {
+            const key = instances.get(ctx.instanceId);
+            const root = key ? servers.get(key)?.root ?? rootOf(ctx) : rootOf(ctx);
+            const since = typeof ctx.input?.since === 'string' ? ctx.input.since : undefined;
+            return { edits: canvasEdits(root, { since }).slice(-200) };
           },
         },
         { name: 'open_progress', description: 'Show the progress page in the open canvas.', handler: (ctx) => go(ctx, 'progress') },

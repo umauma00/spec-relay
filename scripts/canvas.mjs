@@ -12,11 +12,15 @@
 // What it may do, and nothing more:
 // - read the repository's Markdown and render it with render.mjs (same design);
 // - serve image files that a page shows, from inside the repository;
-// - pass a question the person typed to the chat, marked "[canvas]".
-// It writes no file. It listens on 127.0.0.1 only, every path starts with a
-// random token, the Host header must be the server's own, a question must come
-// from its own page (a custom header and, when sent, the same Origin), and the
-// page runs only the scripts this server marked with a fresh nonce.
+// - pass a question the person typed to the chat, marked "[canvas]";
+// - on the page of an active change, write what the person changed in its
+//   review.md (a tick, a decision, the reviewer's name) through review-edit.mjs,
+//   which records each write in canvas-log.jsonl. It writes no other file.
+// It listens on 127.0.0.1 only, every path starts with a random token, the Host
+// header must be the server's own, a question or an edit must come from its own
+// page (a custom header and, when sent, the same Origin), an edit is refused
+// when review.md changed since the page was built, and the page runs only the
+// scripts this server marked with a fresh nonce.
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -25,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { view, page, labels, escapeHtml, markdown, parseReview, capabilities, timeStamp } from './render.mjs';
 import { status, checklist, stepLabel, stepName, STEPS } from './status.mjs';
 import { language, changeSchema, archivedChange } from './gate.mjs';
+import { writeReview, sha256 } from './review-edit.mjs';
 
 export const VIEWS = 'openspec/spec-relay/views';
 
@@ -35,13 +40,18 @@ const WORDS = {
     byCapability: '機能ごと', capability: '機能', spec: '仕様', problems: '問題', none: 'ありません',
     nav: '画面', progress: '進み具合', specs: '仕様の一覧',
     ask: 'これを聞く', askPage: 'この画面について聞く', askTitle: 'チャットに質問を送る', askAbout: '対象',
-    askHint: 'チャットに「[canvas]」付きで届きます。承認や判断にはなりません。承認や判断は、チャットで伝えるか review.md に書いてください。',
+    askHint: 'チャットに「[canvas]」付きで届きます。質問であって、承認や判断にはなりません。',
+    tick: '確認済みにする', untick: '確認を外す', decide: '判断を書く', decideTick: '判断を書いて確認済みにする',
+    reviewer: 'レビュー担当', reviewerSet: 'レビュー担当の名前を書く', save: '保存する',
+    decisionTitle: '判断を書く', reviewerTitle: 'レビュー担当の名前',
+    editHint: 'review.md に書き込みます。あなたが自分でファイルを直したのと同じ扱いです。変更を完了（アーカイブ）してよいかは、チャットで伝えてください。',
+    saving: '保存しています…', saved: 'review.md に保存しました。', changed: 'review.md がほかで変わっていたので、読み直しました。もう一度操作してください。', saveFailed: '保存できませんでした', emptyValue: '書いてから保存してください。',
     send: '送る', cancel: 'やめる', sending: '送っています…', sent: 'チャットに送りました。', failed: '送れませんでした', empty: '質問を書いてください。',
     notRepo: 'このフォルダには openspec/ がありません。spec-relay を導入したリポジトリでチャットを開いてください。',
     notFound: 'この画面はありません（変更や仕様が消えたか、名前が違います）。上の「進み具合」から選んでください。',
     noLink: 'canvas ではこのリンクを開けません（canvas の画面どうしのリンクだけが開きます）。',
     gone: 'チャットのセッションが終わったため、この画面はもう更新されません。',
-    note: 'この画面は表示用です。正は Markdown のファイルです。判断はチャットで伝えるか review.md に書きます。openspec/ のファイルが変わると画面も変わります。',
+    note: '正は Markdown のファイルです。進行中の変更の画面では、確認・判断・レビュー担当を review.md に書き込めます。そのほかの判断はチャットで伝えてください。openspec/ のファイルが変わると画面も変わります。',
     generated: '生成',
   },
   en: {
@@ -50,13 +60,18 @@ const WORDS = {
     byCapability: 'By capability', capability: 'Capability', spec: 'Spec', problems: 'Problems', none: 'None',
     nav: 'Pages', progress: 'Progress', specs: 'Specs',
     ask: 'Ask about this', askPage: 'Ask about this page', askTitle: 'Send a question to the chat', askAbout: 'About',
-    askHint: 'It reaches the chat marked "[canvas]". It is never an approval or a decision: give those in the chat or in review.md.',
+    askHint: 'It reaches the chat marked "[canvas]". It is a question, never an approval or a decision.',
+    tick: 'Mark confirmed', untick: 'Unmark', decide: 'Write the decision', decideTick: 'Write the decision and confirm',
+    reviewer: 'Reviewer', reviewerSet: 'Write the reviewer name', save: 'Save',
+    decisionTitle: 'Write the decision', reviewerTitle: 'Reviewer name',
+    editHint: 'This writes to review.md, the same as editing the file yourself. Whether the change may be completed (archived) you tell in the chat.',
+    saving: 'Saving…', saved: 'Saved to review.md.', changed: 'review.md had changed elsewhere, so the page was reloaded. Try again.', saveFailed: 'Could not save', emptyValue: 'Write something first.',
     send: 'Send', cancel: 'Cancel', sending: 'Sending…', sent: 'Sent to the chat.', failed: 'Could not send', empty: 'Write a question first.',
     notRepo: 'This folder has no openspec/. Open the chat in a repository where spec-relay is set up.',
     notFound: 'There is no such page (the change or spec is gone, or the name is wrong). Pick one from Progress above.',
     noLink: 'This link does not open in the canvas (only links between canvas pages do).',
     gone: 'The chat session has ended, so this page no longer updates.',
-    note: 'This page is a view. The Markdown files are the source of truth. Decisions go in the chat or in review.md. The page follows the files under openspec/ as they change.',
+    note: 'The Markdown files are the source of truth. On the page of a change in progress you can write ticks, decisions and the reviewer to review.md. Other decisions go in the chat. The page follows the files under openspec/ as they change.',
     generated: 'Generated',
   },
 };
@@ -132,7 +147,7 @@ const CANVAS_CSS = `
 .ask:hover{background:var(--ai);color:var(--paper)}
 .ask-row{margin:10px 0 0}
 @container (min-width:860px){.ask-row{padding-left:calc(3.1em + 26px)}}
-.ask-page{margin-top:12px}
+.ask-row.ask-page{margin-top:12px;padding-left:0}
 dialog.ask-box{border:2px solid var(--ink);padding:16px;max-width:min(560px,calc(100vw - 32px));width:100%;background:var(--paper);color:var(--ink);font-family:var(--ui)}
 dialog.ask-box::backdrop{background:rgba(0,0,0,.35)}
 .ask-box h2{margin:0 0 6px;font-size:16px}
@@ -145,6 +160,10 @@ dialog.ask-box::backdrop{background:rgba(0,0,0,.35)}
 .ask-box button.primary{background:var(--ink);color:var(--paper)}
 .ask-box button[disabled]{opacity:.6;cursor:wait}
 .canvas-toast{position:fixed;left:16px;right:16px;bottom:64px;max-width:420px;margin:0 auto;padding:10px 14px;background:var(--ink);color:var(--paper);font:600 14px/1.4 var(--ui);z-index:9}
+.ask.mark{border-color:var(--ink);color:var(--ink);margin-right:8px}
+.ask.mark:hover{background:var(--ink);color:var(--paper)}
+.ask-row .ask{margin-bottom:6px}
+.ask-box input[type=text]{display:block;width:100%;padding:8px;border:1.5px solid var(--ink);background:var(--paper);color:var(--ink);font:15px/1.6 var(--read)}
 .canvas-gone{position:sticky;top:0;z-index:8;margin:0;padding:8px 16px;background:var(--ochre);color:var(--paper);font:600 14px/1.4 var(--ui)}
 @media print{.canvas-nav,.ask,.ask-row,dialog.ask-box,.canvas-toast,.canvas-gone{display:none!important}}
 `;
@@ -191,6 +210,67 @@ const CANVAS_SCRIPT = String.raw`(() => {
     } catch (err) { msg.textContent = W.failed + ' (' + err.message + ')'; }
     finally { pending = false; send.disabled = false; }
   });
+  // Writing review.md: a tick, a decision, the reviewer's name. Each write sends
+  // the hash of review.md the page was built from; the server refuses a stale one.
+  const R = cfg.review;
+  const ebox = d.getElementById('edit-box');
+  let writing = false;
+  if (R && ebox) {
+    const etitle = d.getElementById('edit-title'), etext = d.getElementById('edit-text'), emsg = d.getElementById('edit-msg'), esave = ebox.querySelector('.primary');
+    let hash = R.hash, job = null;
+    const reload = (m) => { store('spec-relay-canvas-toast', m); keepFocus(); location.reload(); };
+    const post = async (action, id, value) => {
+      const res = await fetch(base + '/review', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'review' }, body: JSON.stringify({ page: cfg.page, hash, action, id, value }) });
+      let j = {};
+      try { j = await res.json(); } catch (e) { /* not JSON */ }
+      if (res.status === 409) { reload(W.changed); return false; }
+      if (!res.ok || !j.ok) throw new Error(j.problem || String(res.status));
+      hash = j.hash;
+      return true;
+    };
+    const run = async (steps, report) => {
+      if (writing) return;
+      writing = true;
+      try {
+        for (const [action, id, value] of steps) if (!(await post(action, id, value))) return;
+        reload(W.saved);
+      } catch (err) { report(W.saveFailed + ' (' + err.message + ')'); }
+      finally { writing = false; }
+    };
+    const edit = (kind, id, value, then) => {
+      job = { kind, id, then };
+      etitle.textContent = kind === 'reviewer' ? W.reviewerTitle : W.decisionTitle + ' — ' + id;
+      etext.value = value || ''; emsg.textContent = '';
+      if (ebox.showModal) ebox.showModal(); else ebox.setAttribute('open', '');
+      etext.focus();
+    };
+    const eshut = () => { if (ebox.close) ebox.close(); else ebox.removeAttribute('open'); };
+    R.items.forEach((it) => {
+      const item = d.getElementById(it.id);
+      const row = item && item.matches('main .item') ? item.querySelector('.ask-row') : null;
+      if (!row) return;
+      const button = (label, onClick) => { const b = d.createElement('button'); b.type = 'button'; b.className = 'ask mark'; b.textContent = label; b.setAttribute('aria-label', label + ': ' + it.id); b.addEventListener('click', onClick); return b; };
+      const first = row.firstChild;
+      const mark = it.done ? button(W.untick, () => run([['untick', it.id]], toast))
+        : it.q && !it.decided ? button(W.decideTick, () => edit('decision', it.id, '', 'tick'))
+        : button(W.tick, () => run([['tick', it.id]], toast));
+      row.insertBefore(mark, first);
+      if (it.q) row.insertBefore(button(W.decide, () => edit('decision', it.id, it.decision)), first);
+    });
+    const who = d.getElementById('edit-reviewer');
+    if (who) who.addEventListener('click', () => edit('reviewer', null, R.reviewer));
+    ebox.addEventListener('keydown', (e) => e.stopPropagation());
+    ebox.querySelector('.cancel').addEventListener('click', eshut);
+    ebox.querySelector('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const value = etext.value.trim();
+      if (!value) { emsg.textContent = W.emptyValue; etext.focus(); return; }
+      esave.disabled = true; emsg.textContent = W.saving;
+      const steps = job.kind === 'reviewer' ? [['reviewer', null, value]] : [['decision', job.id, value], ...(job.then ? [[job.then, job.id]] : [])];
+      await run(steps, (m) => { emsg.textContent = m; });
+      esave.disabled = false;
+    });
+  }
   // Links the canvas cannot show (images, source files, other sites) would leave it with no way back.
   const hold = (e) => {
     const a = e.target.closest ? e.target.closest('a[href]') : null;
@@ -202,14 +282,16 @@ const CANVAS_SCRIPT = String.raw`(() => {
   };
   d.addEventListener('click', hold, true);
   d.addEventListener('auxclick', hold, true);
-  // After a reload, put the focus back where it was.
+  // After a reload, put the focus back where it was, and say what was saved.
+  const said = store('spec-relay-canvas-toast');
+  if (said) { store('spec-relay-canvas-toast', null); toast(said); }
   const was = store('spec-relay-canvas-focus');
   if (was) { store('spec-relay-canvas-focus', null); const el = d.getElementById(was); if (el) el.focus({ preventScroll: true }); }
   const keepFocus = () => { const el = d.activeElement && d.activeElement.closest ? d.activeElement.closest('[id]') : null; if (el && el !== d.body) store('spec-relay-canvas-focus', el.id); };
   // Follow the files: reload when they change, go where the agent sent the canvas.
   let busy = false, misses = 0;
   setInterval(async () => {
-    if (busy || d.hidden || box.open) return;
+    if (busy || writing || d.hidden || box.open || (ebox && ebox.open)) return;
     busy = true;
     try {
       const res = await fetch(base + '/state', { cache: 'no-store' });
@@ -226,18 +308,24 @@ const CANVAS_SCRIPT = String.raw`(() => {
 
 // Turns a page of render.mjs into a canvas page: only scripts carrying this
 // response's nonce run, the page talks only to this server, and it gets links
-// between the pages and the ask buttons.
-export function interactive(html, { lang, pagePath, title, version, seq, nonce }) {
+// between the pages and the ask buttons. `review` ({ hash, items, reviewer }) is
+// given for an active change with a review.md: its page also gets the buttons
+// that write review.md.
+export function interactive(html, { lang, pagePath, title, version, seq, nonce, review = null }) {
   const W = WORDS[lang];
   const current = path.posix.basename(pagePath);
   const nav = `<nav class="canvas-nav" aria-label="${escapeHtml(W.nav)}"><a href="progress.html"${current === 'progress.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.progress)}</a><a href="specs.html"${current === 'specs.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.specs)}</a></nav>
-<button type="button" class="ask ask-page" id="ask-page">${escapeHtml(W.askPage)}</button>`;
-  const words = Object.fromEntries(['ask', 'askAbout', 'sending', 'sent', 'failed', 'empty', 'noLink', 'gone'].map((k) => [k, W[k]]));
-  const config = JSON.stringify({ page: pagePath, title, version, seq, words }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+<p class="ask-row ask-page"><button type="button" class="ask" id="ask-page">${escapeHtml(W.askPage)}</button>${review ? ` <button type="button" class="ask mark" id="edit-reviewer">${escapeHtml(review.reviewer ? `${W.reviewer}: ${review.reviewer}` : W.reviewerSet)}</button>` : ''}</p>`;
+  const words = Object.fromEntries(['ask', 'askAbout', 'sending', 'sent', 'failed', 'empty', 'noLink', 'gone',
+    ...(review ? ['tick', 'untick', 'decide', 'decideTick', 'decisionTitle', 'reviewerTitle', 'saving', 'saved', 'changed', 'saveFailed', 'emptyValue'] : [])].map((k) => [k, W[k]]));
+  const config = JSON.stringify({ page: pagePath, title, version, seq, words, review }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const dialog = `<dialog class="ask-box" id="ask-box" aria-labelledby="ask-title" aria-describedby="ask-about"><form method="dialog"><h2 id="ask-title">${escapeHtml(W.askTitle)}</h2><p class="about" id="ask-about"></p>
 <textarea id="ask-text" maxlength="4000" aria-labelledby="ask-title" aria-describedby="ask-about ask-hint ask-msg"></textarea>
 <p class="hint" id="ask-hint">${escapeHtml(W.askHint)}</p><p class="msg" id="ask-msg" role="status"></p><div class="buttons"><button type="button" class="cancel">${escapeHtml(W.cancel)}</button><button type="submit" class="primary">${escapeHtml(W.send)}</button></div></form></dialog>
-<script type="application/json" id="canvas-config">${config}</script>
+${review ? `<dialog class="ask-box" id="edit-box" aria-labelledby="edit-title"><form method="dialog"><h2 id="edit-title"></h2>
+<input type="text" id="edit-text" maxlength="500" autocomplete="off" aria-labelledby="edit-title" aria-describedby="edit-hint edit-msg">
+<p class="hint" id="edit-hint">${escapeHtml(W.editHint)}</p><p class="msg" id="edit-msg" role="status"></p><div class="buttons"><button type="button" class="cancel">${escapeHtml(W.cancel)}</button><button type="submit" class="primary">${escapeHtml(W.save)}</button></div></form></dialog>
+` : ''}<script type="application/json" id="canvas-config">${config}</script>
 <script nonce="${nonce}">${CANVAS_SCRIPT}</script>`;
   return html
     .replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, () => `<meta http-equiv="Content-Security-Policy" content="${csp(nonce)}">`)
@@ -315,6 +403,37 @@ function insideRoot(root, rel) {
   return within(resolved) ? resolved : null;
 }
 
+// The review.md of an active change, when it is a plain file at its own path
+// (no link out of the change folder): the only file the canvas writes.
+function reviewFile(root, name) {
+  if (!CHANGE_NAME.test(name) || name === 'archive' || /^\.+$/.test(name)) return null;
+  const dir = path.join(root, 'openspec/changes', name);
+  if (!fs.existsSync(path.join(dir, '.openspec.yaml')) && !fs.existsSync(path.join(dir, 'proposal.md'))) return null;
+  const rel = `openspec/changes/${name}/review.md`;
+  const file = insideRoot(root, rel);
+  if (!file) return null;
+  const expected = path.join(fs.realpathSync(root), ...rel.split('/'));
+  const same = process.platform === 'win32' ? file.toLowerCase() === expected.toLowerCase() : file === expected;
+  try { return same && fs.lstatSync(expected).isFile() ? expected : null; } catch { return null; }
+}
+
+// What the page needs to write review.md: the hash it was built from, its items and the reviewer.
+function reviewState(file) {
+  const buffer = fs.readFileSync(file);
+  const text = buffer.toString('utf8');
+  const seen = new Set();
+  const items = parseReview(text).flatMap((g) => g.items).filter((i) => i.id && !seen.has(i.id) && seen.add(i.id))
+    .map((i) => ({ id: i.id, done: i.done, q: i.letter === 'Q', decided: Boolean(i.decision), decision: i.decision ?? '' }));
+  let fenced = false;
+  let reviewer = null;
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+    const m = !fenced && line.match(/^\s*\**Reviewer\**\s*:\s*(.*)$/i);
+    if (m) { reviewer = m[1].replace(/<!--[\s\S]*?-->/g, '').replace(/[*_]/g, '').trim() || null; break; }
+  }
+  return { hash: sha256(buffer), items, reviewer };
+}
+
 const sameToken = (a, b) => {
   const x = Buffer.from(String(a)), y = Buffer.from(String(b));
   return x.length === y.length && crypto.timingSafeEqual(x, y);
@@ -353,8 +472,14 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
       let result = null;
       if (name === 'specs') result = view({ root, spec: 'all', lang: code, now: now(), at });
       else if (capability) result = view({ root, spec: capability, lang: code, now: now(), at });
-      else if (changeExists(root, name)) result = view({ root, change: name, lang: code, now: now(), at });
-      built = result?.ok ? { html: result.html, title: result.title } : null;
+      let review = null;
+      if (!capability && name !== 'specs' && changeExists(root, name)) {
+        // The hash is read before the page, so a file that changes meanwhile makes the edit stale, never wrong.
+        const file = reviewFile(root, name);
+        try { review = file ? reviewState(file) : null; } catch { review = null; }
+        result = view({ root, change: name, lang: code, now: now(), at });
+      }
+      built = result?.ok ? { html: result.html, title: result.title, review } : null;
     }
     if (cache.size > 30) cache.clear();
     cache.set(key, built);
@@ -386,6 +511,30 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         await ask(askPrompt({ ...body, page: built ? `${VIEWS}/${name}.html` : '', title: built?.title ?? '' }, lang()));
         return send(res, 200, 'application/json; charset=utf-8', '{"ok":true}');
       }
+      if (rest.length === 1 && rest[0] === 'review') {
+        const origin = req.headers.origin;
+        if (req.method !== 'POST' || req.headers['x-spec-relay'] !== 'review' || (origin && origin !== `http://127.0.0.1:${port}`)) return send(res, 403, 'text/plain; charset=utf-8', 'forbidden');
+        const reply = (code, body) => send(res, code, 'application/json; charset=utf-8', JSON.stringify(body));
+        let body;
+        try { body = JSON.parse(await readBody(req)); } catch { return reply(400, { ok: false, problem: 'bad request' }); }
+        if (!body || typeof body !== 'object') return reply(400, { ok: false, problem: 'bad request' });
+        const { action, id, value, hash } = body;
+        if (!['tick', 'untick', 'decision', 'reviewer'].includes(action) || typeof hash !== 'string'
+          || (action === 'reviewer' ? typeof value !== 'string' : typeof id !== 'string')
+          || (action === 'decision' && typeof value !== 'string')) return reply(400, { ok: false, problem: 'bad request' });
+        const name = typeof body.page === 'string' && body.page.startsWith(`${VIEWS}/`) ? path.posix.basename(body.page, '.html') : '';
+        if (!name || !reviewFile(root, name)) return reply(404, { ok: false, problem: 'this page has no review.md to write' });
+        const result = writeReview(root, name, { action, id: action === 'reviewer' ? undefined : id, value, hash });
+        if (!result.ok) return reply(result.status, { ok: false, problem: result.problem });
+        if (!result.unchanged) {
+          // The pages show the new file at once, and the next look at the files does not count this write twice.
+          version += 1;
+          cache.clear();
+          seen = signature(root);
+          checked = Date.now();
+        }
+        return reply(200, { ok: true, hash: result.hash });
+      }
       if (req.method !== 'GET' || rest[0] !== 'r') return send(res, 404, 'text/plain; charset=utf-8', 'not found');
       const rel = rest.slice(1).join('/');
       if (rel.startsWith(`${VIEWS}/`) && rel.endsWith('.html') && rest.length === 5) {
@@ -393,7 +542,7 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         const code = lang();
         const nonce = crypto.randomBytes(16).toString('base64');
         const built = pageHtml(name);
-        const html = interactive(built ? built.html : notFoundPage({ lang: code, now: now() }), { lang: code, pagePath: rel, title: built ? built.title : WORDS[code].title, version: currentVersion(), seq: goto.seq, nonce });
+        const html = interactive(built ? built.html : notFoundPage({ lang: code, now: now() }), { lang: code, pagePath: rel, title: built ? built.title : WORDS[code].title, version: currentVersion(), seq: goto.seq, nonce, review: built?.review ?? null });
         return send(res, built ? 200 : 404, 'text/html; charset=utf-8', html, { 'Content-Security-Policy': csp(nonce) });
       }
       const type = IMAGES[path.extname(rel).toLowerCase()];

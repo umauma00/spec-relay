@@ -636,6 +636,8 @@ export function capabilityList(text) {
 export const PLAN = 'openspec/spec-relay/plan.md';
 // What the person's corrections taught; only the orchestrator writes it.
 export const LESSONS = 'openspec/spec-relay/lessons.md';
+// The person's edits of review.md made in the canvas (review-edit.mjs writes it; agents never do).
+export const CANVAS_LOG = 'openspec/spec-relay/canvas-log.jsonl';
 
 // The capabilities of the plan's capability list: top-level items under the
 // "## Capabilities" heading (as status.mjs reads it), not follow-up notes.
@@ -860,11 +862,28 @@ export function guardCompare(root, name) {
     return { ok: false, problems: [`no snapshot ${GUARD_DIR}/${name}.json; run gate.mjs guard --save ${name} before the wave`] };
   }
   const now = guardFiles(root);
-  const changed = Object.keys(now).filter((f) => f in before && before[f] !== now[f]).sort();
+  // A review.md the person changed in the canvas (a chain of logged edits from the
+  // snapshot's hash to today's) is theirs, not a subagent's.
+  const edges = new Map();
+  try {
+    for (const line of fs.readFileSync(path.join(root, CANVAS_LOG), 'utf8').split(/\r?\n/)) {
+      let e;
+      try { e = JSON.parse(line); } catch { continue; }
+      if (e && typeof e.file === 'string' && typeof e.before === 'string' && typeof e.after === 'string') edges.set(`${e.file}\0${e.before}`, e.after);
+    }
+  } catch { /* no canvas edits */ }
+  const byCanvas = (f) => {
+    let at = before[f];
+    for (let n = 0; n < 10000 && at !== now[f]; n += 1) { at = edges.get(`${f}\0${at}`); if (!at) return false; }
+    return at === now[f];
+  };
+  const touched = Object.keys(now).filter((f) => f in before && before[f] !== now[f]);
+  const canvas = touched.filter(byCanvas).sort();
+  const changed = touched.filter((f) => !canvas.includes(f)).sort();
   const added = Object.keys(now).filter((f) => !(f in before)).sort();
   const removed = Object.keys(before).filter((f) => !(f in now)).sort();
   const cap = (list) => (list.length > 50 ? [...list.slice(0, 50), `...and ${list.length - 50} more`] : list);
-  return { ok: changed.length + added.length + removed.length === 0, changed: cap(changed), added: cap(added), removed: cap(removed) };
+  return { ok: changed.length + added.length + removed.length === 0, changed: cap(changed), added: cap(added), removed: cap(removed), ...(canvas.length ? { canvas } : {}) };
 }
 
 export function checkPortReady(root, capability) {
@@ -1518,7 +1537,8 @@ export function nextSteps(command, result, lang = 'en') {
   let agent = [];
   if (command === 'guard') {
     if (!result.ok && result.changed) person.push(words.guard(shortList([...result.changed, ...result.added, ...result.removed])));
-    return { person, agent: result.problems ?? [] };
+    const canvas = result.canvas?.length ? [`The person changed ${result.canvas.join(', ')} in the canvas during the wave (ticks, decisions or the reviewer's name). Read them again before using them; they are the person's own edits.`] : [];
+    return { person, agent: [...(result.problems ?? []), ...canvas] };
   }
   const problems = result.problems ?? [];
   const unticked = problems.filter((p) => p.startsWith('not ticked: ')).map((p) => plain(p.slice('not ticked: '.length)).split(' ')[0]);

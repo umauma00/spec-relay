@@ -2,7 +2,7 @@
 
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) を使って、コードベースを別のプログラミング言語へ移すための GitHub Copilot 用キットです。元のコードから仕様を起こし、人間がその仕様をレビューし、レビュー済みの仕様をもとに新しい言語で実装します。
 
-> **状態：0.17.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
+> **状態：0.18.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
 
 ## 流れ
 
@@ -169,6 +169,7 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 - 元コード（元のフォルダーが `.` のときは `openspec/` と移行先のフォルダー以外のすべて）、`openspec/specs/`、`openspec/changes/archive/`、`openspec/schemas/`、`openspec/spec-relay/tools/`（固定した OpenSpec）、`openspec/config.yaml`、キット自体への書き込み
 - サブエージェントによる review.md・questions.md・crosscheck.md・port の proposal.md と design.md・計画（plan.md）・学びの記録（lessons.md）の書き込み
 - port のテスト実行の記録（`verify.json`）への書き込み（編集ツールでも、`Set-Content`・リダイレクト・`node -e` などのシェルコマンドでも。書くのは `verify.mjs` だけ）
+- canvas での書き込みの記録（`openspec/spec-relay/canvas-log.jsonl`）への書き込み（編集ツールでも、シェルコマンドでも。書くのは canvas だけ）
 
 有効にするには、`openspec/config.yaml` の context に次の1行を足すか、`on` に変えます（導入時なら `--hooks on`。導入済みのリポジトリでは `--hooks` は反映されないので、この行を自分で直します）。フックが有効な間、AI の編集ツールは config.yaml を書けず、この行や config.yaml を書き換えるシェルコマンドも拒否されます（無効の間も、AI には変えないように指示しています）。
 
@@ -177,9 +178,13 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 ```
 
 - 実機（特に Windows）での確認がまだなので、既定は無効です。node が見つからないなどでフックが動かないときは、拒否せずに通常の許可確認へ進みます（Copilot は終了コードが 0 以外だとそのツールの実行を拒否するので、壊れたフックですべての操作が止まらないよう、必ず 0 を返します）。
-- シェルコマンドでの書き込み（`Set-Content` など）は、config.yaml と verify.json へのもの以外は読み取りません。これはオーケストレーターの `gate.mjs guard` が後から見つけます。
+- シェルコマンドでの書き込み（`Set-Content` など）は、config.yaml・verify.json・canvas-log.jsonl へのもの以外は読み取りません。これはオーケストレーターの `gate.mjs guard` が後から見つけます。
 - フックはプラグインを入れたすべてのリポジトリで、シェルとファイル編集の前に1回ずつ起動します（node の起動1回分。spec-relay のリポジトリでなければすぐ終わります）。ホストがプラグインの場所（`PLUGIN_ROOT`）を渡さないときは何もしません。
 - チャットでの承認は AI が review.md に書くので、「AI が勝手にチェックを付ける」ことはフックでは区別できません。承認は今も、チャットでのあなたの言葉と gate の合格の両方です。
+
+## 0.17.0 から更新するとき
+
+0.18.0 で、canvas のレビュー画面から review.md に書き込めるようになりました（確認済みにする・判断を書く・レビュー担当の名前）。自分でファイルを直したのと同じ扱いで、変更の完了（アーカイブ）は今までどおりチャットで伝えます（[詳しく](docs/CANVAS.md)）。書き込みは `openspec/spec-relay/canvas-log.jsonl` に記録され、`gate.mjs guard --compare` はそれをサブエージェントの変更と区別します。プラグインを更新すれば入ります。スキーマや成果物に変更はありません。
 
 ## 0.16.0 から更新するとき
 
@@ -297,7 +302,7 @@ plugin.json                    プラグイン定義（Agent Plugins 1.0）
 .github/plugin/marketplace.json マーケットプレイス定義
 com.github.copilot/agents/     オーケストレーター・解析担当・照合担当・実装担当
 com.github.copilot/hooks/      実行前に archive と書き込みを確かめるフック（既定は無効）と、サブエージェントの時間の記録
-com.github.copilot/extensions/ canvas の拡張（進み具合・レビュー画面・仕様を Copilot の canvas に出す。試験中）
+com.github.copilot/extensions/ canvas の拡張（進み具合・レビュー画面・仕様を Copilot の canvas に出し、レビューのチェックと判断を書き戻す。試験中）
 skills/spec-relay/SKILL.md     オーケストレーターの手順
 skills/spec-relay-view/        markdown を HTML にして見せるスキル
 openspec-schemas/              移行用の OpenSpec スキーマ
@@ -316,6 +321,7 @@ scripts/compare.mjs            比べ方 B1：元のプログラムから記録�
 scripts/run.mjs                verify と compare がコマンドを実行する部分（Windows では PowerShell）
 scripts/render.mjs             成果物の markdown をレビュー用の HTML に、承認済みの仕様を読みものの HTML にする（デザイン固定）
 scripts/canvas.mjs             canvas の画面を出すサーバー（拡張から使う。単独でブラウザーでも試せる）
+scripts/review-edit.mjs        canvas から review.md への書き込み（チェック・判断・レビュー担当）と、その記録
 scripts/doctor.mjs             最初の環境チェックとサブエージェントの試運転
 scripts/openspec.mjs           リポジトリに固定した OpenSpec CLI の起動（`node <キット>/scripts/openspec.mjs <引数>`、シェルを通さない）
 templates/openspec-tools/      リポジトリに置く、OpenSpec の版を固定する package.json と package-lock.json
