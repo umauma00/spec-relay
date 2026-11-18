@@ -107,7 +107,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
     'glossary.md': '# Glossary\n',
     'capabilities.md': '# Capabilities\n\n### calc\n1. `calc/add` 足し算\n   - `src/`\n   - `openspec/spec-relay/db/calc/`\n',
     'database.md': `# Databases\n\n## Databases\n| Database | Product and version | Connection setting | Definitions |\n|---|---|---|---|\n| calc | SQL Server 2012 | CalcDb | \`openspec/spec-relay/db/calc/\` |\n\n## Logic in the database\n| Kind | Count | Contexts | Notes |\n|---|---|---|---|\n| trigger | 1 | calc | |\n\n## Missing definitions\nNone\n\n## Snapshot\nsha256: ${databaseHash(dir)}\n`,
-    'review.md': 'Reviewer: Uma\n\n- [x] K1 platform\n- [x] K2 calc\n- [x] C1 inventory\n- [x] D1 calc: definitions\n- [x] D90 missing definitions\n',
+    'review.md': 'Reviewer: Uma\n\n- [x] K1 platform\n- [x] K2 calc\n- [x] M1 map\n- [x] M2 owners\n- [x] M3 glossary\n- [x] M4 capabilities\n- [x] M5 carry\n- [x] C1 inventory\n- [x] D1 calc: definitions\n- [x] D90 missing definitions\n',
   });
   assert.deepEqual(checkReview(dir, 'survey'), { ok: true, problems: [] });
   openspec(dir, 'archive', 'survey', '--yes');
@@ -121,7 +121,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
     'ui.md': '# UI\n\n## Screens\n| Context | Screens | Source kind | Target | Policy | Why |\n|---|---|---|---|---|---|\n| platform | all | none | none | none | |\n| calc | all | none | none | none | |\n\n## Carried files\nNone\n',
     'verification.md': '| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| platform | yes | no | no | no |\n| calc | yes | no | no | no |\n',
     'data.md': '# Data\n\n## Schema policy\nkeep\n\n## Database logic\n| Kind | Handling | Reason |\n|---|---|---|\n| trigger | keep | |\n\n## Data access mapping\n| Topic | Source behavior | Target rule |\n|---|---|---|\n| Character set | cp932 | same |\n\n## Schema changes\nno migrations\n\n## Test database\nLocalDB\n',
-    'review.md': 'Reviewer: Uma\n\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 calc\n- [x] E1 platform: levels\n- [x] E2 calc: levels\n- [x] U1 platform: screens\n- [x] U2 calc: screens\n- [x] U90 shared look\n- [x] D0 schema policy\n- [x] D1 trigger: keep\n- [x] D90 exceptions\n- [x] D91 mapping\n- [x] D92 schema changes, test database\n',
+    'review.md': 'Reviewer: Uma\n\n- [x] A0 style\n- [x] A1 platform\n- [x] A2 calc\n- [x] A90 ownership\n- [x] A91 boundary\n- [x] V1 runtime\n- [x] V2 mapping\n- [x] V3 coding\n- [x] V4 commands\n- [x] E90 sign-in\n- [x] E1 platform: levels\n- [x] E2 calc: levels\n- [x] U1 platform: screens\n- [x] U2 calc: screens\n- [x] U90 shared look\n- [x] D0 schema policy\n- [x] D1 trigger: keep\n- [x] D90 exceptions\n- [x] D91 mapping\n- [x] D92 schema changes, test database\n',
   });
   assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
   openspec(dir, 'archive', 'target-design', '--yes');
@@ -134,7 +134,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
     'source-map.md': '# Source map\n\n| Path | Role | In scope |\n|---|---|---|\n| src/calc.py | adds | full |\n| openspec/spec-relay/db/calc/tables.sql | the sums table and its trigger | full |\n',
     'specs/calc/add/spec.md': crlf(SPEC),
     'screens.md': '# Screens\r\n\r\nNone\r\n',
-    'trace.md': '# Trace\r\n\r\n| Requirement | Source | Existing tests |\r\n|---|---|---|\r\n| Add two numbers | src/calc.py:add:1-2 | none |\r\n',
+    'trace.md': '# Trace\r\n\r\n| Requirement | Source | Existing tests |\r\n|---|---|---|\r\n| Add two numbers | src/calc.py:add:1-2<br>openspec/spec-relay/db/calc/tables.sql:sums_total | none |\r\n',
     'crosscheck.md': '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/calc.py:2 |\n',
     'coverage.md': '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/calc.py:(file)` | covered R1 | 1-2 the whole adder |\n| `openspec/spec-relay/db/calc/tables.sql:(file)` | no behavior | the table only |\n| `openspec/spec-relay/db/calc/tables.sql:sums_total` | covered R1 | the trigger keeps total = a + b |\n',
     'questions.md': '﻿# Questions\r\n',

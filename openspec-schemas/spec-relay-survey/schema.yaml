@@ -35,7 +35,9 @@ artifacts:
         `excluded`. Propose carry; the person decides in the review, and the
         target design (ui.md) says where carried files go.
       - **Notes**: for `excluded`, why (generated code, vendored library, build
-        output, dead code). For a file whose parts belong to several contexts
+        output, dead code). An excluded file is never specified or ported, so
+        `gate.mjs review` fails on an excluded row without a reason, and the
+        person accepts the list in the review (C1). For a file whose parts belong to several contexts
         (a god class, a shared include), name the main context here and list
         the other contexts with the symbols that go to each.
 
@@ -189,6 +191,10 @@ artifacts:
         table, `- [ ] D<n> <database>: definitions and the logic in it`, and
         `- [ ] D90 The missing definitions are understood`. Leave the heading
         empty when database.md says None.
+      Keep every item of the template under `## 2. Map` and `## 3. Coverage`
+      (M1-M5 and C1), also when there is nothing to decide (no shared data, no
+      carried file): `gate.mjs review` fails when one is missing, because each
+      is a decision only the person can take.
       Do not tick any box. Only the reviewer decides; see the apply instruction.
     requires:
       - inventory

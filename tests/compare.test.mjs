@@ -261,7 +261,7 @@ test('cases git ignores, or a build folder holds, still void the run when they c
   assert.equal((await verify(dir, 'port-calc-add', { progress: () => {} })).ok, true);
   assert.equal(checkPortDone(dir, 'port-calc-add').ok, true);
   write(dir, 'ts/out/golden/rules.json', '{"ignore":["$.at","$.sum"]}\n');
-  assert.match(checkPortDone(dir, 'port-calc-add').problems.join(), /the recorded cases or rules\.json of level B1 changed after the last verify run/);
+  assert.match(checkPortDone(dir, 'port-calc-add').problems.join(), /the recorded cases, rules\.json or the map of level B1 changed after the last verify run/);
 });
 
 test('text that is not UTF-8 is a problem, not replacement characters', async () => {

@@ -58,7 +58,10 @@ yourself, every one of them, and decide what a user or caller could notice:
 results, errors and messages, writes (database, files, mail, session),
 redirects, calls to other systems, rounding, defaults, the current time. The
 markers in the sites file point at lines that usually matter; account for
-each marker line, but do not stop at them.
+each marker line, but do not stop at them. The Untraced cell lists the
+effect lines (a write, a mail, a file, a call to another system, an error, an
+exit, a redirect) that the trace of no requirement reaches: nobody read those
+lines for any requirement, so read each one first and expect a `gap`.
 - A site id is `<path>:<symbol>`. `Class.Method#2` is the second member of
   that name in the file (an overload), in file order. `(init)` and
   `(static init)` are initializer blocks. `<Enum>.(values)` is the values of
@@ -79,7 +82,21 @@ each marker line, but do not stop at them.
   characters (minified code, embedded data) that the scanner did not read:
   read it yourself.
 - `covered R<n>, S<n>`: every effect of the site is in these requirements'
-  scenarios or these screens (R and S numbered as the task gives them).
+  scenarios or these screens (R and S numbered as the task gives them). Name
+  the requirement of every effect line, and say in the evidence which line is
+  which requirement's (`42 mail: R3`). The gate checks each effect line
+  against the trace of the requirements you name. When a requirement's
+  scenarios do describe an Untraced line, name it and say so in the evidence
+  (the analyst then adds the line to its trace); when you cannot point to a
+  scenario that states what the line does, the site is a `gap`. One
+  requirement that only lists or shows something never covers a page's
+  writes, mails and redirects. A marker is a word, so a line may hold one
+  and no effect: text of the page ("to delete, press..."), script that runs
+  in the browser, a word inside a string. Only for such a line, add
+  `; no effect <lines>` after the names (`covered R1, S1; no effect 6, 9`)
+  and say per line in the evidence what the line is (`6: script for the
+  browser`). The person reads these lines, so never use it for a line that
+  writes, sends, fails, ends the request or redirects.
 - `no behavior`: nothing to notice. Say why in the evidence.
 - `other capability <path>`: the task names that capability as an owner of
   this file, and this site is that capability's part.
@@ -136,7 +153,14 @@ code by hand, are right; the driver passes each input to the new code's
 real entry point (the one its callers use) and does not read the case files
 or return anything taken from them; and every rule in the folder's `rules.json` (ignored
 paths, tolerance, unordered arrays, numbers as text, trimming, missing as
-null) is one design.md's Decisions explains. An expected value that agrees
+null) is one design.md's Decisions explains. When the driver is
+`spec-relay-http` (cases recorded over HTTP), there is no recorder or driver
+code to read; check instead that the requests cover the item's scenarios, that
+the expected responses are what the source code gives for them (trace a few
+by hand), that `--start` runs the new system from this code, and that every
+line of the `--map` file (old path or field name to new) and every ignored
+part of a response is one design.md's Decisions explains: a path or field
+mapped to the wrong place makes two different pages look equal. An expected value that agrees
 with the new code but not with the source code, a driver that reads the
 expected values or skips the new code, or a rule nothing explains, makes the
 items it touches `mismatch`.

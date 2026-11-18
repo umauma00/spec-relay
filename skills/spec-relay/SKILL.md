@@ -19,7 +19,8 @@ The kit's own files are two directories above this skill:
 [scripts/metrics.mjs](../../scripts/metrics.mjs),
 [scripts/merge.mjs](../../scripts/merge.mjs),
 [scripts/verify.mjs](../../scripts/verify.mjs),
-[scripts/compare.mjs](../../scripts/compare.mjs) ([docs/COMPARE.md](../../docs/COMPARE.md)),
+[scripts/compare.mjs](../../scripts/compare.mjs) and
+[scripts/http.mjs](../../scripts/http.mjs) ([docs/COMPARE.md](../../docs/COMPARE.md)),
 [scripts/finish.mjs](../../scripts/finish.mjs),
 [scripts/guide.mjs](../../scripts/guide.mjs) ([docs/GUIDE.md](../../docs/GUIDE.md)),
 [scripts/doctor.mjs](../../scripts/doctor.mjs), `openspec-schemas/` and
@@ -427,7 +428,10 @@ the domain, not the folders.
    missing from the inventory, or a file that is not `excluded` belongs to no
    capability (the indented paths under each capability in capabilities.md).
    Tell the person which files are excluded and why: an excluded file is
-   never specified or ported, so that box is theirs. While the person reviews, ask the questions the
+   never specified or ported, so that box (C1) is theirs, and the gate fails
+   on an excluded row with no reason in Notes. Keep the template's M1-M5
+   and C1 items in review.md even when one has nothing to decide (say so in
+   the item): the gate fails when one is missing. While the person reviews, ask the questions the
    target design needs (step 2) so that it can start right after the archive.
 4. After archiving, write the plan: copy capabilities.md's lists under a
    `## Capabilities` heading in `openspec/spec-relay/plan.md`, keeping the
@@ -470,7 +474,12 @@ the domain, not the folders.
    choice). Suggest B1 for contexts with calculations or business rules
    whenever the source code can be built and run here or records of its real
    runs exist (batch input and output, report data): it is the level that
-   compares with what the old system did (docs/COMPARE.md). For the screens (ui.md), ask who uses them, whether manuals,
+   compares with what the old system did (docs/COMPARE.md). When the logic
+   cannot be called by itself (code at the top of a PHP page, WebForms event
+   handlers), B1 still works over HTTP if the person can run a test copy of
+   the old system: ask for its address, its encoding and how its test
+   database is reset, and write them in verification.md. Only the person
+   names a system on another machine, and never production. For the screens (ui.md), ask who uses them, whether manuals,
    training or printed forms show them, and the target UI technology, then
    propose a policy per context (`same`, `layout`, `new`, `none`; the
    instruction says which fits which source); the person decides, and you
@@ -534,7 +543,11 @@ waves.
    numbered requirement and screen names, the capabilities that own parts of
    shared files (from the plan), and the path
    `openspec/spec-relay/work/extract-<capability>/coverage/<nn>.md` to write.
-   Never give it the analysts' notes. Merge with `merge.mjs --into
+   Never give it the analysts' notes. The sites file's Untraced column and
+   the `untraced` count sites.mjs prints are the effect lines (a write, a
+   mail, a file, a call to another system, an error, an exit, a redirect)
+   that no requirement's trace reaches: tell the person the count in your
+   report. Merge with `merge.mjs --into
    openspec/changes/extract-<capability>/coverage.md --parts
    openspec/spec-relay/work/extract-<capability>/coverage --clean`. For every
    `gap`, have an analyst add the requirement it needs (and its trace) at
@@ -542,7 +555,18 @@ waves.
    same; have a checker crosscheck the new requirement and judge that site
    again (give it the site ids from the sites file, and have it write a part
    file with a higher number, merged the same way); or move it to
-   questions.md and write `question Q<n>` as its verdict yourself. A changed
+   questions.md and write `question Q<n>` as its verdict yourself. The gate
+   also fails a `covered` row while a named requirement's trace reaches not
+   every effect line of the site. Then decide per line with the checker's
+   evidence: when a requirement's scenarios state what the line does, have
+   an analyst add the line to that requirement's trace row and a checker
+   crosscheck the requirement again; when the line holds no effect at all
+   (text of the page, script that runs in the browser, a word in a string),
+   the checker writes it into the verdict (`covered R1; no effect 6, 9`)
+   and the person confirms it with C1; when neither, it is a gap as above.
+   Write several lines of one file as `path:3-6, 9`.
+   Never widen a trace row, and never have an analyst do it, to make the
+   gate pass: that hides the omission the check exists to find. A changed
    source map or source file means running sites.mjs again and judging the
    sites of the changed files again (a verdict is tied to a site id, not to
    its content; an added overload renumbers `#2`): `gate.mjs review` scans the files itself, fails on a site
@@ -551,7 +575,13 @@ waves.
    code), coverage.md keeps its empty table.
 5. **Questions and review.** Write questions.md from the analysts' reported
    doubts and the rows moved to questions, then review.md (names by search,
-   not by reading the spec).
+   not by reading the spec). When `gate.mjs review` says that sites with
+   marker lines are judged `no behavior` or `no effect`, add `## 4.
+   Coverage` with the item `- [ ] C1 ...` in the words it gives (they end
+   with a code that names the list); the review page lists those sites
+   under the omission check with the same code, and the person decides
+   whether they may be left out. When the list changes later, the gate
+   gives new words: write them and leave the item unticked.
 6. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
    analyst fix every error and warning. `gate.mjs review` also checks the
    coverage, so the person does not: source-map.md holds every file the plan
@@ -631,6 +661,19 @@ Words); the finish step (step 6) lists it in the hand-over.
    `spec-relay-compare --cases <dir> --driver "<command>"` compares the cases
    recorded from the source program with the new code's output: when cases
    differ, the new code is fixed, never the expected values or `rules.json`.
+   With the driver `spec-relay-http --base <address> --start '<command>'` the
+   cases are HTTP requests recorded from the running old system, and the run
+   starts the new system itself, asks it the same and stops it. Recording
+   (`http.mjs record`, a B1 task) sends real requests to the old system and
+   can change its data: before that task, ask the person to confirm that the
+   test copy runs at the address in verification.md, that its database is at
+   the starting state, and that the sign-in variables are set in this
+   terminal. Only the person may name a host other than this machine
+   (`--allow-host`, for recording only; a port command never takes it);
+   never add it yourself, and never record from production. Sign-in values
+   are written `{{env:NAME}}` in the requests; the recording puts the
+   placeholder back where an answer repeats a value, and leaves out values
+   under names like token or session id.
 7. **Port crosscheck.** Number the baseline spec's requirements (`R1 <name>`)
    and the archived extract change's screens (`S1 <name>`) by search, as in
    step 3, and give them to `spec-relay-checker` subagents as a **port

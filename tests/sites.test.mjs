@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { scanText, scanFile, decode, parseVerdict, writeParts, markerText, checkLedger } from '../scripts/sites.mjs';
+import { scanText, scanFile, decode, parseVerdict, writeParts, markerText, checkLedger, ledgerSummary, listCode, refReaches } from '../scripts/sites.mjs';
 import { checkReview } from '../scripts/gate.mjs';
 import { render } from '../scripts/render.mjs';
 import { spawnSync } from 'node:child_process';
@@ -143,8 +143,8 @@ test('Shift_JIS source is decoded first, so 「ソ」 does not escape a closing 
 });
 
 test('verdicts', () => {
-  assert.deepEqual(parseVerdict('covered R1, R03 S2'), { kind: 'covered', refs: ['R1', 'R3', 'S2'] });
-  assert.deepEqual(parseVerdict('**Covered**: R2.'), { kind: 'covered', refs: ['R2'] });
+  assert.deepEqual(parseVerdict('covered R1, R03 S2'), { kind: 'covered', refs: ['R1', 'R3', 'S2'], dismissed: [] });
+  assert.deepEqual(parseVerdict('**Covered**: R2.'), { kind: 'covered', refs: ['R2'], dismissed: [] });
   assert.equal(parseVerdict('covered R1 and maybe R2').kind, 'invalid');
   assert.equal(parseVerdict('No behaviour').kind, 'no-behavior');
   assert.deepEqual(parseVerdict('other capability `billing/tax`'), { kind: 'other', capability: 'billing/tax' });
@@ -162,8 +162,8 @@ test('sites.mjs writes the parts of a change from its source map', () => {
   write(dir, 'openspec/changes/archive/2026-11-01-survey/inventory.md', '| Path | Context |\n|---|---|\n| src/ | calc |\n| src/vendor/ | excluded |\n');
   write(dir, 'openspec/changes/extract-calc/source-map.md', '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/ | all | full |\n');
   const result = writeParts(dir, 'extract-calc', 2);
-  assert.deepEqual({ ...result, problems: undefined }, { ok: true, change: 'extract-calc', sites: 3, files: 1, parts: ['openspec/spec-relay/work/extract-calc/sites/01.md', 'openspec/spec-relay/work/extract-calc/sites/02.md'], problems: undefined });
-  assert.match(fs.readFileSync(path.join(dir, result.parts[1]), 'utf8'), /\| `src\/a.php:c` \| 4-4 \| - \|/);
+  assert.deepEqual({ ...result, problems: undefined }, { ok: true, change: 'extract-calc', sites: 3, files: 1, untraced: 0, parts: ['openspec/spec-relay/work/extract-calc/sites/01.md', 'openspec/spec-relay/work/extract-calc/sites/02.md'], problems: undefined });
+  assert.match(fs.readFileSync(path.join(dir, result.parts[1]), 'utf8'), /\| `src\/a.php:c` \| 4-4 \| - \| - \|/);
   assert.equal(writeParts(dir, 'extract-none').ok, false);
 });
 
@@ -386,8 +386,14 @@ test('UTF-16 without a byte order mark is read; other binary content is one (fil
 });
 
 test('verdicts: the cell holds the verdict only, with ranges and colons read', () => {
-  assert.deepEqual(parseVerdict('covered R1-R3, S2'), { kind: 'covered', refs: ['R1', 'R2', 'R3', 'S2'] });
-  assert.deepEqual(parseVerdict('covered: R4'), { kind: 'covered', refs: ['R4'] });
+  assert.deepEqual(parseVerdict('covered R1-R3, S2'), { kind: 'covered', refs: ['R1', 'R2', 'R3', 'S2'], dismissed: [] });
+  assert.deepEqual(parseVerdict('covered: R4'), { kind: 'covered', refs: ['R4'], dismissed: [] });
+  // Marker lines the checker found to hold no effect, for the person to confirm.
+  assert.deepEqual(parseVerdict('covered R1, S1; no effect 6, 9-11'), { kind: 'covered', refs: ['R1', 'S1'], dismissed: [6, 9, 10, 11] });
+  assert.deepEqual(parseVerdict('covered R2 no-effect: 14'), { kind: 'covered', refs: ['R2'], dismissed: [14] });
+  assert.deepEqual(parseVerdict('covered R2; no effect'), { kind: 'invalid' });
+  assert.deepEqual(parseVerdict('covered R2; no effect 9-3'), { kind: 'invalid' });
+  assert.deepEqual(parseVerdict('covered; no effect 3'), { kind: 'invalid' });
   assert.equal(parseVerdict('covered R3-S4').kind, 'invalid');
   assert.deepEqual(parseVerdict('question: Q01'), { kind: 'question', question: 'Q1' });
   // Notes go to the Evidence cell, so none can take a verdict back.
@@ -643,4 +649,184 @@ test('fourth review: the ledger reads only Site tables, rejects placeholder evid
   ]);
   // A ledger range may have spaces around the dash.
   assert.deepEqual(parseVerdict('covered R1 - R3').refs, ['R1', 'R2', 'R3']);
+});
+
+test('effect lines: a covered site needs a named requirement whose trace reaches each of them', () => {
+  const dir = tempDir();
+  const C = 'openspec/changes/extract-shop-orders';
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only): src\n');
+  // A page with code outside functions: one (file) site, as in old PHP.
+  write(dir, 'src/orders.php', [
+    '<?php',
+    'if (!isset($_SESSION["user"])) { header("Location: login.php"); exit; }',
+    'if (isset($_POST["delete"])) {',
+    '  mysql_query("DELETE FROM orders WHERE id = " . $_POST["delete"]);',
+    '  mail("admin@example.com", "deleted", $_POST["delete"]);',
+    '}',
+    '$rows = mysql_query("SELECT * FROM orders");',
+    'function fmt_yen($n) { return number_format(floor($n)) . " yen"; }',
+    'function audit($m) { file_put_contents("audit.log", $m, FILE_APPEND); }',
+    '',
+  ].join('\n'));
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/inventory.md', '| Path | Context |\n|---|---|\n| src/ | shop |\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md', '1. `shop/orders`\n   - `src/orders.php`\n');
+  write(dir, `${C}/.openspec.yaml`, 'schema: spec-relay-extract\n');
+  write(dir, `${C}/specs/shop/orders/spec.md`, '## Purpose\n\nOrders.\n\n## ADDED Requirements\n\n### Requirement: List orders\nThe system SHALL list.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n\n### Requirement: Delete an order\nThe system SHALL delete.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n');
+  write(dir, `${C}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/orders.php | all | full |\n');
+  const trace = (list, del) => write(dir, `${C}/trace.md`, `| Requirement | Source | Existing tests |\n|---|---|---|\n| List orders | ${list} | none |\n| Delete an order | ${del} | none |\n`);
+  write(dir, `${C}/screens.md`, '### Screen: Orders\n- x\n');
+  write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 List orders | confirmed | x |\n| R2 Delete an order | confirmed | x |\n| S1 Orders | confirmed | x |\n');
+  write(dir, `${C}/questions.md`, 'None\n');
+  const review = (extra = '') => write(dir, `${C}/review.md`, `Reviewer: Uma\n- [x] R1 List orders\n- [x] R2 Delete an order\n- [x] S1 Orders\n${extra}`);
+  const ledger = (file, fmt = 'covered R1', audit = 'covered R2') => write(dir, `${C}/coverage.md`, `| Site | Verdict | Evidence |\n|---|---|---|\n| \`src/orders.php:(file)\` | ${file} | the page |\n| \`src/orders.php:fmt_yen\` | ${fmt} | 8 |\n| \`src/orders.php:audit\` | ${audit} | 9 |\n`);
+  const problems = () => checkReview(dir, 'extract-shop-orders').problems;
+  review();
+
+  // The sloppy ledger: one requirement "covers" the whole page, and the trace never read the delete branch.
+  trace('src/orders.php:7', 'src/orders.php:audit');
+  ledger('covered R1');
+  assert.deepEqual(problems(), [
+    'coverage of src/orders.php:(file) is "covered R1", but no trace of R1 reaches its effect lines (exit 2; redirect 2; db-write 4; mail 5): name the requirement that specifies each line (its trace row must cite the line or the member), or write gap. Only when a line holds no effect at all (page text, script that runs in the browser), add "; no effect <lines>" to the verdict, for the person to confirm',
+  ]);
+  // The sites file already tells the checker which effect lines no trace reaches.
+  const parts = writeParts(dir, 'extract-shop-orders');
+  assert.equal(parts.untraced, 4);
+  assert.match(fs.readFileSync(path.join(dir, parts.parts[0]), 'utf8'), /\| `src\/orders.php:\(file\)` \| [^|]+ \| [^|]+ \| exit 2; redirect 2; db-write 4; mail 5 \|\n\| `src\/orders.php:fmt_yen` \| 8-8 \| rounding 8 \| - \|\n\| `src\/orders.php:audit` \| 9-9 \| file 9 \| - \|/);
+
+  // Naming more requirements is not enough: their traces must reach the lines.
+  ledger('covered R1, R2');
+  assert.match(problems().join(), /no trace of R1, R2 reaches its effect lines \(exit 2; redirect 2; db-write 4; mail 5\)/);
+  // A screen stands for a redirect (where an action leads) and the exit that ends it, never for a write or a mail.
+  ledger('covered R1, S1');
+  assert.match(problems().join(), /no trace of R1 reaches its effect lines \(db-write 4; mail 5\)/);
+  trace('src/orders.php:7', 'src/orders.php:3-6<br>src/orders.php:audit');
+  ledger('covered R1, R2');
+  assert.match(problems().join(), /no trace of R1, R2 reaches its effect lines \(exit 2; redirect 2\)/);
+  ledger('covered R1, R2, S1');
+  assert.deepEqual(problems(), []);
+  // Several lines after one path are lines, not a symbol.
+  ledger('covered R1, R2');
+  trace('src/orders.php:2, 7', 'src/orders.php:3-4, 5<br>src/orders.php:audit');
+  assert.deepEqual(problems(), []);
+  trace('src/orders.php:2, 7', 'src/orders.php:3-4, 500-600<br>src/orders.php:audit');
+  assert.deepEqual(problems(), ['the trace of "Delete an order" gives src/orders.php the lines 500-600, but the file has 9 lines', 'coverage of src/orders.php:(file) is "covered R1, R2", but no trace of R1, R2 reaches its effect lines (mail 5): name the requirement that specifies each line (its trace row must cite the line or the member), or write gap. Only when a line holds no effect at all (page text, script that runs in the browser), add "; no effect <lines>" to the verdict, for the person to confirm']);
+  trace('src/orders.php:2<br>src/orders.php:7', 'src/orders.php:3-6<br>src/orders.php:audit');
+  assert.deepEqual(problems(), []);
+  // The requirement must be the one the row names, and a symbol reaches its own member only.
+  ledger('covered R1');
+  assert.match(problems().join(), /no trace of R1 reaches its effect lines \(db-write 4; mail 5\)/);
+  ledger('covered R1, R2', 'covered R1', 'covered R1');
+  assert.match(problems().join(), /coverage of src\/orders.php:audit is "covered R1", but no trace of R1 reaches its effect lines \(file 9\)/);
+  // `(file)` has no name, so a symbol in the trace does not reach it.
+  trace('src/orders.php:page code', 'src/orders.php:3-6<br>src/orders.php:Audit');
+  ledger('covered R1, R2');
+  assert.match(problems().join(), /src\/orders.php:\(file\) is "covered R1, R2", but no trace of R1, R2 reaches its effect lines \(exit 2; redirect 2; db-write 7\)/);
+});
+
+test('"no behavior" on a site with marker lines needs the person\'s C1 item with the count', () => {
+  const dir = tempDir();
+  const C = 'openspec/changes/extract-shop-orders';
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only): src\n');
+  write(dir, 'src/log.php', '<?php\nfunction audit($m) { file_put_contents("audit.log", $m, FILE_APPEND); }\nfunction stamp() { return date("Y"); }\nfunction name() { return "x"; }\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/inventory.md', '| Path | Context |\n|---|---|\n| src/ | shop |\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md', '1. `shop/orders`\n   - `src/log.php`\n');
+  write(dir, `${C}/.openspec.yaml`, 'schema: spec-relay-extract\n');
+  write(dir, `${C}/specs/shop/orders/spec.md`, '## Purpose\n\nOrders.\n\n## ADDED Requirements\n\n### Requirement: Name\nThe system SHALL name.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n');
+  write(dir, `${C}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/log.php | all | full |\n');
+  write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Name | src/log.php:name | none |\n');
+  write(dir, `${C}/screens.md`, 'None\n');
+  write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Name | confirmed | x |\n');
+  write(dir, `${C}/questions.md`, 'None\n');
+  write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/log.php:audit` | no behavior | a log nobody reads |\n| `src/log.php:stamp` | no behavior | unused |\n| `src/log.php:name` | covered R1 | 4 |\n');
+  const review = (extra = '') => write(dir, `${C}/review.md`, `Reviewer: Uma\n- [x] R1 Name\n${extra}`);
+  const problems = () => checkReview(dir, 'extract-shop-orders').problems;
+  review();
+  const code = listCode(['src/log.php:audit', 'src/log.php:stamp']);
+  assert.match(code, /^[0-9a-f]{6}$/);
+  const item = `C1 The marker lines of 2 sites are judged to hold nothing to migrate (list ${code})`;
+  assert.deepEqual(problems(), [`review.md has no C1 item: 2 sites with marker lines are judged "no behavior" or "no effect" (src/log.php:audit; src/log.php:stamp); add "- [ ] ${item}" under "## 4. Coverage", for the person to decide`]);
+  // An item for another list (an older one, or one of the same length) is not this list's.
+  const stale = [`review item C1 is not for the list as it is now (2 sites with marker lines judged "no behavior" or "no effect"); write "- [ ] ${item}" and leave it unticked, so the person sees the list again`];
+  review('- [x] C1 The 2 sites judged no behavior have nothing to migrate\n');
+  assert.deepEqual(problems(), stale);
+  review(`- [x] C1 動作なしと判断した 2 箇所は移行しなくてよい（list ${listCode(['src/log.php:audit', 'src/log.php:name'])}）\n`);
+  assert.deepEqual(problems(), stale);
+  review(`- [ ] C1 目印があるのに動作なしと判断した 2 箇所は移行しなくてよい（list ${code}）\n`);
+  assert.deepEqual(problems(), [`not ticked: C1 目印があるのに動作なしと判断した 2 箇所は移行しなくてよい（list ${code}）`]);
+  review(`- [x] C1 目印があるのに動作なしと判断した 2 箇所は移行しなくてよい（list ${code}）\n`);
+  assert.deepEqual(problems(), []);
+  assert.equal(ledgerSummary(dir, path.join(dir, C)).code, code);
+  // Without such a site the item is not needed.
+  write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/log.php:audit` | question Q1 | 2 |\n| `src/log.php:stamp` | question Q1 | 3 |\n| `src/log.php:name` | covered R1 | 4 |\n');
+  write(dir, `${C}/questions.md`, '- Q1. Are audit and stamp still used?\n');
+  review('- [x] Q1 audit: decision: keep\n');
+  assert.deepEqual(problems(), []);
+  assert.equal(ledgerSummary(dir, path.join(dir, C)).code, null);
+});
+
+test('a marker line that holds no effect is set aside in the verdict, and the person confirms it', () => {
+  const dir = tempDir();
+  const C = 'openspec/changes/extract-shop-orders';
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only): src\n');
+  // Page text and script for the browser trip the markers of a page with code outside functions.
+  write(dir, 'src/orders.php', [
+    '<?php',
+    '$rows = mysql_query("SELECT * FROM orders");',
+    '?>',
+    '<script>try { initCalendar(); } catch (e) {}</script>',
+    '<p>Commit your changes before leaving. To delete from the list, press the button.</p>',
+    '<?php mail("admin@example.com", "seen", ""); ?>',
+    '',
+  ].join('\n'));
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/inventory.md', '| Path | Context |\n|---|---|\n| src/ | shop |\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md', '1. `shop/orders`\n   - `src/orders.php`\n');
+  write(dir, `${C}/.openspec.yaml`, 'schema: spec-relay-extract\n');
+  write(dir, `${C}/specs/shop/orders/spec.md`, '## Purpose\n\nOrders.\n\n## ADDED Requirements\n\n### Requirement: List orders\nThe system SHALL list.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n');
+  write(dir, `${C}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/orders.php | all | full |\n');
+  write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| List orders | src/orders.php:2 | none |\n');
+  write(dir, `${C}/screens.md`, 'None\n');
+  write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 List orders | confirmed | x |\n');
+  write(dir, `${C}/questions.md`, 'None\n');
+  const review = (extra = '') => write(dir, `${C}/review.md`, `Reviewer: Uma\n- [x] R1 List orders\n${extra}`);
+  const ledger = (verdict) => write(dir, `${C}/coverage.md`, `| Site | Verdict | Evidence |\n|---|---|---|\n| \`src/orders.php:(file)\` | ${verdict} | 4: script for the browser; 5: page text |\n`);
+  const problems = () => checkReview(dir, 'extract-shop-orders').problems;
+  review();
+  ledger('covered R1');
+  const open = problems().join();
+  assert.match(open, /no trace of R1 reaches its effect lines \(([^)]*4[^)]*5[^)]*mail 6)\)/);
+  // Setting aside the page text does not set aside the mail: that line still needs a requirement.
+  ledger('covered R1; no effect 4, 5');
+  assert.match(problems().join(), /no trace of R1 reaches its effect lines \(mail 6\)/);
+  write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| List orders | src/orders.php:2, 6 | none |\n');
+  // What was set aside is the person's to confirm, and the item names this list.
+  const code = listCode(['src/orders.php:(file) no effect 4,5']);
+  assert.deepEqual(problems(), [`review.md has no C1 item: 1 site with marker lines is judged "no behavior" or "no effect" (src/orders.php:(file) no effect 4,5); add "- [ ] C1 The marker lines of 1 site are judged to hold nothing to migrate (list ${code})" under "## 4. Coverage", for the person to decide`]);
+  review(`- [x] C1 The marker lines of 1 site are judged to hold nothing to migrate (list ${code})\n`);
+  assert.deepEqual(problems(), []);
+  // Another line set aside is another list: the tick no longer counts.
+  ledger('covered R1; no effect 4-6');
+  write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| List orders | src/orders.php:2 | none |\n');
+  assert.match(problems().join(), /review item C1 is not for the list as it is now/);
+  // The review page shows what was set aside, with the code the item must name.
+  const summary = ledgerSummary(dir, path.join(dir, C));
+  assert.equal(summary.code, listCode(['src/orders.php:(file) no effect 4,5,6']));
+  assert.equal(summary.unmarked.length, 1);
+  assert.match(summary.unmarked[0].markers, /^no effect: .*mail 6/);
+  // A line that a trace reaches, or that holds no effect marker, sets nothing aside.
+  ledger('covered R1; no effect 1, 2');
+  write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| List orders | src/orders.php:2-6 | none |\n');
+  review();
+  assert.deepEqual(problems(), []);
+});
+
+test('a trace symbol reaches its member however the two write the name', () => {
+  const site = (symbol) => ({ file: 'src/a.cs', symbol });
+  const ref = (symbol) => ({ file: 'SRC/A.cs', symbol, from: null, to: null });
+  for (const [written, found] of [['[dbo].[usp_Save]', 'dbo.usp_Save'], ['"dbo"."usp_Save"', 'dbo.usp_Save'], ['Repo<T>.Get', 'Repo.Get'], ['App\\Models\\Order::save()', 'App.Models.Order.save'], ['Order->save', 'Order.save'], ['Save#2', 'OrderService.Save'], ['OrderService', 'OrderService.Save']]) {
+    assert.equal(refReaches(ref(written), site(found), 10), true, `${written} -> ${found}`);
+  }
+  assert.equal(refReaches(ref('Service.Save'), site('OrderService.Save'), 10), false);
+  assert.equal(refReaches(ref('page code'), site('(file)'), 10), false);
+  assert.equal(refReaches({ file: 'src/a.cs', symbol: '', from: 3, to: 12 }, site('(file)'), 10), true);
+  assert.equal(refReaches({ file: 'src/b.cs', symbol: '', from: 3, to: 12 }, site('(file)'), 10), false);
 });

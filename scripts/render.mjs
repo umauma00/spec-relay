@@ -59,7 +59,7 @@ const LABELS = {
     ledger: '抜けの確認', ledgerTitle: '抜けの確認（箇所台帳）',
     ledgerFacts: (s) => `箇所 ${s.sites}（${s.files} ファイル）・要件や画面あり ${s.counts.covered}・動作なし ${s.counts['no-behavior']}・別の capability ${s.counts.other}・質問 ${s.counts.question}`,
     ledgerOpen: (n) => `判定がない、または gap の箇所が ${n} 件あります。gate はまだ通りません。`,
-    ledgerQuestions: '質問に回した箇所', ledgerUnmarked: '「動作なし」としたが、目印（DB 書き込み・例外など）がある箇所。念のため目を通してください',
+    ledgerQuestions: '質問に回した箇所', ledgerUnmarked: '目印（DB 書き込み・例外など）があるのに、「動作なし」または「効果なし」とした箇所。目を通して、よければ review.md の C1 にチェックしてください',
     ledgerAll: '台帳のすべての行',
     specKind: '仕様', specIndexKind: '仕様の一覧', specIndexTitle: '移行の仕様', capability: 'capability', scenarios: 'シナリオ', basis: '根拠', amendingNow: '修正中',
     amending: (c) => `修正中の変更があります（${c}）。archive するまで、この仕様はまだ変わっていません`,
@@ -98,7 +98,7 @@ const LABELS = {
     ledger: 'Omission check', ledgerTitle: 'Omission check (site ledger)',
     ledgerFacts: (s) => `${s.sites} sites in ${s.files} files: ${s.counts.covered} covered, ${s.counts['no-behavior']} no behavior, ${s.counts.other} other capability, ${s.counts.question} questions`,
     ledgerOpen: (n) => `${n} sites have no verdict or are gaps; the gate does not pass yet.`,
-    ledgerQuestions: 'Sites moved to questions', ledgerUnmarked: 'Sites judged "no behavior" that hold markers (a database write, an error...). Glance over them',
+    ledgerQuestions: 'Sites moved to questions', ledgerUnmarked: 'Sites that hold markers (a database write, an error...) and are judged "no behavior" or "no effect". Read them, and tick C1 in review.md when they are right',
     ledgerAll: 'Every row of the ledger',
     specKind: 'Spec', specIndexKind: 'Specs', specIndexTitle: 'Migration specs', capability: 'Capability', scenarios: 'Scenarios', basis: 'Basis', amendingNow: 'Being amended',
     amending: (c) => `An amendment is in progress (${c}). Until it is archived, this spec has not changed yet`,
@@ -335,16 +335,23 @@ export function parseTrace(text) {
 // references may share a cell, separated by <br>, ";" or ",".
 // The path ends at the first ".ext" followed by ":" or the end, so paths may hold
 // spaces, non-ASCII letters or backslashes, and symbols may hold "::".
+const RANGE = String.raw`L?\d+(?:\s*[-–]\s*L?\d+)?`;
+const LINES = new RegExp(String.raw`^(?:(.*?):)?\s*(${RANGE}(?:\s*,\s*${RANGE})*)$`, 'i');
 export function parseRefs(cell) {
   const refs = [];
-  for (const part of cell.replace(/`/g, '').split(/<br\s*\/?>|;|,(?=\s*[^,:;]+\.[A-Za-z0-9]+:)/i)) {
+  for (const part of cell.replace(/`/g, '').split(/<br\s*\/?>|;|,(?=\s*[^,:;<]+\.[A-Za-z0-9]+:)/i)) {
     const m = part.trim().match(/^([^:<>"|?*]+?\.[A-Za-z0-9]+)(?::(.*))?$/);
     if (!m) continue;
     const file = m[1].trim().replace(/\\/g, '/');
     const rest = (m[2] ?? '').trim();
-    const lines = rest.match(/^(?:(.*?):)?(\d+)(?:\s*[-–]\s*(\d+))?$/);
-    if (lines) refs.push({ file, symbol: (lines[1] ?? '').trim(), from: Number(lines[2]), to: Number(lines[3] ?? lines[2]) });
-    else refs.push({ file, symbol: rest, from: null, to: null });
+    // Lines: "10", "10-42", "L10-L42", or several after one path ("3-6, 9").
+    const lines = rest.match(LINES);
+    if (lines) {
+      for (const range of lines[2].split(',')) {
+        const [from, to = from] = range.replace(/L/gi, '').split(/[-–]/).map((n) => Number(n.trim()));
+        refs.push({ file, symbol: (lines[1] ?? '').trim(), from, to });
+      }
+    } else refs.push({ file, symbol: rest, from: null, to: null });
   }
   return refs;
 }
@@ -807,7 +814,7 @@ function ledgerHtml(sum, text, L) {
   return `<div class="doc"><p>${escapeHtml(L.ledgerFacts(sum))}</p>
 ${sum.open.length ? `<p class="caution">${escapeHtml(L.ledgerOpen(sum.open.length))}</p>` : ''}
 ${sum.questions.length ? `<h3>${escapeHtml(L.ledgerQuestions)}</h3>${list(sum.questions)}` : ''}
-${sum.unmarked.length ? `<h3>${escapeHtml(L.ledgerUnmarked)}</h3>${list(sum.unmarked)}` : ''}
+${sum.unmarked.length ? `<h3>${escapeHtml(L.ledgerUnmarked)}${sum.code ? ` <span class="mono">(list ${escapeHtml(sum.code)})</span>` : ''}</h3>${list(sum.unmarked)}` : ''}
 <details><summary>${escapeHtml(L.ledgerAll)}</summary>${markdown(text, { headingOffset: 2 })}</details></div>`;
 }
 

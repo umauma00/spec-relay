@@ -49,7 +49,14 @@ instructions), and the exact file paths you may write.
   language-neutral: no class, function or library names of the source
   language. What triggers, constraints, defaults and procedures do to the data
   is behavior of the capability: specify it, and trace it to the definition
-  file. Put every source location in trace.md. For screens, copy labels
+  file. Put every source location in trace.md, and make each requirement's
+  row reach every line its scenarios describe: each database write, mail,
+  file write, call to another system, error, exit and redirect, by its lines
+  or the member that holds it (code outside functions, such as a PHP page's
+  top-level code, has no symbol: cite its lines). The omission check counts a
+  write or a mail as specified only where a requirement's trace reaches it,
+  so a line you leave out comes back as a gap; a line no scenario describes
+  stays out, and you report it as a doubt instead. For screens, copy labels
   and messages exactly from templates, resource files and string literals,
   and copy the look (stylesheet paths, ids and classes, designer positions,
   sizes and tab order) exactly from the markup, designer file or XAML.

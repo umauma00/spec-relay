@@ -2,7 +2,7 @@
 
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) を使って、コードベースを別のプログラミング言語へ移すための GitHub Copilot 用キットです。元のコードから仕様を起こし、人間がその仕様をレビューし、レビュー済みの仕様をもとに新しい言語で実装します。
 
-> **状態：0.19.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
+> **状態：0.20.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
 
 ## 流れ
 
@@ -182,6 +182,19 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 - フックはプラグインを入れたすべてのリポジトリで、シェルとファイル編集の前に1回ずつ起動します（node の起動1回分。spec-relay のリポジトリでなければすぐ終わります）。ホストがプラグインの場所（`PLUGIN_ROOT`）を渡さないときは何もしません。
 - チャットでの承認は AI が review.md に書くので、「AI が勝手にチェックを付ける」ことはフックでは区別できません。承認は今も、チャットでのあなたの言葉と gate の合格の両方です。
 
+## 0.19.0 から更新するとき
+
+0.20.0 で、点検で見つかった3つの穴をふさぎました。調査・移行先の設計・解析・port のスキーマの説明文が変わったので、`openspec/schemas/spec-relay-*` を削除してから導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。archive 済みの change はそのままです。影響があるのは進行中の change だけです。
+
+| 変わったこと | 進行中の change で起きること |
+|---|---|
+| 調査の review.md は M1〜M5 と C1 の項目が必須。除外したファイルは inventory.md の Notes に理由が必須 | 項目を消していたり、理由が空だったりすると `gate.mjs review` が止まる。項目を戻し、理由を書く |
+| 移行先の設計の review.md は A0・A90・A91・V1〜V4・E90・U90 の項目が必須 | 項目を消していると止まる。テンプレートの項目を戻す |
+| trace の行番号は、そのファイルにある行でなければならない | ファイルより先の行を書いていると止まる |
+| 箇所台帳の `covered` は、その箇所の効果のある行（DB への書き込み・エラー・リダイレクト・メールなど）すべてに、名前を挙げた要件の trace が届いている必要がある | 届いていない行を gate が挙げる。その行を定めている要件の名前を足すか、要件がなければ `gap` として解析担当に戻す。効果のない行（ページの文章など）に目印が付いただけなら、判定に `; no effect <行>` を足す（[詳しく](docs/WORKFLOW.md#箇所台帳ファイルの中の抜けの検出)） |
+| 目印のある箇所を「動作なし」としたとき、または行を `no effect` で外したときは、review.md の `## 4. Coverage` に C1 が必要 | gate が示す文（一覧を表す符号つき）でオーケストレーターが項目を足し、人が一覧を見てチェックする。以前の版の「4. Coverage」の C1 が残っている場合も、この文に書き直す |
+| 比べ方 B1 を HTTP 越しに使える（`scripts/http.mjs`） | なし。ロジックを直接呼べない PHP のページや WebForms でも、元のシステムを手元で動かせれば B1 を選べる（[詳しく](docs/COMPARE.md#直接呼べないロジックhttp-越しの記録)）。A だけにしていたコンテキストを B1 にするときは、移行先の設計をやり直す（`target-design-v2`） |
+
 ## 0.18.0 から更新するとき
 
 0.19.0 で、任意の**コードガイド**を作れるようになりました。移行先のコードを、機能・画面と URL・ファイルの3つの入口から辿れる案内で、モジュールと依存の図、データの持ち主の図、ファイルごとの説明、canvas で聞いて役立った Q&A が入ります。チャットで「コードガイドを作って」と頼んでください（[詳しく](docs/GUIDE.md)）。新しいエージェント `spec-relay-guide-writer` が増えます。プラグインを更新すれば入ります。スキーマや今までの成果物に変更はありません。
@@ -322,6 +335,7 @@ scripts/metrics.mjs            工程ごとにかかった時間の記録と集�
 scripts/merge.mjs              サブエージェントが分担して書いた表を1つの成果物にまとめる
 scripts/verify.mjs             実装のテスト・境界チェック・比べ方を実行し、結果を記録する（port-done が読む）
 scripts/compare.mjs            比べ方 B1：元のプログラムから記録したケースと新しいコードの結果を1件ずつ比べる
+scripts/http.mjs               比べ方 B1 の HTTP 版：動いている元のシステムにリクエストを送って記録し、新しいシステムに同じリクエストを送る
 scripts/run.mjs                verify と compare がコマンドを実行する部分（Windows では PowerShell）
 scripts/render.mjs             成果物の markdown をレビュー用の HTML に、承認済みの仕様を読みものの HTML にする（デザイン固定）
 scripts/canvas.mjs             canvas の画面を出すサーバー（拡張から使う。単独でブラウザーでも試せる）
@@ -347,6 +361,12 @@ npm test
 
 通しのテストは、一時フォルダーに `npm ci` で OpenSpec を入れて動かします（npm のレジストリへの接続が必要です）。npm がない端末では、その部分だけ skip と表示されます（CI では skip せず失敗にします）。OpenSpec の版を上げるときは、`templates/openspec-tools/package.json` の版を変えて、そのフォルダーで `npm install --package-lock-only --ignore-scripts` を実行し、lock ファイルを作り直します。`scripts/openspec.mjs` の `OPENSPEC_VERSION` と `scripts/doctor.mjs` の `OPENSPEC_TESTED` も合わせます（テストが3つの一致を確かめます）。移行中のリポジトリでは、新しいキットの導入スクリプトが古い package.json と package-lock.json を衝突として止めるので、その2つを消してから導入スクリプトを実行し直すよう、更新の手順に書いてください。テストは一時フォルダーの設定を使うので、手元の OpenSpec の設定は変わりません。CI は Windows と Ubuntu の Node.js 22・24 で実行しています。
 
-ライセンスはまだ決めていません（LICENSE は未配置）。
+## ライセンス
+
+[MIT License](LICENSE) です。
+
+- キットのスクリプトは外部のパッケージを使わず、ほかのプロジェクトのコードも同梱していません。
+- OpenSpec（`@fission-ai/openspec`、MIT License）は同梱していません。導入スクリプトが npm から移行対象のリポジトリに入れます。固定している 2.0.0 と、それが使うパッケージを合わせた 57 個のライセンスは、MIT 50、ISC 6、BSD-3-Clause 1 です（`templates/openspec-tools/package-lock.json` で 2026-11-18 に確認）。OpenSpec の版を上げるときは、この内訳も確かめ直します。
+- 参考にした code-migration-kit-with-github-copilot は Apache-2.0 です。参考にしたのは構成と考え方で、ファイルは写していません。
 
 構成と考え方は [code-migration-kit-with-github-copilot](https://github.com/umauma00/code-migration-kit-with-github-copilot) を参考にしています。違いは [docs/WORKFLOW.md](docs/WORKFLOW.md#先行例code-migration-kit-with-github-copilotから引き継いだこと) にあります。

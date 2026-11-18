@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { capabilitySources, ownersOf, checkCoverage, contextOf, inventoryRows } from '../scripts/coverage.mjs';
+import { capabilitySources, ownersOf, checkCoverage, checkTrace, contextOf, inventoryRows } from '../scripts/coverage.mjs';
 import { checkReview, main } from '../scripts/gate.mjs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +20,7 @@ const CAPABILITIES = '# Capabilities\n\n### platform\n1. `platform/db` DB\n   - 
 function project({ capabilities = CAPABILITIES, sourceMap = ['src/billing/invoice.php', 'src/billing/print.php'] } = {}) {
   const dir = tempDir();
   write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only): src\n  Target root (new implementation): ts\n');
-  for (const f of ['src/billing/invoice.php', 'src/billing/print.php', 'src/billing/tax.php', 'src/common/db.php', 'src/vendor/lib.php']) write(dir, f, '<?php\n');
+  for (const f of ['src/billing/invoice.php', 'src/billing/print.php', 'src/billing/tax.php', 'src/common/db.php', 'src/vendor/lib.php']) write(dir, f, PHP);
   write(dir, `${SURVEY}/inventory.md`, '| Path | Context | Notes |\n|---|---|---|\n| src/billing/ | billing | |\n| src/common/ | platform | |\n| src/vendor/ | excluded | library |\n');
   write(dir, `${SURVEY}/capabilities.md`, capabilities);
   write(dir, `${CHANGE}/.openspec.yaml`, 'schema: spec-relay-extract\n');
@@ -65,11 +65,11 @@ test('the survey gate needs every kept file in a capability, and every listed pa
   const dir = tempDir();
   const S = 'openspec/changes/survey';
   write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only): src\n');
-  for (const f of ['src/billing/invoice.php', 'src/common/db.php', 'src/vendor/lib.php']) write(dir, f, '<?php\n');
+  for (const f of ['src/billing/invoice.php', 'src/common/db.php', 'src/vendor/lib.php']) write(dir, f, PHP);
   write(dir, `${S}/.openspec.yaml`, 'schema: spec-relay-survey\n');
   write(dir, `${S}/context-map.md`, '### Context: platform\n\n### Context: billing\n');
-  write(dir, `${S}/inventory.md`, '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/billing/ | billing | port | |\n| src/common/ | platform | port | |\n| src/vendor/ | excluded | | |\n');
-  write(dir, `${S}/review.md`, 'Reviewer: Uma\n- [x] K1 platform\n- [x] K2 billing\n');
+  write(dir, `${S}/inventory.md`, '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/billing/ | billing | port | |\n| src/common/ | platform | port | |\n| src/vendor/ | excluded | | library |\n');
+  write(dir, `${S}/review.md`, 'Reviewer: Uma\n- [x] K1 platform\n- [x] K2 billing\n- [x] M1 map\n- [x] M2 owners\n- [x] M3 glossary\n- [x] M4 capabilities\n- [x] M5 carry\n- [x] C1 coverage\n');
   write(dir, `${S}/database.md`, '## Databases\nNone\n\n## Logic in the database\nNone\n');
   write(dir, `${S}/capabilities.md`, '### platform\n1. `platform/db`\n\n### billing\n1. `billing/invoice`\n   - `src/billing`\n');
   const found = checkReview(dir, 'survey').problems;
@@ -150,7 +150,7 @@ test('an amendment\'s source map needs the trace of one of its requirements', ()
   write(dir, `${A}/specs/billing/invoice/spec.md`, '## ADDED Requirements\n\n### Requirement: Refund\nThe system SHALL refund.\n\n#### Scenario: r\n- **WHEN** x\n- **THEN** y\n');
   write(dir, `${A}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Refund | confirmed | x |\n');
   write(dir, `${A}/review.md`, 'Reviewer: Uma\n- [x] R1 Refund\n');
-  write(dir, 'src/billing/refund.php', '<?php\n');
+  write(dir, 'src/billing/refund.php', PHP);
   write(dir, `${A}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/billing/refund.php | refunds | full |\n');
   write(dir, `${A}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Refund | src/billing/invoice.php:2 | none |\n');
   assert.deepEqual(checkReview(dir, 'amend-billing-invoice').problems, ['source-map.md lists src/billing/refund.php, but no requirement of this amendment traces to it; specify what it does, or leave it out']);
@@ -197,12 +197,15 @@ test('gate.mjs and render.mjs run as programs despite the import cycle', () => {
   }
 });
 
+// A source file with no site and enough lines for the fixtures' trace ranges.
+const PHP = `<?php\n${'//\n'.repeat(40)}`;
+
 test('gate.mjs coverage checks the whole plan and lists the capabilities not analyzed yet', () => {
   const dir = project();
   assert.deepEqual(checkCoverage(dir), { ok: true, problems: [], files: 4, capabilities: { analyzed: 1, pending: ['platform/db', 'billing/tax'] } });
 
-  write(dir, 'src/billing/refund.php', '<?php\n');
-  write(dir, 'src/report/monthly.php', '<?php\n');
+  write(dir, 'src/billing/refund.php', PHP);
+  write(dir, 'src/report/monthly.php', PHP);
   write(dir, 'openspec/spec-relay/plan.md', `# Plan\n\n## Capabilities\n\n${CAPABILITIES.replace('# Capabilities\n\n', '').replace('`src/common/`', '`src/commons/`')}`);
   const result = checkCoverage(dir);
   assert.equal(result.ok, false);
@@ -225,7 +228,7 @@ test('gate.mjs coverage checks the whole plan and lists the capabilities not ana
   // A file moved to a capability whose extract is archived: the amendment that specifies it carries a source map.
   write(archived, 'openspec/spec-relay/plan.md', `# Plan\n\n## Capabilities\n\n${CAPABILITIES.replace('# Capabilities\n\n', '')}`);
   fs.rmSync(path.join(archived, 'openspec/changes/extract-billing-invoice-v2'), { recursive: true });
-  write(archived, 'src/billing/refund.php', '<?php\n');
+  write(archived, 'src/billing/refund.php', PHP);
   assert.match(checkCoverage(archived).problems.join(), /src\/billing\/refund.php/);
   write(archived, 'openspec/changes/archive/2026-11-09-amend-billing-invoice/source-map.md', '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/billing/refund.php | refunds | full |\n');
   assert.deepEqual(checkCoverage(archived).problems, []);
@@ -282,4 +285,17 @@ test('database definitions: assigned to a capability, held by its source map, an
   assert.ok(!review.some((p) => p.includes('trg_Invoices')), review.join('\n'));
   snapshot();
   assert.match(checkCoverage(dir).problems.join('\n'), /not in the source map of extract-billing-invoice or of an amendment: openspec\/spec-relay\/db\/sales\/dbo\/Triggers\/trg_Invoices\.sql/);
+});
+
+test('trace lines must exist in the file', () => {
+  const dir = tempDir();
+  const C = 'openspec/changes/extract-billing-invoice';
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only): src\n');
+  write(dir, 'src/a.php', '<?php\r\n// 2\r\n// 3\r\n');
+  const trace = (source) => { write(dir, `${C}/trace.md`, `| Requirement | Source | Existing tests |\n|---|---|---|\n| Total | ${source} | none |\n`); const problems = []; checkTrace(dir, path.join(dir, C), ['Total'], problems); return problems; };
+  assert.deepEqual(trace('src/a.php:2-3'), []);
+  assert.deepEqual(trace('src/a.php:total:3'), []);
+  assert.deepEqual(trace('src/a.php:total:3-40'), ['the trace of "Total" gives src/a.php the lines 3-40, but the file has 3 lines']);
+  assert.deepEqual(trace('src/a.php:9-2'), ['the trace of "Total" gives src/a.php the lines 9-2, which is not a range']);
+  assert.deepEqual(trace('src/a.php:0-2'), ['the trace of "Total" gives src/a.php the lines 0-2, which is not a range']);
 });

@@ -44,7 +44,7 @@ function repo({ plan = PLAN, review = '- [x] R1 a\n- [ ] R2 b\n- [ ] Q1 c decisi
   write(dir, `${EXTRACT}/.openspec.yaml`, 'schema: spec-relay-extract\n');
   if (artifacts) {
     write(dir, `${EXTRACT}/specs/billing/invoice/spec.md`, SPEC);
-    write(dir, 'src/invoice.php', '<?php\n');
+    write(dir, 'src/invoice.php', '<?php\n//\n');
     write(dir, `${EXTRACT}/source-map.md`, '| Path | Role | In scope |\n|---|---|---|\n| src/invoice.php | invoice | full |\n');
     write(dir, `${EXTRACT}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| a | src/invoice.php:a:1 | none |\n| b | src/invoice.php:b:2 | none |\n');
     write(dir, `${EXTRACT}/screens.md`, '# Screens\nNone\n');

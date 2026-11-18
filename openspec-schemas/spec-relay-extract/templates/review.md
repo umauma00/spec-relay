@@ -11,3 +11,5 @@ Reviewer: <!-- name -->
 ## 3. Questions
 - [ ] Q1 <!-- short title -->: decision:
 
+<!-- When gate.mjs review asks for it (coverage.md judges sites that hold marker lines as "no behavior", or sets marker lines aside with "no effect"), add the heading "4. Coverage" with the one item C1, in the words the gate gives (they end with the code of the list). -->
+
