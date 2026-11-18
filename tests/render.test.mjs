@@ -423,3 +423,59 @@ test('with no specs the list says so', () => {
   assert.deepEqual(result.pages, []);
   assert.match(html(dir, 'specs'), /No specs yet/);
 });
+
+test('renames, deltas that name no baseline requirement and two amendments are all shown', () => {
+  const dir = specs();
+  write(dir, 'openspec/changes/amend-a/specs/billing/invoice/spec.md', '## RENAMED Requirements\n- FROM: `### Requirement: Total`\n- TO: `### Requirement: Grand total`\n\n## MODIFIED Requirements\n\n### Requirement: Grand total\nThe system SHALL add the lines and the tax.\n\n### Requirement: Totals\nThe system SHALL x.\n');
+  write(dir, 'openspec/changes/amend-b/specs/billing/invoice/spec.md', '## MODIFIED Requirements\n\n### Requirement: Reject empty\nThe system SHALL warn on an invoice without lines.\n');
+  write(dir, 'openspec/changes/amend-b/trace.md', '| Requirement | Source | Tests |\n|---|---|---|\n| Total | src/pending.php:x:1 | none |\n');
+  write(dir, 'src/pending.php', 'PENDING\n');
+  render({ root: dir, spec: 'billing/invoice' });
+  const page = html(dir, 'spec-billing-invoice');
+  assert.match(page, /id="R1"[\s\S]*?Total → Grand total[\s\S]*?修正中の変更があります（amend-a）[\s\S]*?<ins> and the tax<\/ins>/);
+  assert.match(page, /id="R1"[\s\S]*?invoice_total[\s\S]*?id="R2"/, 'the evidence follows the rename');
+  assert.match(page, /id="R2"[\s\S]*?修正中の変更があります（amend-b）[\s\S]*?<ins>n on<\/ins>/);
+  assert.match(page, /id="R3"[\s\S]*?Totals[\s\S]*?現在の仕様（openspec\/specs）に同じ名前の要件がありません/, 'a delta that names nothing is not dropped');
+  assert.doesNotMatch(page, /PENDING/, 'the trace of an amendment in progress is not the evidence of an unchanged requirement');
+});
+
+test('images of screens.md and of a purpose resolve against their own files and stay inside the repository', () => {
+  const dir = specs();
+  write(dir, `${ARCHIVED}/shots/entry.png`, 'png');
+  write(dir, `${ARCHIVED}/screens.md`, '# Screens\n\n### Screen: Entry\n![shot](shots/entry.png)\n');
+  write(dir, 'openspec/specs/auth/login/spec.md', '## Purpose\nSigns in. ![o](../../../../../../outside.png)\n\n## Requirements\n');
+  render({ root: dir, spec: 'all' });
+  assert.match(html(dir, 'spec-billing-invoice'), /<img src="\.\.\/\.\.\/changes\/archive\/2026-11-10-extract-billing-invoice\/shots\/entry\.png"/);
+  assert.doesNotMatch(html(dir, 'specs'), /outside\.png"/);
+});
+
+test('one page rendered again keeps its link to the list; names are encoded, matched without case and pages of removed specs go', () => {
+  const dir = specs();
+  render({ root: dir, spec: 'all' });
+  render({ root: dir, spec: 'billing/invoice' });
+  assert.match(html(dir, 'spec-billing-invoice'), /← 仕様の一覧/);
+  assert.equal(render({ root: dir, spec: 'Billing/Invoice' }).out, 'openspec/spec-relay/views/spec-billing-invoice.html');
+  write(dir, 'openspec/specs/billing/a#b/spec.md', '## Purpose\nx\n\n## Requirements\n');
+  fs.rmSync(path.join(dir, 'openspec/specs/auth'), { recursive: true });
+  render({ root: dir, spec: 'all' });
+  assert.match(html(dir, 'specs'), /href="spec-billing-a%23b\.html"/);
+  assert.equal(fs.existsSync(path.join(dir, 'openspec/spec-relay/views/spec-auth-login.html')), false);
+});
+
+test('archived amendments count in date and version order; a spec linked from outside is not read', () => {
+  const dir = specs();
+  for (const [v, file] of [['-v9', 'nine'], ['-v10', 'ten']]) {
+    write(dir, `openspec/changes/archive/2026-11-12-amend-billing-invoice${v}/specs/billing/invoice/spec.md`, '## MODIFIED Requirements\n');
+    write(dir, `openspec/changes/archive/2026-11-12-amend-billing-invoice${v}/trace.md`, `| Requirement | Source | Tests |\n|---|---|---|\n| Total | src/${file}.php:x:1 | none |\n`);
+    write(dir, `src/${file}.php`, `${file.toUpperCase()}\n`);
+  }
+  render({ root: dir, spec: 'billing/invoice' });
+  assert.match(html(dir, 'spec-billing-invoice'), /TEN/);
+  const outside = tempDir();
+  fs.writeFileSync(path.join(outside, 'spec.md'), '## Purpose\nSECRET\n');
+  fs.mkdirSync(path.join(dir, 'openspec/specs/billing/link'));
+  try { fs.symlinkSync(path.join(outside, 'spec.md'), path.join(dir, 'openspec/specs/billing/link/spec.md')); } catch { return; }
+  render({ root: dir, spec: 'all' });
+  assert.doesNotMatch(html(dir, 'specs'), /SECRET/);
+  assert.equal(render({ root: dir, spec: 'billing/link' }).ok, false);
+});

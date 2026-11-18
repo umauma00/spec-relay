@@ -59,19 +59,26 @@ node "<kit>/scripts/render.mjs" --spec all
 - `--spec` shows the approved specs under `openspec/specs/` for reading, after
   the reviews. `--spec <context>/<name>` writes one capability's page
   (`spec-<context>-<name>.html`); `--spec all` writes `specs.html`, a list of
-  every capability grouped by context, and a page for each, linked from it.
+  every capability grouped by context, and a page for each, linked from it, and
+  prints their paths under `pages`. It removes pages of capabilities that no
+  longer exist. (A capability literally named `all` is rendered alone with
+  `--spec all/`.)
   - A capability page has the same design as a review page, without seals,
-    progress or the filter: the purpose, each requirement with its scenarios
-    and its source lines (from `trace.md` of the archived extract change and of
-    every archived amend change, the newest winning), and the screens of the
-    archived extract.
+    progress, the filter or the single-key shortcuts: the purpose, each
+    requirement with its scenarios and its source lines (from `trace.md` of the
+    archived extract change and of every archived amend change, the newest
+    winning), and the screens of the archived extract. `R<n>` there is the
+    position in the spec, not the id of a `review.md` line.
   - An amend change still in progress that names the capability is shown on
-    the requirements it would change or add, with a caution: until it is
-    archived the spec has not changed. Do not tell the person the spec already
-    says the new wording.
-  - A search box (with script on) narrows the requirements by any word of
-    their text.
-  - `--out` cannot be used with `--spec all`.
+    the requirements it would change, rename or add (and on any requirement it
+    names that the spec does not have), with a caution: until it is archived the
+    spec has not changed. Do not tell the person the spec already says the new
+    wording.
+  - A search box (with script on) keeps the items that contain every word
+    typed, in any of their text (requirements, scenarios, source lines,
+    screens); full-width and half-width letters match each other.
+  - `--out` cannot be used with `--spec all`. `--file` of a file named
+    `specs.md` would overwrite the list; render such a file with `--out`.
 - Screenshots are not copied into the page. The page links the image file named
   in `screens.md` (inside the repository, `png`, `jpg`, `gif`, `webp` or `bmp`)
   by a relative path, so the image must stay where it is, and a page sent to
