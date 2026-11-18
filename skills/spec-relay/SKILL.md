@@ -95,7 +95,9 @@ need the reasoning behind a step.
   so a second survey, port or amendment of the same thing gets a `-v<n>`
   suffix (`port-billing-invoice-v2`). The scripts treat it as the same change.
 - **Review page**: the HTML view of a change's Markdown, made by the
-  `spec-relay-view` skill. The Markdown stays the source of truth.
+  `spec-relay-view` skill. The Markdown stays the source of truth. The same
+  skill shows the approved specs for reading (`render.mjs --spec all`) when the
+  person asks to see a spec.
 - **Work folder**: `openspec/spec-relay/work/<change>/`, scratch files that
   subagents write in parallel (table parts, survey evidence) before
   `merge.mjs` puts them into an artifact.

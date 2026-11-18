@@ -1,6 +1,6 @@
 ---
 name: spec-relay-view
-description: Turn spec-relay's Markdown artifacts (an OpenSpec change or one Markdown file) into a fixed-design HTML page for a person to review. Use before asking a person to review spec-relay artifacts, and whenever they ask to see them as HTML.
+description: Turn spec-relay's Markdown artifacts (an OpenSpec change, the approved specs, or one Markdown file) into a fixed-design HTML page for a person to review or read. Use before asking a person to review spec-relay artifacts, and whenever they ask to see them or the specs as HTML.
 user-invocable: true
 ---
 
@@ -34,6 +34,8 @@ under PowerShell):
 ```text
 node "<kit>/scripts/render.mjs" --change <change-name>
 node "<kit>/scripts/render.mjs" --file <path/to/file.md>
+node "<kit>/scripts/render.mjs" --spec <context>/<name>
+node "<kit>/scripts/render.mjs" --spec all
 ```
 
 - `--change` finds the change under `openspec/changes/`, or its newest copy under
@@ -54,6 +56,31 @@ node "<kit>/scripts/render.mjs" --file <path/to/file.md>
     that names nothing. Tell the person about these cautions; do not hide them.
   Any other change (a port) gets each of its Markdown files in order, without
   progress.
+- `--spec` shows the approved specs under `openspec/specs/` for reading, after
+  the reviews. `--spec <context>/<name>` writes one capability's page
+  (`spec-<context>-<name>.html`); `--spec all` writes `specs.html`, a list of
+  every capability grouped by context, and a page for each, linked from it, and
+  prints their paths under `pages`. It removes the pages it wrote earlier for
+  capabilities that no longer exist. A single page links back to the list only
+  once `specs.html` exists, so run `--spec all` first. (A capability literally named `all` is rendered alone with
+  `--spec all/`.)
+  - A capability page has the same design as a review page, without seals,
+    progress, the filter or the single-key shortcuts: the purpose, each
+    requirement with its scenarios and its source lines (from `trace.md` of the
+    archived extract change and of every archived amend change, the newest
+    winning), and the screens of the archived extract. `R<n>` there is the
+    position in the spec, not the id of a `review.md` line.
+  - An amend change still in progress that names the capability is shown on
+    the requirements it would change, rename or add (and on any requirement it
+    names that the spec does not have), with a caution: until it is archived the
+    spec has not changed. When two amendments change one requirement, each
+    wording is shown under the change's name. Do not tell the person the spec already says the new
+    wording.
+  - A search box (with script on) keeps the items that contain every word
+    typed, in any of their text (requirements, scenarios, source lines,
+    screens); full-width and half-width letters match each other.
+  - `--out` cannot be used with `--spec all`. `--file` of a file named
+    `specs.md` would overwrite the list; render such a file with `--out`.
 - Screenshots are not copied into the page. The page links the image file named
   in `screens.md` (inside the repository, `png`, `jpg`, `gif`, `webp` or `bmp`)
   by a relative path, so the image must stay where it is, and a page sent to

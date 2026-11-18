@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { render, markdown, inline, parseRefs, parseReview, parseQuestions, diffChars, commonIndent, timeStamp, main } from '../scripts/render.mjs';
+import { render, markdown, inline, parseRefs, parseReview, parseQuestions, diffChars, commonIndent, timeStamp, main, capabilities } from '../scripts/render.mjs';
 import { tempDir, write, quiet, crlf } from './helpers.mjs';
 
 const CHANGE = 'openspec/changes/extract-billing-invoice';
@@ -338,4 +338,158 @@ test('the page works without script and leaves the reader in control', () => {
 
 test('the time stamp is local time with its offset', () => {
   assert.match(timeStamp(new Date('2026-11-10T13:41:00Z')), /^2026-11-1[01] \d\d:\d\d UTC[+-]\d\d:\d\d$/);
+});
+
+// ---- the approved specs
+
+const BASELINE = '## Purpose\n\nComputes invoice totals.\n\n## Requirements\n\n### Requirement: Total\nThe system SHALL add the lines.\n\n#### Scenario: two lines\n- **WHEN** 100 x 3 and 55 x 1\n- **THEN** `355`\n\n### Requirement: Reject empty\nThe system SHALL reject an invoice without lines.\n';
+const ARCHIVED = 'openspec/changes/archive/2026-11-10-extract-billing-invoice';
+
+function specs() {
+  const dir = repo();
+  fs.rmSync(path.join(dir, CHANGE), { recursive: true });
+  write(dir, 'openspec/specs/billing/invoice/spec.md', BASELINE);
+  write(dir, 'openspec/specs/billing/payment/spec.md', '## Purpose\nTakes payments.\n\n## Requirements\n\n### Requirement: Card\nThe system SHALL take cards.\n');
+  write(dir, 'openspec/specs/auth/login/spec.md', '## Purpose\nSigns people in.\n\n## Requirements\n');
+  write(dir, `${ARCHIVED}/.openspec.yaml`, 'schema: spec-relay-extract\n');
+  write(dir, `${ARCHIVED}/trace.md`, TRACE);
+  write(dir, `${ARCHIVED}/review.md`, REVIEW);
+  write(dir, `${ARCHIVED}/screens.md`, '# Screens\n\n### Screen: Entry\n- **Entry**: menu\n');
+  return dir;
+}
+
+test('an approved spec reads as a page with its scenarios, source and screens, and no review marks', () => {
+  const dir = specs();
+  assert.deepEqual(render({ root: dir, spec: 'billing/invoice' }), { ok: true, out: 'openspec/spec-relay/views/spec-billing-invoice.html' });
+  const page = html(dir, 'spec-billing-invoice');
+  assert.match(page, /<p class="kind">仕様<\/p>\s*<h1>billing\/invoice<\/h1>/);
+  assert.match(page, /Computes invoice totals\./);
+  assert.match(page, /<dt>要件<\/dt><dd>2<\/dd><dt>シナリオ<\/dt><dd>1<\/dd><dt>画面<\/dt><dd>1<\/dd><dt>根拠<\/dt><dd class="mono">2026-11-10-extract-billing-invoice<\/dd>/);
+  assert.match(page, /class="item k-req" id="R1"[\s\S]*?Total[\s\S]*?<dl class="gwt">/);
+  assert.match(page, /\/\/ 合計/, 'the source code from the archived trace.md');
+  assert.match(page, /id="R2"[\s\S]*?trace\.md に記載がありません/);
+  assert.match(page, /class="item small k-screen" id="S1"|class="item k-screen" id="S1"/);
+  assert.doesNotMatch(page, /class="seal|class="left"|class="filter"|id="keys-on"|class="dock"|class="all-clear"|未確認/, 'nothing about review');
+  assert.match(page, /<input id="q" type="search"/);
+  assert.match(page, /<li data-for="R1"><a href="#R1">/);
+  assert.match(page, /正は openspec\/specs\/ の Markdown です/);
+  assert.match(page, /Content-Security-Policy" content="default-src 'none'/);
+});
+
+test('an amendment in progress is shown on the spec it would change, and an archived one counts', () => {
+  const dir = specs();
+  write(dir, 'openspec/changes/archive/2026-11-12-amend-billing-invoice/specs/billing/invoice/spec.md', '## MODIFIED Requirements\n');
+  write(dir, 'openspec/changes/archive/2026-11-12-amend-billing-invoice/trace.md', '| Requirement | Source | Tests |\n|---|---|---|\n| Reject empty | src/invoice.php:invoice_total:3 | tests/a.php |\n');
+  write(dir, 'openspec/changes/amend-billing-invoice-2/specs/billing/invoice/spec.md', '## MODIFIED Requirements\n\n### Requirement: Total\nThe system SHALL add the lines and round down.\n\n#### Scenario: two lines\n- **WHEN** 100 x 3 and 55 x 1\n- **THEN** `355`\n\n## ADDED Requirements\n\n### Requirement: Zero rate\nThe system SHALL accept 0.\n');
+  write(dir, 'openspec/changes/amend-other/specs/billing/payment/spec.md', '## ADDED Requirements\n\n### Requirement: Cash\nx\n');
+  render({ root: dir, spec: 'billing/invoice' });
+  const page = html(dir, 'spec-billing-invoice');
+  assert.match(page, /2026-11-10-extract-billing-invoice<br>2026-11-12-amend-billing-invoice/);
+  assert.match(page, /<dt>修正中<\/dt><dd class="mono">amend-billing-invoice-2<\/dd>/);
+  assert.match(page, /id="R1"[\s\S]*?＊ 変更[\s\S]*?修正中の変更があります（amend-billing-invoice-2）[\s\S]*?<ins> and round down<\/ins>/);
+  assert.match(page, /id="R2"[\s\S]*?tests\/a\.php/, 'the archived amendment\'s trace is used');
+  assert.match(page, /id="R3"[\s\S]*?＋ 追加[\s\S]*?Zero rate/);
+  assert.doesNotMatch(page, /Cash/);
+});
+
+test('--spec all writes the list and every page, grouped by context and linked', () => {
+  const dir = specs();
+  assert.deepEqual(capabilities(dir), ['auth/login', 'billing/invoice', 'billing/payment']);
+  const result = render({ root: dir, spec: 'all' });
+  assert.deepEqual(result, { ok: true, out: 'openspec/spec-relay/views/specs.html', pages: ['openspec/spec-relay/views/spec-auth-login.html', 'openspec/spec-relay/views/spec-billing-invoice.html', 'openspec/spec-relay/views/spec-billing-payment.html'] });
+  const index = html(dir, 'specs');
+  assert.match(index, /<h1>移行の仕様<\/h1>/);
+  assert.match(index, /<h2 id="g1">auth<span class="n">1<\/span><\/h2>[\s\S]*<h2 id="g2">billing<span class="n">2<\/span><\/h2>/);
+  assert.match(index, /<h3><a href="spec-billing-invoice\.html">billing\/invoice<\/a><\/h3>/);
+  assert.match(index, /<summary>要件 2<\/summary><ol><li>Total<\/li><li>Reject empty<\/li><\/ol>/);
+  assert.match(html(dir, 'spec-billing-payment'), /<p class="nav"><a href="specs\.html">← 仕様の一覧<\/a><\/p>/);
+  assert.equal(render({ root: dir, spec: 'all', out: 'x.html' }).ok, false);
+});
+
+test('a spec outside openspec/specs, or one that does not exist, is refused', () => {
+  const dir = specs();
+  for (const bad of ['../billing', 'billing/../../x', 'billing/none', 'a:b']) {
+    const result = render({ root: dir, spec: bad });
+    assert.equal(result.ok, false, bad);
+  }
+  assert.equal(quiet(() => main(['--spec', 'billing/invoice', '--change', 'x'])), 2);
+  assert.equal(quiet(() => main(['--root', dir, '--spec', 'billing/invoice'])), 0);
+});
+
+test('with no specs the list says so', () => {
+  const dir = tempDir();
+  const result = render({ root: dir, spec: 'all', lang: 'en' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.pages, []);
+  assert.match(html(dir, 'specs'), /No specs yet/);
+});
+
+test('renames, deltas that name no baseline requirement and two amendments are all shown', () => {
+  const dir = specs();
+  write(dir, 'openspec/changes/amend-a/specs/billing/invoice/spec.md', '## RENAMED Requirements\n- FROM: `### Requirement: Total`\n- TO: `### Requirement: Grand total`\n\n## MODIFIED Requirements\n\n### Requirement: Grand total\nThe system SHALL add the lines and the tax.\n\n### Requirement: Totals\nThe system SHALL x.\n');
+  write(dir, 'openspec/changes/amend-b/specs/billing/invoice/spec.md', '## MODIFIED Requirements\n\n### Requirement: Reject empty\nThe system SHALL warn on an invoice without lines.\n');
+  write(dir, 'openspec/changes/amend-b/trace.md', '| Requirement | Source | Tests |\n|---|---|---|\n| Total | src/pending.php:x:1 | none |\n');
+  write(dir, 'src/pending.php', 'PENDING\n');
+  render({ root: dir, spec: 'billing/invoice' });
+  const page = html(dir, 'spec-billing-invoice');
+  assert.match(page, /id="R1"[\s\S]*?Total → Grand total[\s\S]*?修正中の変更があります（amend-a）[\s\S]*?<ins> and the tax<\/ins>/);
+  assert.match(page, /id="R1"[\s\S]*?invoice_total[\s\S]*?id="R2"/, 'the evidence follows the rename');
+  assert.match(page, /id="R2"[\s\S]*?修正中の変更があります（amend-b）[\s\S]*?<ins>n on<\/ins>/);
+  assert.match(page, /id="R3"[\s\S]*?Totals[\s\S]*?現在の仕様（openspec\/specs）に同じ名前の要件がありません/, 'a delta that names nothing is not dropped');
+  assert.doesNotMatch(page, /PENDING/, 'the trace of an amendment in progress is not the evidence of an unchanged requirement');
+});
+
+test('images of screens.md and of a purpose resolve against their own files and stay inside the repository', () => {
+  const dir = specs();
+  write(dir, `${ARCHIVED}/shots/entry.png`, 'png');
+  write(dir, `${ARCHIVED}/screens.md`, '# Screens\n\n### Screen: Entry\n![shot](shots/entry.png)\n');
+  write(dir, 'openspec/specs/auth/login/spec.md', '## Purpose\nSigns in. ![o](../../../../../../outside.png)\n\n## Requirements\n');
+  render({ root: dir, spec: 'all' });
+  assert.match(html(dir, 'spec-billing-invoice'), /<img src="\.\.\/\.\.\/changes\/archive\/2026-11-10-extract-billing-invoice\/shots\/entry\.png"/);
+  assert.doesNotMatch(html(dir, 'specs'), /outside\.png"/);
+});
+
+test('one page rendered again keeps its link to the list; names are encoded, matched without case and pages of removed specs go', () => {
+  const dir = specs();
+  render({ root: dir, spec: 'all' });
+  render({ root: dir, spec: 'billing/invoice' });
+  assert.match(html(dir, 'spec-billing-invoice'), /← 仕様の一覧/);
+  assert.equal(render({ root: dir, spec: 'Billing/Invoice' }).out, 'openspec/spec-relay/views/spec-billing-invoice.html');
+  write(dir, 'openspec/specs/billing/a#b/spec.md', '## Purpose\nx\n\n## Requirements\n');
+  fs.rmSync(path.join(dir, 'openspec/specs/auth'), { recursive: true });
+  render({ root: dir, spec: 'all' });
+  assert.match(html(dir, 'specs'), /href="spec-billing-a%23b\.html"/);
+  assert.equal(fs.existsSync(path.join(dir, 'openspec/spec-relay/views/spec-auth-login.html')), false);
+});
+
+test('archived amendments count in date and version order; a spec linked from outside is not read', () => {
+  const dir = specs();
+  for (const [v, file] of [['-v9', 'nine'], ['-v10', 'ten']]) {
+    write(dir, `openspec/changes/archive/2026-11-12-amend-billing-invoice${v}/specs/billing/invoice/spec.md`, '## MODIFIED Requirements\n');
+    write(dir, `openspec/changes/archive/2026-11-12-amend-billing-invoice${v}/trace.md`, `| Requirement | Source | Tests |\n|---|---|---|\n| Total | src/${file}.php:x:1 | none |\n`);
+    write(dir, `src/${file}.php`, `${file.toUpperCase()}\n`);
+  }
+  render({ root: dir, spec: 'billing/invoice' });
+  assert.match(html(dir, 'spec-billing-invoice'), /TEN/);
+  const outside = tempDir();
+  fs.writeFileSync(path.join(outside, 'spec.md'), '## Purpose\nSECRET\n');
+  fs.mkdirSync(path.join(dir, 'openspec/specs/billing/link'));
+  try { fs.symlinkSync(path.join(outside, 'spec.md'), path.join(dir, 'openspec/specs/billing/link/spec.md')); } catch { return; }
+  render({ root: dir, spec: 'all' });
+  assert.doesNotMatch(html(dir, 'specs'), /SECRET/);
+  assert.equal(render({ root: dir, spec: 'billing/link' }).ok, false);
+});
+
+test('two amendments of one requirement each show their wording; only pages --spec wrote are removed; no link to a missing list', () => {
+  const dir = specs();
+  render({ root: dir, spec: 'billing/invoice' });
+  assert.doesNotMatch(html(dir, 'spec-billing-invoice'), /← 仕様の一覧/, 'specs.html does not exist yet');
+  write(dir, 'openspec/changes/amend-a/specs/billing/invoice/spec.md', '## MODIFIED Requirements\n\n### Requirement: Total\nThe system SHALL add the lines, ALPHA.\n');
+  write(dir, 'openspec/changes/amend-b/specs/billing/invoice/spec.md', '## MODIFIED Requirements\n\n### Requirement: Total\nThe system SHALL add the lines, BETA.\n');
+  write(dir, 'notes/spec-notes.md', '# Notes\n');
+  render({ root: dir, file: 'notes/spec-notes.md' });
+  render({ root: dir, spec: 'all' });
+  const page = html(dir, 'spec-billing-invoice');
+  assert.match(page, /id="R1"[\s\S]*?amend-a, amend-b[\s\S]*?amend-a<\/p>[\s\S]*?ALPHA[\s\S]*?amend-b<\/p>[\s\S]*?BETA[\s\S]*?id="R2"/);
+  assert.equal(fs.existsSync(path.join(dir, 'openspec/spec-relay/views/spec-notes.html')), true, 'a page of --file is not removed');
 });
