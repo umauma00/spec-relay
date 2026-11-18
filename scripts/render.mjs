@@ -254,7 +254,11 @@ function list(items) {
 
 // ---------------------------------------------------------------- reading
 
+// While view() builds a page, every Markdown file it reads must be inside the
+// repository (a change folder or a file in it may be a symbolic link elsewhere).
+let readRoot = null;
 function readText(file) {
+  if (readRoot && !insideRoot(readRoot, path.relative(path.resolve(readRoot), path.resolve(file)))) return null;
   try { return fs.readFileSync(file, 'utf8').replace(/^﻿/, ''); } catch { return null; }
 }
 
@@ -1499,26 +1503,75 @@ function withImages(root, docDir, resolved, build) {
 const specFile = (capability) => `spec-${changeKey(capability)}.html`;
 const specHref = (capability) => encodeURIComponent(specFile(capability));
 
+// One page as HTML, without writing it: render() writes it, the canvas serves it.
+// `at` is where the page is taken to be; images are linked relative to it.
+// { change } is a change's page, { spec: 'all' } the list of specs, { spec } one
+// capability's page, { file } one Markdown file.
+export function view(options) {
+  const before = readRoot;
+  readRoot = options.root ?? process.cwd();
+  try { return buildView(options); } finally { readRoot = before; }
+}
+
+function buildView({ root = process.cwd(), change, spec, file, lang, now = new Date(), at, nav = '' }) {
+  const code = pickLang(root, lang);
+  const L = LABELS[code];
+  const stamp = `${L.generated} ${timeStamp(now)}`;
+  const resolved = path.resolve(root, at);
+  if (spec === 'all') {
+    const list = capabilities(root);
+    return { ok: true, title: L.specIndexTitle, html: withImages(root, path.join(root, SPECS), resolved, () => page({ title: L.specIndexTitle, kind: L.specIndexKind, meta: stamp, ...specIndex({ root, L, list, href: specHref }), L, lang: code, mode: 'read', nav, note: L.specNote })) };
+  }
+  if (spec) {
+    const capability = capabilityPath(spec, capabilities(root));
+    if (!capability) return { ok: false, problems: [`spec not found: ${SPECS}/${String(spec).replace(/\\/g, '/')}/spec.md`] };
+    const html = withImages(root, path.join(root, SPECS, ...capability.split('/')), resolved, (outDir) => page({ title: capability, kind: L.specKind, meta: stamp, ...specView({ root, capability, L, outDir }), L, lang: code, mode: 'read', nav, note: L.specNote, view: 'spec' }));
+    return { ok: true, title: capability, capability, html };
+  }
+  if (change) {
+    const found = findChange(root, change);
+    if (!found) return { ok: false, problems: [`change not found: ${change}`] };
+    const schema = readText(path.join(found.dir, '.openspec.yaml')) === null ? '' : changeSchema(found.dir);
+    const reviewed = fs.existsSync(path.join(found.dir, 'review.md'));
+    const html = withImages(root, found.dir, resolved, (outDir) => {
+      const shown = reviewed ? reviewView({ root, dir: found.dir, schema: schema || 'spec-relay-extract', L, outDir }) : genericChangeView(found.dir);
+      const meta = [schema, found.archived ? L.archived : '', stamp].filter(Boolean).join(' · ');
+      return page({ title: change, kind: L.kinds[schema || (reviewed ? 'spec-relay-extract' : '')] ?? L.document, meta, ...shown, L, lang: code, nav });
+    });
+    return { ok: true, title: change, html };
+  }
+  if (file) {
+    // --file may name a file outside the repository on purpose; only what it links stays inside.
+    const text = (() => { const r = readRoot; readRoot = null; try { return readText(path.resolve(root, file)); } finally { readRoot = r; } })();
+    if (text === null) return { ok: false, problems: [`file not found: ${file}`] };
+    const name = path.basename(file).replace(/\.md$/i, '');
+    const html = withImages(root, path.dirname(path.resolve(root, file)), resolved, () => page({ title: name, kind: L.document, meta: stamp, docs: [{ id: 'doc', title: name, html: `<div class="doc">${markdown(text, { headingOffset: 2 })}</div>` }], L, lang: code, nav }));
+    return { ok: true, title: name, html };
+  }
+  return { ok: false, problems: ['pass --change NAME, --file PATH or --spec CAPABILITY|all'] };
+}
+
+// The labels of the pages, for a page built elsewhere (the canvas's progress page).
+export const labels = (lang) => LABELS[lang === 'ja' ? 'ja' : 'en'];
+
 // --spec CAPABILITY writes one capability's page; --spec all writes specs.html
 // (the list) and a page for every capability next to it, and removes the pages
-// of capabilities that are gone.
-function renderSpecs({ root, spec, out, L, code, stamp }) {
+// it wrote for capabilities that are gone.
+function renderSpecs({ root, spec, out, lang, now }) {
   const views = path.resolve(root, VIEWS);
-  const list = capabilities(root);
+  const L = LABELS[pickLang(root, lang)];
   const back = `<a href="specs.html">${escapeHtml(L.toIndex)}</a>`;
-  const one = (capability, resolved, nav) => {
-    const html = withImages(root, path.join(root, SPECS, ...capability.split('/')), resolved, (outDir) => {
-      const view = specView({ root, capability, L, outDir });
-      return page({ title: capability, kind: L.specKind, meta: stamp, ...view, L, lang: code, mode: 'read', nav, note: L.specNote, view: 'spec' });
-    });
-    writeView(root, resolved, html);
-    return path.relative(root, resolved).replace(/\\/g, '/');
+  const write = (options, resolved) => {
+    const built = view({ root, lang, now, at: resolved, ...options });
+    if (built.ok) writeView(root, resolved, built.html);
+    return built;
   };
   if (spec === 'all') {
     if (out) return { ok: false, problems: ['--out cannot be used with --spec all; the pages go to openspec/spec-relay/views/'] };
+    const list = capabilities(root);
     const index = path.join(views, 'specs.html');
-    writeView(root, index, withImages(root, path.join(root, SPECS), index, () => page({ title: L.specIndexTitle, kind: L.specIndexKind, meta: stamp, ...specIndex({ root, L, list, href: specHref }), L, lang: code, mode: 'read', note: L.specNote })));
-    const pages = list.map((capability) => one(capability, path.join(views, specFile(capability)), back));
+    write({ spec: 'all' }, index);
+    const pages = list.map((capability) => { const at = path.join(views, specFile(capability)); write({ spec: capability, nav: back }, at); return path.relative(root, at).replace(/\\/g, '/'); });
     // Only pages this option wrote (they carry its marker) are removed; a failed removal is not an error.
     const keep = new Set(list.map(specFile));
     for (const f of fs.readdirSync(views)) {
@@ -1528,42 +1581,21 @@ function renderSpecs({ root, spec, out, L, code, stamp }) {
     }
     return { ok: true, out: path.relative(root, index).replace(/\\/g, '/'), pages };
   }
-  const capability = capabilityPath(spec, list);
+  const capability = capabilityPath(spec, capabilities(root));
   if (!capability) return { ok: false, problems: [`spec not found: ${SPECS}/${String(spec).replace(/\\/g, '/')}/spec.md`] };
-  return { ok: true, out: one(capability, path.resolve(root, out ?? path.join(views, specFile(capability))), !out && fs.existsSync(path.join(views, 'specs.html')) ? back : '') };
+  const resolved = path.resolve(root, out ?? path.join(views, specFile(capability)));
+  const built = write({ spec: capability, nav: !out && fs.existsSync(path.join(views, 'specs.html')) ? back : '' }, resolved);
+  return built.ok ? { ok: true, out: path.relative(root, resolved).replace(/\\/g, '/') } : built;
 }
 
 export function render({ root = process.cwd(), change, file, spec, out, lang, now = new Date() }) {
-  const code = pickLang(root, lang);
-  const L = LABELS[code];
-  const stamp = `${L.generated} ${timeStamp(now)}`;
-  const views = path.resolve(root, VIEWS);
-  if (spec) return renderSpecs({ root, spec, out, L, code, stamp });
-  let build;
-  let name;
-  let docDir;
-  if (change) {
-    const found = findChange(root, change);
-    if (!found) return { ok: false, problems: [`change not found: ${change}`] };
-    const schema = readText(path.join(found.dir, '.openspec.yaml')) === null ? '' : changeSchema(found.dir);
-    const reviewed = fs.existsSync(path.join(found.dir, 'review.md'));
-    name = change;
-    docDir = found.dir;
-    build = (outDir) => {
-      const view = reviewed ? reviewView({ root, dir: found.dir, schema: schema || 'spec-relay-extract', L, outDir }) : genericChangeView(found.dir);
-      const meta = [schema, found.archived ? L.archived : '', stamp].filter(Boolean).join(' · ');
-      return page({ title: change, kind: L.kinds[schema || (reviewed ? 'spec-relay-extract' : '')] ?? L.document, meta, ...view, L, lang: code });
-    };
-  } else if (file) {
-    const text = readText(path.resolve(root, file));
-    if (text === null) return { ok: false, problems: [`file not found: ${file}`] };
-    name = path.basename(file).replace(/\.md$/i, '');
-    docDir = path.dirname(path.resolve(root, file));
-    build = () => page({ title: name, kind: L.document, meta: stamp, docs: [{ id: 'doc', title: name, html: `<div class="doc">${markdown(text, { headingOffset: 2 })}</div>` }], L, lang: code });
-  } else return { ok: false, problems: ['pass --change NAME, --file PATH or --spec CAPABILITY|all'] };
-
-  const resolved = path.resolve(root, out ?? path.join(views, `${name}.html`));
-  writeView(root, resolved, withImages(root, docDir, resolved, build));
+  if (spec) return renderSpecs({ root, spec, out, lang, now });
+  if (!change && !file) return { ok: false, problems: ['pass --change NAME, --file PATH or --spec CAPABILITY|all'] };
+  const name = change ?? path.basename(file).replace(/\.md$/i, '');
+  const resolved = path.resolve(root, out ?? path.join(path.resolve(root, VIEWS), `${name}.html`));
+  const built = view({ root, change, file, lang, now, at: resolved });
+  if (!built.ok) return built;
+  writeView(root, resolved, built.html);
   return { ok: true, out: path.relative(root, resolved).replace(/\\/g, '/') };
 }
 

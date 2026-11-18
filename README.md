@@ -2,7 +2,7 @@
 
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) を使って、コードベースを別のプログラミング言語へ移すための GitHub Copilot 用キットです。元のコードから仕様を起こし、人間がその仕様をレビューし、レビュー済みの仕様をもとに新しい言語で実装します。
 
-> **状態：0.16.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
+> **状態：0.17.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
 
 ## 流れ
 
@@ -181,6 +181,10 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 - フックはプラグインを入れたすべてのリポジトリで、シェルとファイル編集の前に1回ずつ起動します（node の起動1回分。spec-relay のリポジトリでなければすぐ終わります）。ホストがプラグインの場所（`PLUGIN_ROOT`）を渡さないときは何もしません。
 - チャットでの承認は AI が review.md に書くので、「AI が勝手にチェックを付ける」ことはフックでは区別できません。承認は今も、チャットでのあなたの言葉と gate の合格の両方です。
 
+## 0.16.0 から更新するとき
+
+0.17.0 で、Copilot の canvas（試験中）に進み具合・レビュー画面・仕様を出せるようになりました。各項目の「これを聞く」で、質問をそのままチャットに送れます（[詳しく](docs/CANVAS.md)）。プラグインを更新すれば入ります。スキーマや成果物に変更はありません。
+
 ## 0.15.0 から更新するとき
 
 0.16.0 で、承認済みの仕様を HTML で読めるようになりました。`node "<kit>/scripts/render.mjs" --spec all` で `openspec/spec-relay/views/specs.html`（仕様の一覧）と capability ごとのページができます。要件ごとにシナリオと元コードの該当行が並び、修正中の amend があればその要件に注意書きが出ます。スキーマや成果物に変更はないので、導入のやり直しは要りません。
@@ -293,6 +297,7 @@ plugin.json                    プラグイン定義（Agent Plugins 1.0）
 .github/plugin/marketplace.json マーケットプレイス定義
 com.github.copilot/agents/     オーケストレーター・解析担当・照合担当・実装担当
 com.github.copilot/hooks/      実行前に archive と書き込みを確かめるフック（既定は無効）と、サブエージェントの時間の記録
+com.github.copilot/extensions/ canvas の拡張（進み具合・レビュー画面・仕様を Copilot の canvas に出す。試験中）
 skills/spec-relay/SKILL.md     オーケストレーターの手順
 skills/spec-relay-view/        markdown を HTML にして見せるスキル
 openspec-schemas/              移行用の OpenSpec スキーマ
@@ -310,6 +315,7 @@ scripts/verify.mjs             実装のテスト・境界チェック・比べ�
 scripts/compare.mjs            比べ方 B1：元のプログラムから記録したケースと新しいコードの結果を1件ずつ比べる
 scripts/run.mjs                verify と compare がコマンドを実行する部分（Windows では PowerShell）
 scripts/render.mjs             成果物の markdown をレビュー用の HTML に、承認済みの仕様を読みものの HTML にする（デザイン固定）
+scripts/canvas.mjs             canvas の画面を出すサーバー（拡張から使う。単独でブラウザーでも試せる）
 scripts/doctor.mjs             最初の環境チェックとサブエージェントの試運転
 scripts/openspec.mjs           リポジトリに固定した OpenSpec CLI の起動（`node <キット>/scripts/openspec.mjs <引数>`、シェルを通さない）
 templates/openspec-tools/      リポジトリに置く、OpenSpec の版を固定する package.json と package-lock.json
@@ -318,6 +324,7 @@ docs/WORKFLOW.md               流れと設計の説明、今後の課題
 docs/WINDOWS.md                Windows での準備と注意点
 docs/DATABASE.md               データベースの扱いと、定義の書き出し方
 docs/COMPARE.md                比べ方 B1（元のプログラムから記録したケースとの比較）の書き方
+docs/CANVAS.md                 canvas で見る（試験中）
 ```
 
 ## 開発
