@@ -19,6 +19,7 @@ The kit's own files are two directories above this skill:
 [scripts/metrics.mjs](../../scripts/metrics.mjs),
 [scripts/merge.mjs](../../scripts/merge.mjs),
 [scripts/verify.mjs](../../scripts/verify.mjs),
+[scripts/compare.mjs](../../scripts/compare.mjs) ([docs/COMPARE.md](../../docs/COMPARE.md)),
 [scripts/finish.mjs](../../scripts/finish.mjs),
 [scripts/doctor.mjs](../../scripts/doctor.mjs), `openspec-schemas/` and
 `docs/WORKFLOW.md`. `<kit>` below stands for the absolute path of that
@@ -436,7 +437,10 @@ the domain, not the folders.
    cannot tell you: frameworks they prefer, whether the source program can
    still be run, and which verification levels each context needs (A scenario
    tests always; B1 logic comparison, B2 screen replay, C screenshots by
-   choice). For the screens (ui.md), ask who uses them, whether manuals,
+   choice). Suggest B1 for contexts with calculations or business rules
+   whenever the source code can be built and run here or records of its real
+   runs exist (batch input and output, report data): it is the level that
+   compares with what the old system did (docs/COMPARE.md). For the screens (ui.md), ask who uses them, whether manuals,
    training or printed forms show them, and the target UI technology, then
    propose a policy per context (`same`, `layout`, `new`, `none`; the
    instruction says which fits which source); the person decides, and you
@@ -593,7 +597,10 @@ Words); the finish step (step 6) lists it in the hand-over.
    stops at the first failure: give the printed `tail` to the implementer as
    one task and run it again. A command that chains (`a; b`, a pipe) is
    refused; ask for a design.md command, or tell the person when the
-   conventions' command needs a new target design.
+   conventions' command needs a new target design. A B1 command
+   `spec-relay-compare --cases <dir> --driver "<command>"` compares the cases
+   recorded from the source program with the new code's output: when cases
+   differ, the new code is fixed, never the expected values or `rules.json`.
 7. **Port crosscheck.** Number the baseline spec's requirements (`R1 <name>`)
    and the archived extract change's screens (`S1 <name>`) by search, as in
    step 3, and give them to `spec-relay-checker` subagents as a **port

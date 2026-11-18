@@ -78,7 +78,17 @@ unspecified behavior you found (below).
   test the tag `spec-relay: <capability> | <requirement name> | <scenario
   name>` in a comment, or as its whole test name (the string starts with
   `spec-relay:`), with the names exactly as in the baseline spec (`// spec-relay: billing/invoice | Issue an invoice | Month end
-  closing`). Never weaken, skip or delete a test to make it pass. Tick a task
+  closing`). Never weaken, skip or delete a test to make it pass. For B1 with
+  recorded cases (`spec-relay-compare`, docs/COMPARE.md), the expected
+  values come from the source program only: write the recorder for the old
+  code (or the conversion of its records) and the driver for the new code,
+  and never edit an expected value or add a rule to `rules.json` to make a
+  case pass. The driver calls the same entry point the new code's callers
+  use (the module's public function or service, not a copy or a stub), reads
+  the cases only from its standard input, never opens the case files, and
+  writes logs to stderr. When a case differs, fix the new code; when you
+  believe the recording is wrong, record it again from the source program
+  and report why. Tick a task
   only after its verification passes, and run the boundary check before you
   report.
 - When a task gives you crosscheck rows to fix, fix the code or the test so it

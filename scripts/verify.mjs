@@ -12,11 +12,14 @@
 // - the boundary check: the Boundary check command of conventions.md;
 // - each comparison level (B1, B2, C) that the archived verification.md chose for
 //   the capability's context: the command design.md's Verification table gives it.
+//   A command `spec-relay-compare --cases <dir> --driver "<command>"` runs the
+//   kit's compare.mjs (B1 against cases recorded from the source program), and
+//   its run records { cases: { count, passed, sha256 } }.
 // They stop at the first failure. Progress goes to stderr. Then writes
 // openspec/changes/<change>/verify.json:
 //   { kit, version, change, capability, ranAt, ok,
 //     target: { count, sha256, sameCode: [<sha256>], files: { <path>: <sha256> } },
-//     runs: [{ level, command, exitCode, seconds, timedOut }] }
+//     runs: [{ level, command, exitCode, seconds, timedOut, cases? }] }
 // `target.sha256` is one hash over the target root's files after the run
 // (gate.mjs targetHash); port-done fails, naming the files, when the code
 // changed since. A timeout stops the command and every process it started. The
@@ -34,98 +37,27 @@
 //
 // Prints { ok, receipt, runs, problems } as JSON and exits 0 when every command
 // passed, 1 when one failed or nothing could run, 2 on bad usage.
-import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { changeSchema, cleanValue, configValue, portCapability, targetFiles, targetHash, targetHashes, verifyPlan, VERIFY_RECEIPT } from './gate.mjs';
+import { runCommand, MAX_TIMEOUT_MS, stopAllOnSignal } from './run.mjs';
+import { isCompareCommand, runCompareCommand } from './compare.mjs';
+
+export { runCommand, windowsScript, MAX_TIMEOUT_MS } from './run.mjs';
 
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TAIL_LINES = 40;
-const KEEP_BYTES = 256 * 1024;
 
 const tail = (text) => (text ?? '').replace(/\s+$/, '').split(/\r?\n/).slice(-TAIL_LINES).join('\n');
 
-// Stops a command and everything it started: a test runner's own children
-// (dotnet, java, node) would otherwise keep running and hold files open.
-function killTree(child, platform) {
-  if (platform === 'win32') spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
-  else { try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* gone */ } } }
-}
-
-// The longest timeout setTimeout can wait (about 24.8 days).
-export const MAX_TIMEOUT_MS = 2 ** 31 - 1;
-// After the command's own process ended (or was killed), how long to wait for
-// the output of what it left behind before going on.
-const GRACE_MS = 2000;
-const running = new Set();
-
-// The PowerShell script that runs a command and exits with its status.
-export const windowsScript = (command) => `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ${command}; $ok = $?; if ($LASTEXITCODE) { exit $LASTEXITCODE }; if (-not $ok) { exit 1 }`;
-
-// Runs one command line in the target root and resolves to
-// { exitCode, timedOut, seconds, output } (only the last part of the output).
-export function runCommand(command, cwd, { timeoutMs, platform = process.platform, exec = spawn } = {}) {
-  // UTF-8 output, so the printed tail of a failure is readable on a Japanese
-  // (CP932) console too. `-Command` alone exits 1 for any failure, so the exit
-  // code of a program is passed on, and a failed cmdlet exits 1.
-  const [file, args, extra] = platform === 'win32'
-    ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', windowsScript(command)], {}]
-    : ['/bin/sh', ['-c', command], { detached: true }];
-  const started = Date.now();
-  return new Promise((resolve) => {
-    const chunks = [];
-    let size = 0;
-    let timedOut = false;
-    let settled = false;
-    let exitCode = null;
-    let child;
-    let timer = null;
-    let grace = null;
-    const keep = (chunk) => {
-      chunks.push(chunk); size += chunk.length;
-      while (size > KEEP_BYTES && chunks.length > 1) size -= chunks.shift().length;
-    };
-    const done = (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer); clearTimeout(grace);
-      running.delete(child);
-      child?.stdout?.destroy?.(); child?.stderr?.destroy?.();
-      const output = Buffer.concat(chunks).toString('utf8');
-      resolve({ exitCode: timedOut || typeof exitCode !== 'number' ? -1 : exitCode, timedOut, seconds: Math.round((Date.now() - started) / 100) / 10, output: error ? `${output}\n${error.message}` : output });
-    };
-    try {
-      child = exec(file, args, { cwd, env: process.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], ...extra });
-    } catch (error) { resolve({ exitCode: -1, timedOut: false, seconds: 0, output: error.message }); return; }
-    running.add(child);
-    if (timeoutMs) {
-      timer = setTimeout(() => {
-        timedOut = true;
-        killTree(child, platform);
-        grace = setTimeout(() => done(), GRACE_MS);
-      }, Math.min(timeoutMs, MAX_TIMEOUT_MS));
-    }
-    child.stdout?.on('data', keep);
-    child.stderr?.on('data', keep);
-    child.on('error', (error) => done(error));
-    // A process the command left behind may hold the output open: the command's
-    // own exit decides, and its output is read for a short while after.
-    child.on('exit', (code) => { exitCode = code; clearTimeout(grace); grace = setTimeout(() => done(), GRACE_MS); });
-    child.on('close', () => done());
-  });
-}
-
-// Ctrl+C on verify.mjs stops the command it is running too (on POSIX the
-// command runs in its own process group, which the terminal does not signal).
-function stopAll(signal) {
-  for (const child of running) killTree(child, process.platform);
-  process.exit(signal === 'SIGINT' ? 130 : 143);
-}
+// Runs one level: a `spec-relay-compare ...` command with compare.mjs (level
+// B1 against recorded cases), anything else as a command line.
+export const runLevel = (command, cwd, options) => (isCompareCommand(command) ? runCompareCommand(command, cwd, options) : runCommand(command, cwd, options));
 
 const say = (line) => process.stderr.write(`verify: ${line}\n`);
 
-export async function verify(root, change, { timeoutMs = 60 * 60 * 1000, run = runCommand, progress = say } = {}) {
+export async function verify(root, change, { timeoutMs = 60 * 60 * 1000, run = runLevel, progress = say } = {}) {
   const dir = path.join(root, 'openspec/changes', change);
   if (!fs.existsSync(dir)) return { ok: false, problems: [`change not found: ${change}`] };
   if (changeSchema(dir) !== 'spec-relay-port') return { ok: false, problems: [`${change} is not a port change (schema spec-relay-port)`] };
@@ -147,8 +79,9 @@ export async function verify(root, change, { timeoutMs = 60 * 60 * 1000, run = r
     progress(`${level} (${from}): ${command}`);
     const result = await run(command, cwd, { timeoutMs });
     progress(`${level}: ${result.exitCode === 0 ? 'passed' : result.timedOut ? 'timed out' : `failed, exit code ${result.exitCode}`} in ${result.seconds}s`);
-    runs.push({ level, command, exitCode: result.exitCode, seconds: result.seconds, timedOut: result.timedOut });
-    shown.push({ level, command, from, exitCode: result.exitCode, seconds: result.seconds, ...(result.timedOut ? { timedOut: true } : {}), ...(result.exitCode !== 0 ? { tail: tail(result.output) } : {}) });
+    const cases = result.cases ? { cases: result.cases } : {};
+    runs.push({ level, command, exitCode: result.exitCode, seconds: result.seconds, timedOut: result.timedOut, ...cases });
+    shown.push({ level, command, from, exitCode: result.exitCode, seconds: result.seconds, ...cases, ...(result.timedOut ? { timedOut: true } : {}), ...(result.exitCode !== 0 ? { tail: tail(result.output) } : {}) });
     if (result.exitCode !== 0) break;
   }
   const ok = runs.length === plan.runs.length && runs.every((r) => r.exitCode === 0);
@@ -189,8 +122,7 @@ export function main(argv) {
   }
   const minutes = Number(opts.timeout);
   if (!opts.change || !(minutes > 0) || minutes * 60 * 1000 > MAX_TIMEOUT_MS) return usage();
-  process.once('SIGINT', stopAll);
-  process.once('SIGTERM', stopAll);
+  stopAllOnSignal();
   if (!fs.existsSync(path.join(opts.root, 'openspec'))) {
     console.error(`verify: no openspec/ folder in ${path.resolve(opts.root)}. Run this from the repository root or pass --root DIR.`);
     return 2;

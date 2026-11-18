@@ -23,7 +23,9 @@ artifacts:
         (tests run, passed) and the date in Notes.
       - **Verification levels**: one row per context. For each level the
         archived target design's verification.md chose for it (A always), run
-        it again for every capability of that context together and write
+        it again for every capability of that context together (a B1 command
+        `spec-relay-compare <options>` from a port design.md runs as
+        `node "<kit>/scripts/compare.mjs" <options> --cwd <target root>`) and write
         `pass`, `fail` or `not-run: <reason>` (the source program could not be
         run, for example). A level not chosen stays `-`. Every `not-run`
         needs a `verification` row in leftovers.md.

@@ -310,7 +310,7 @@ test('on Windows the commands run in Windows PowerShell for this process only, w
   };
   const result = await runCommand('npm test', 'C:/repo/ts', { platform: 'win32', exec });
   assert.equal(result.exitCode, 0);
-  assert.deepEqual(calls[0], ['powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '[Console]::OutputEncoding = [Text.Encoding]::UTF8; npm test; $ok = $?; if ($LASTEXITCODE) { exit $LASTEXITCODE }; if (-not $ok) { exit 1 }'], 'C:/repo/ts']);
+  assert.deepEqual(calls[0], ['powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', '[Console]::OutputEncoding = [Text.Encoding]::UTF8; [Console]::InputEncoding = [Text.Encoding]::UTF8; npm test; $ok = $?; if ($LASTEXITCODE) { exit $LASTEXITCODE }; if (-not $ok) { exit 1 }'], 'C:/repo/ts']);
 });
 
 test('in a git repository, files git ignores are not target code, and a nested repository is read from disk', { skip: spawnSync('git', ['--version']).status !== 0 && 'git not found' }, () => {
