@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { render, markdown, inline, parseRefs, parseReview, parseQuestions, diffChars, commonIndent, timeStamp, main } from '../scripts/render.mjs';
+import { render, markdown, inline, parseRefs, parseReview, parseQuestions, diffChars, commonIndent, timeStamp, main, capabilities } from '../scripts/render.mjs';
 import { tempDir, write, quiet, crlf } from './helpers.mjs';
 
 const CHANGE = 'openspec/changes/extract-billing-invoice';
@@ -338,4 +338,88 @@ test('the page works without script and leaves the reader in control', () => {
 
 test('the time stamp is local time with its offset', () => {
   assert.match(timeStamp(new Date('2026-11-10T13:41:00Z')), /^2026-11-1[01] \d\d:\d\d UTC[+-]\d\d:\d\d$/);
+});
+
+// ---- the approved specs
+
+const BASELINE = '## Purpose\n\nComputes invoice totals.\n\n## Requirements\n\n### Requirement: Total\nThe system SHALL add the lines.\n\n#### Scenario: two lines\n- **WHEN** 100 x 3 and 55 x 1\n- **THEN** `355`\n\n### Requirement: Reject empty\nThe system SHALL reject an invoice without lines.\n';
+const ARCHIVED = 'openspec/changes/archive/2026-11-10-extract-billing-invoice';
+
+function specs() {
+  const dir = repo();
+  fs.rmSync(path.join(dir, CHANGE), { recursive: true });
+  write(dir, 'openspec/specs/billing/invoice/spec.md', BASELINE);
+  write(dir, 'openspec/specs/billing/payment/spec.md', '## Purpose\nTakes payments.\n\n## Requirements\n\n### Requirement: Card\nThe system SHALL take cards.\n');
+  write(dir, 'openspec/specs/auth/login/spec.md', '## Purpose\nSigns people in.\n\n## Requirements\n');
+  write(dir, `${ARCHIVED}/.openspec.yaml`, 'schema: spec-relay-extract\n');
+  write(dir, `${ARCHIVED}/trace.md`, TRACE);
+  write(dir, `${ARCHIVED}/review.md`, REVIEW);
+  write(dir, `${ARCHIVED}/screens.md`, '# Screens\n\n### Screen: Entry\n- **Entry**: menu\n');
+  return dir;
+}
+
+test('an approved spec reads as a page with its scenarios, source and screens, and no review marks', () => {
+  const dir = specs();
+  assert.deepEqual(render({ root: dir, spec: 'billing/invoice' }), { ok: true, out: 'openspec/spec-relay/views/spec-billing-invoice.html' });
+  const page = html(dir, 'spec-billing-invoice');
+  assert.match(page, /<p class="kind">仕様<\/p>\s*<h1>billing\/invoice<\/h1>/);
+  assert.match(page, /Computes invoice totals\./);
+  assert.match(page, /<dt>要件<\/dt><dd>2<\/dd><dt>シナリオ<\/dt><dd>1<\/dd><dt>画面<\/dt><dd>1<\/dd><dt>根拠<\/dt><dd class="mono">2026-11-10-extract-billing-invoice<\/dd>/);
+  assert.match(page, /class="item k-req" id="R1"[\s\S]*?Total[\s\S]*?<dl class="gwt">/);
+  assert.match(page, /\/\/ 合計/, 'the source code from the archived trace.md');
+  assert.match(page, /id="R2"[\s\S]*?trace\.md に記載がありません/);
+  assert.match(page, /class="item small k-screen" id="S1"|class="item k-screen" id="S1"/);
+  assert.doesNotMatch(page, /class="seal|class="left"|class="filter"|id="keys-on"|class="dock"|class="all-clear"|未確認/, 'nothing about review');
+  assert.match(page, /<input id="q" type="search"/);
+  assert.match(page, /<li data-for="R1"><a href="#R1">/);
+  assert.match(page, /正は openspec\/specs\/ の Markdown です/);
+  assert.match(page, /Content-Security-Policy" content="default-src 'none'/);
+});
+
+test('an amendment in progress is shown on the spec it would change, and an archived one counts', () => {
+  const dir = specs();
+  write(dir, 'openspec/changes/archive/2026-11-12-amend-billing-invoice/specs/billing/invoice/spec.md', '## MODIFIED Requirements\n');
+  write(dir, 'openspec/changes/archive/2026-11-12-amend-billing-invoice/trace.md', '| Requirement | Source | Tests |\n|---|---|---|\n| Reject empty | src/invoice.php:invoice_total:3 | tests/a.php |\n');
+  write(dir, 'openspec/changes/amend-billing-invoice-2/specs/billing/invoice/spec.md', '## MODIFIED Requirements\n\n### Requirement: Total\nThe system SHALL add the lines and round down.\n\n#### Scenario: two lines\n- **WHEN** 100 x 3 and 55 x 1\n- **THEN** `355`\n\n## ADDED Requirements\n\n### Requirement: Zero rate\nThe system SHALL accept 0.\n');
+  write(dir, 'openspec/changes/amend-other/specs/billing/payment/spec.md', '## ADDED Requirements\n\n### Requirement: Cash\nx\n');
+  render({ root: dir, spec: 'billing/invoice' });
+  const page = html(dir, 'spec-billing-invoice');
+  assert.match(page, /2026-11-10-extract-billing-invoice<br>2026-11-12-amend-billing-invoice/);
+  assert.match(page, /<dt>修正中<\/dt><dd class="mono">amend-billing-invoice-2<\/dd>/);
+  assert.match(page, /id="R1"[\s\S]*?＊ 変更[\s\S]*?修正中の変更があります（amend-billing-invoice-2）[\s\S]*?<ins> and round down<\/ins>/);
+  assert.match(page, /id="R2"[\s\S]*?tests\/a\.php/, 'the archived amendment\'s trace is used');
+  assert.match(page, /id="R3"[\s\S]*?＋ 追加[\s\S]*?Zero rate/);
+  assert.doesNotMatch(page, /Cash/);
+});
+
+test('--spec all writes the list and every page, grouped by context and linked', () => {
+  const dir = specs();
+  assert.deepEqual(capabilities(dir), ['auth/login', 'billing/invoice', 'billing/payment']);
+  const result = render({ root: dir, spec: 'all' });
+  assert.deepEqual(result, { ok: true, out: 'openspec/spec-relay/views/specs.html', pages: ['openspec/spec-relay/views/spec-auth-login.html', 'openspec/spec-relay/views/spec-billing-invoice.html', 'openspec/spec-relay/views/spec-billing-payment.html'] });
+  const index = html(dir, 'specs');
+  assert.match(index, /<h1>移行の仕様<\/h1>/);
+  assert.match(index, /<h2 id="g1">auth<span class="n">1<\/span><\/h2>[\s\S]*<h2 id="g2">billing<span class="n">2<\/span><\/h2>/);
+  assert.match(index, /<h3><a href="spec-billing-invoice\.html">billing\/invoice<\/a><\/h3>/);
+  assert.match(index, /<summary>要件 2<\/summary><ol><li>Total<\/li><li>Reject empty<\/li><\/ol>/);
+  assert.match(html(dir, 'spec-billing-payment'), /<p class="nav"><a href="specs\.html">← 仕様の一覧<\/a><\/p>/);
+  assert.equal(render({ root: dir, spec: 'all', out: 'x.html' }).ok, false);
+});
+
+test('a spec outside openspec/specs, or one that does not exist, is refused', () => {
+  const dir = specs();
+  for (const bad of ['../billing', 'billing/../../x', 'billing/none', 'a:b']) {
+    const result = render({ root: dir, spec: bad });
+    assert.equal(result.ok, false, bad);
+  }
+  assert.equal(quiet(() => main(['--spec', 'billing/invoice', '--change', 'x'])), 2);
+  assert.equal(quiet(() => main(['--root', dir, '--spec', 'billing/invoice'])), 0);
+});
+
+test('with no specs the list says so', () => {
+  const dir = tempDir();
+  const result = render({ root: dir, spec: 'all', lang: 'en' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.pages, []);
+  assert.match(html(dir, 'specs'), /No specs yet/);
 });

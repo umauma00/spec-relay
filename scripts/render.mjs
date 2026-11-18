@@ -59,6 +59,11 @@ const LABELS = {
     ledgerOpen: (n) => `判定がない、または gap の箇所が ${n} 件あります。gate はまだ通りません。`,
     ledgerQuestions: '質問に回した箇所', ledgerUnmarked: '「動作なし」としたが、目印（DB 書き込み・例外など）がある箇所。念のため目を通してください',
     ledgerAll: '台帳のすべての行',
+    specKind: '仕様', specIndexKind: '仕様の一覧', specIndexTitle: '移行の仕様', capability: 'capability', scenarios: 'シナリオ', basis: '根拠', amendingNow: '修正中',
+    amending: (c) => `修正中の変更があります（${c}）。archive するまで、この仕様はまだ変わっていません`,
+    search: '検索', searchHint: '要件名・本文で絞り込む', noMatch: '一致する項目はありません。',
+    specNote: 'この画面は表示用です。正は openspec/specs/ の Markdown です。承認済みの仕様を変えるのは amend の変更だけです。',
+    toIndex: '← 仕様の一覧', reqList: '要件の一覧', reqCount: (n) => `要件 ${n}`, noSpecs: '仕様はまだありません（openspec/specs/ が空です）。',
   },
   en: {
     kinds: { 'spec-relay-extract': 'Extract review', 'spec-relay-survey': 'Survey review', 'spec-relay-target': 'Target design review', 'spec-relay-amend': 'Amend review', 'spec-relay-port': 'Port', 'spec-relay-finish': 'Finish review' },
@@ -91,6 +96,11 @@ const LABELS = {
     ledgerOpen: (n) => `${n} sites have no verdict or are gaps; the gate does not pass yet.`,
     ledgerQuestions: 'Sites moved to questions', ledgerUnmarked: 'Sites judged "no behavior" that hold markers (a database write, an error...). Glance over them',
     ledgerAll: 'Every row of the ledger',
+    specKind: 'Spec', specIndexKind: 'Specs', specIndexTitle: 'Migration specs', capability: 'Capability', scenarios: 'Scenarios', basis: 'Basis', amendingNow: 'Being amended',
+    amending: (c) => `An amendment is in progress (${c}). Until it is archived, this spec has not changed yet`,
+    search: 'Search', searchHint: 'Filter by requirement name or text', noMatch: 'No item matches.',
+    specNote: 'This page is a view. The Markdown under openspec/specs/ is the source of truth. Only an amend change changes an approved spec.',
+    toIndex: '← All specs', reqList: 'Requirements', reqCount: (n) => `${n} requirements`, noSpecs: 'No specs yet (openspec/specs/ is empty).',
   },
 };
 
@@ -798,6 +808,129 @@ function genericChangeView(dir) {
   };
 }
 
+// ---------------------------------------------------------------- specs
+
+// The baseline specs a person reads after the reviews: openspec/specs/<context>/<name>/spec.md.
+const changeKey = (capability) => capability.split('/').join('-');
+const SPECS = 'openspec/specs';
+
+// Every capability with a baseline spec, as "<context>/<name>", in code-point order.
+export function capabilities(root) {
+  const base = path.join(root, SPECS);
+  return walk(base).filter((f) => path.basename(f) === 'spec.md')
+    .map((f) => path.relative(base, path.dirname(f)).split(path.sep).join('/')).filter(Boolean);
+}
+
+// A capability as written by a person or an agent: "billing/invoice". Null when
+// it could name a path outside openspec/specs.
+function capabilityPath(capability) {
+  const parts = String(capability).replace(/\\/g, '/').split('/').filter(Boolean);
+  if (!parts.length || parts.some((p) => p === '.' || p === '..' || !/^[^<>:"|?*\u0000-\u001f]+$/.test(p))) return null;
+  return parts.join('/');
+}
+
+// Archived amendments of the capability (oldest first), then the active ones.
+// An amendment counts when its delta names the capability (specs/<capability>/spec.md).
+function amendments(root, capability) {
+  const has = (dir) => fs.existsSync(path.join(dir, 'specs', ...capability.split('/'), 'spec.md'));
+  const list = [];
+  const archive = path.join(root, 'openspec/changes/archive');
+  let entries = [];
+  try { entries = fs.readdirSync(archive).sort(); } catch { /* none */ }
+  for (const entry of entries) {
+    const m = entry.match(/^\d{4}-\d{2}-\d{2}-(amend-.+)$/);
+    if (m && has(path.join(archive, entry))) list.push({ dir: path.join(archive, entry), name: m[1], archived: true });
+  }
+  let active = [];
+  try { active = fs.readdirSync(path.join(root, 'openspec/changes')).sort(); } catch { /* none */ }
+  for (const entry of active.filter((e) => e.startsWith('amend-'))) {
+    if (has(path.join(root, 'openspec/changes', entry))) list.push({ dir: path.join(root, 'openspec/changes', entry), name: entry, archived: false });
+  }
+  return list;
+}
+
+const readItem = (label, anchor, title, kind, body, notes, heading = inline(title)) => ({
+  id: label, letter: label[0], label, anchor, title, name: plainText(title), done: true,
+  html: `<article class="item${body.html ? '' : ' small'} k-${kind}${body.removed ? ' is-removed' : ''}" id="${escapeHtml(anchor)}" tabindex="-1">
+<header class="item-head"><span class="id">${escapeHtml(label)}</span><h3>${body.tag}${heading}</h3></header>
+${cautionsHtml(notes)}${body.html}
+</article>`,
+});
+
+// One capability's baseline spec: its requirements with their scenarios and the
+// source code they came from (trace.md of the archived extract change and of
+// every amendment), its screens, and what an amendment in progress would change.
+export function specView({ root, capability, L, outDir }) {
+  const specText = readText(path.join(root, SPECS, ...capability.split('/'), 'spec.md'));
+  if (specText === null) return null;
+  const spec = parseSpec(specText);
+  const extract = archivedChange(root, `extract-${changeKey(capability)}`);
+  const amends = amendments(root, capability);
+  const trace = parseTrace(extract ? readText(path.join(extract, 'trace.md')) : null);
+  for (const a of amends) for (const [key, value] of parseTrace(readText(path.join(a.dir, 'trace.md')))) trace.set(key, value);
+  const pending = amends.filter((a) => !a.archived);
+  const delta = new Map();
+  const added = [];
+  for (const a of pending) {
+    for (const req of parseSpec(readText(path.join(a.dir, 'specs', ...capability.split('/'), 'spec.md')) ?? '').requirements) {
+      if (req.kind === 'added') added.push({ req, change: a.name });
+      else delta.set(norm(req.name), { req, change: a.name });
+    }
+  }
+  const old = (req) => spec.requirements.find((r) => norm(r.name) === norm(req.name)) ?? null;
+  const c = { root, L, outDir, amend: false, baseline: old, cross: new Map(), trace };
+  const anchors = new Set();
+  const anchor = (id) => { let a = id; for (let k = 2; anchors.has(a); k += 1) a = `${id}-${k}`; anchors.add(a); return a; };
+
+  const reqs = spec.requirements.map((req, k) => {
+    const change = delta.get(norm(req.name));
+    const body = requirementBody({ data: change ? change.req : req }, change ? { ...c, amend: true } : c);
+    return readItem(`R${k + 1}`, anchor(`R${k + 1}`), req.name, 'req', body, [...(change ? [L.amending(change.change)] : []), ...body.notes]);
+  });
+  added.forEach(({ req, change }, k) => {
+    const n = spec.requirements.length + k + 1;
+    const body = requirementBody({ data: req }, { ...c, amend: true });
+    reqs.push(readItem(`R${n}`, anchor(`R${n}`), req.name, 'req', body, [L.amending(change), ...body.notes]));
+  });
+  const screens = extract ? blocks(readText(path.join(extract, 'screens.md')), 'Screen') : [];
+  const shown = screens.map((screen, k) => readItem(`S${k + 1}`, anchor(`S${k + 1}`), screen.name, 'screen', screenBody({ data: screen }, c), []));
+
+  const groups = [{ title: L.requirements, items: reqs }, { title: L.screens, items: shown }].filter((g) => g.items.length);
+  groups.forEach((g, n) => { g.id = `g${n + 1}`; });
+  const scenarios = spec.requirements.reduce((sum, r) => sum + r.scenarios.length, 0);
+  const basis = [extract ? path.basename(extract) : '', ...amends.filter((a) => a.archived).map((a) => path.basename(a.dir))].filter(Boolean);
+  const brief = `<header class="brief">
+${spec.purpose.trim() ? `<div class="purpose"><span class="label">${escapeHtml(L.purpose)}</span>${markdown(spec.purpose)}</div>` : ''}
+<dl class="facts"><dt>${escapeHtml(L.capability)}</dt><dd class="mono">${escapeHtml(capability)}</dd><dt>${escapeHtml(L.requirements)}</dt><dd>${spec.requirements.length}</dd><dt>${escapeHtml(L.scenarios)}</dt><dd>${scenarios}</dd>${screens.length ? `<dt>${escapeHtml(L.screens)}</dt><dd>${screens.length}</dd>` : ''}${basis.length ? `<dt>${escapeHtml(L.basis)}</dt><dd class="mono">${basis.map(escapeHtml).join('<br>')}</dd>` : ''}${pending.length ? `<dt>${escapeHtml(L.amendingNow)}</dt><dd class="mono">${pending.map((a) => escapeHtml(a.name)).join('<br>')}</dd>` : ''}</dl>
+</header>`;
+  return { groups, docs: [], brief, imageDir: extract ?? path.join(root, SPECS, ...capability.split('/')) };
+}
+
+// Every capability, grouped by its context, with its purpose and the names of its
+// requirements (so the search finds a capability by a requirement), each linking
+// to its own page next to this one.
+export function specIndex({ root, L, list, href }) {
+  const byContext = new Map();
+  for (const capability of list) {
+    const context = capability.includes('/') ? capability.split('/')[0] : '';
+    if (!byContext.has(context)) byContext.set(context, []);
+    byContext.get(context).push(capability);
+  }
+  let n = 0;
+  const groups = [...byContext].map(([context, caps], g) => ({
+    id: `g${g + 1}`, title: context || L.other,
+    items: caps.map((capability) => {
+      const spec = parseSpec(readText(path.join(root, SPECS, ...capability.split('/'), 'spec.md')) ?? '');
+      const purpose = oneLine(spec.purpose.split(/\r?\n/));
+      const link = `<a href="${escapeHtml(href(capability))}">${escapeHtml(capability)}</a>`;
+      const body = { tag: '', notes: [], html: `<div class="q-body">${purpose ? `<p class="q-text">${inline(purpose)}</p>` : ''}${spec.requirements.length ? `<details class="reqs"><summary>${escapeHtml(L.reqCount(spec.requirements.length))}</summary><ol>${spec.requirements.map((r) => `<li>${inline(r.name)}</li>`).join('')}</ol></details>` : ''}</div>` };
+      n += 1;
+      return readItem(String(n), `c${n}`, capability, 'cap', body, [], link);
+    }),
+  }));
+  return { groups, docs: [], brief: groups.length ? '' : `<p class="caution">${escapeHtml(L.noSpecs)}</p>` };
+}
+
 // ---------------------------------------------------------------- page
 
 // Colour rule: ink is what the artifacts say, vermilion (--shu) marks only what
@@ -845,6 +978,13 @@ main{padding:16px 40px 120px;max-width:1640px}}
 .remain-sub{margin:4px 0 0;font-size:13px;color:var(--ink2)}
 .next{display:inline-block;margin:10px 0 0;padding:7px 12px;border:1.5px solid var(--ink);color:var(--ink);font:600 14px/1.3 var(--ui);text-decoration:none}
 .next:hover{background:var(--ink);color:var(--paper)}
+.nav{margin:10px 0 0;font-size:14px}
+.search{display:none;margin:16px 0 0}.js .search{display:block}
+.search input{display:block;width:100%;margin-top:4px;padding:7px 10px;border:1.5px solid var(--ink);border-radius:0;background:var(--paper);color:var(--ink);font:15px/1.4 var(--ui)}
+.no-match{margin:0 0 20px;color:var(--ink2)}
+.group:has(.item):not(:has(.item:not([hidden]))){display:none}
+.toc li[hidden]{display:none}
+.reqs{margin-top:4px;font-size:14px}.reqs summary{cursor:pointer;color:var(--ink2)}.reqs ol{margin:4px 0 0;padding-left:1.6em}
 
 .sheet{margin:14px 0 0;padding:0;list-style:none;display:grid;grid-template-columns:1.6em minmax(0,1fr);gap:6px 4px;align-items:start}
 .sheet .g{font:600 12px/18px var(--mono);color:var(--ink2)}
@@ -1011,7 +1151,8 @@ footer{border-top:1px solid var(--rule);padding:12px 0 0;color:var(--ink2);font-
 body{font-size:10.5pt}
 @page{margin:14mm}
 .shell{display:block}.rail{display:block;position:static;height:auto;overflow:visible;border:0;border-bottom:2px solid #000;padding:0 0 8pt;background:none}
-.filter,.toc,.keys,.dock,.next,.skip{display:none!important}
+.filter,.toc,.keys,.dock,.next,.skip,.search,.nav,.no-match{display:none!important}
+.item[hidden],.group{display:block!important}
 main{padding:0;max-width:none}
 body:has(#f-open:checked) main .item.is-done{display:block}
 .claim{position:static;max-height:none;overflow:visible}
@@ -1117,6 +1258,26 @@ const SCRIPT = String.raw`(() => {
     dock.querySelector('.prev').addEventListener('click', () => step(-1, true));
     dock.querySelector('.primary').addEventListener('click', () => step(1, true));
   }
+  // Read mode: the search box hides the items (and their contents lines) whose text does not match.
+  const q = d.getElementById('q');
+  if (q) {
+    const none = d.getElementById('no-match');
+    const filter = () => {
+      const words = q.value.toLowerCase().split(/\s+/).filter(Boolean);
+      let shown = 0;
+      d.querySelectorAll('main .item').forEach((el) => {
+        const text = el.textContent.toLowerCase();
+        el.hidden = !words.every((w) => text.includes(w));
+        if (!el.hidden) shown += 1;
+        const li = d.querySelector('.toc li[data-for="' + CSS.escape(el.id) + '"]');
+        if (li) li.hidden = el.hidden;
+      });
+      if (none) none.hidden = shown > 0;
+      pinned = null; sync();
+    };
+    q.addEventListener('input', filter);
+    if (q.value) filter();
+  }
   // The browser scrolls to the fragment by itself after loading; pin the item once that is done.
   const fromHash = () => { const el = location.hash ? itemOf(location.hash) : null; if (el) go(el); else { pinned = null; sync(); } };
   addEventListener('hashchange', fromHash);
@@ -1124,10 +1285,13 @@ const SCRIPT = String.raw`(() => {
   fromHash();
 })();`;
 
-export function page({ title, kind, meta, brief = '', groups = [], docs = [], L, lang }) {
+// mode 'review' shows what review.md records (progress, the filter, the keys, the
+// dock); mode 'read' is for approved specs: no seals or progress, a search box instead.
+export function page({ title, kind, meta, brief = '', groups = [], docs = [], L, lang, mode = 'review', nav = '', note = L.note }) {
   const all = groups.flatMap((g) => g.items);
   const open = all.filter((x) => !x.done);
-  const reviewed = all.length > 0;
+  const read = mode === 'read';
+  const reviewed = !read && all.length > 0;
   const count = (list) => `${list.filter((x) => x.done).length} / ${list.length}`;
   const state = (x) => (x.done ? 'is-done' : 'is-open');
   const word = (x) => escapeHtml(x.done ? L.confirmed : L.open);
@@ -1145,10 +1309,14 @@ ${open.length ? `<a class="next" href="#${escapeHtml(open[0].anchor)}">${escapeH
 <label><input type="radio" name="f" id="f-open">${escapeHtml(L.onlyOpen)}<span class="n">${open.length}</span></label>
 </fieldset>` : '';
 
+  const search = read && all.length ? `<div class="search"><label class="label" for="q">${escapeHtml(L.search)}</label><input id="q" type="search" placeholder="${escapeHtml(L.searchHint)}" autocomplete="off"></div>` : '';
+  const tally = (g) => (read ? String(g.items.length) : count(g.items));
   const toc = `<details class="toc"><summary>${escapeHtml(L.toc)}</summary>
 <nav aria-label="${escapeHtml(L.toc)}">
-${groups.map((g) => `<h2><a href="#${g.id}">${escapeHtml(g.title)}</a><span class="n">${count(g.items)}</span></h2>
-<ol>${g.items.map((x) => `<li class="${state(x)}"><a href="#${escapeHtml(x.anchor)}"><span class="id">${escapeHtml(x.label)}</span><span class="t">${escapeHtml(x.name)}</span><span class="st" aria-hidden="true">${escapeHtml(x.done ? L.sealDone : L.sealOpen)}</span><span class="vh">${word(x)}</span></a></li>`).join('')}</ol>`).join('\n')}
+${groups.map((g) => `<h2><a href="#${g.id}">${escapeHtml(g.title)}</a><span class="n">${tally(g)}</span></h2>
+<ol>${g.items.map((x) => (read
+    ? `<li data-for="${escapeHtml(x.anchor)}"><a href="#${escapeHtml(x.anchor)}"><span class="id">${escapeHtml(x.label)}</span><span class="t">${escapeHtml(x.name)}</span></a></li>`
+    : `<li class="${state(x)}"><a href="#${escapeHtml(x.anchor)}"><span class="id">${escapeHtml(x.label)}</span><span class="t">${escapeHtml(x.name)}</span><span class="st" aria-hidden="true">${escapeHtml(x.done ? L.sealDone : L.sealOpen)}</span><span class="vh">${word(x)}</span></a></li>`)).join('')}</ol>`).join('\n')}
 ${docs.length ? `${reviewed ? `<h2><span>${escapeHtml(L.appendix)}</span></h2>` : ''}
 <ol>${docs.map((s) => `<li class="plain"><a href="#${escapeHtml(s.id)}"><span class="t">${escapeHtml(s.title)}</span></a></li>`).join('')}</ol>` : ''}
 </nav></details>`;
@@ -1158,9 +1326,10 @@ ${docs.length ? `${reviewed ? `<h2><span>${escapeHtml(L.appendix)}</span></h2>` 
 
   const body = [
     brief,
-    ...groups.map((g) => `<section class="group"><h2 id="${g.id}">${escapeHtml(g.title)}<span class="n">${escapeHtml(L.confirmed)} ${count(g.items)}</span></h2>
+    read && all.length ? `<p class="no-match" id="no-match" hidden>${escapeHtml(L.noMatch)}</p>` : '',
+    ...groups.map((g) => `<section class="group"><h2 id="${g.id}">${escapeHtml(g.title)}<span class="n">${read ? g.items.length : `${escapeHtml(L.confirmed)} ${count(g.items)}`}</span></h2>
 ${g.items.map((x) => x.html).join('\n')}
-<p class="all-clear">${escapeHtml(L.allClear)}</p>
+${read ? '' : `<p class="all-clear">${escapeHtml(L.allClear)}</p>`}
 </section>`),
     ...docs.map((s) => `<section class="group" id="${escapeHtml(s.id)}"><h2>${reviewed ? `${escapeHtml(L.appendix)} — ` : ''}${escapeHtml(s.title)}</h2>
 ${s.html}
@@ -1185,13 +1354,15 @@ ${s.html}
 <p class="kind">${escapeHtml(kind)}</p>
 <h1>${escapeHtml(title)}</h1>
 <p class="meta">${escapeHtml(meta)}</p>
+${nav ? `<p class="nav">${nav}</p>` : ''}
 ${progress}
+${search}
 ${toc}
 ${keys}
 </aside>
 <main id="main">
 ${body}
-<footer>${escapeHtml(L.note)}</footer>
+<footer>${escapeHtml(note)}</footer>
 </main>
 </div>
 ${reviewed ? `<div class="dock"><button type="button" class="prev" aria-label="${escapeHtml(L.prevOpen)}">↑</button><span class="count"><b>${open.length}</b>${escapeHtml(L.remainShort)}</span><button type="button" class="primary">${escapeHtml(L.nextOpen)}</button></div>` : ''}
@@ -1218,19 +1389,71 @@ export function timeStamp(now) {
   return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ${p(now.getHours())}:${p(now.getMinutes())} UTC${offset < 0 ? '-' : '+'}${p(Math.floor(abs / 60))}:${p(abs % 60)}`;
 }
 
-export function render({ root = process.cwd(), change, file, out, lang, now = new Date() }) {
+const VIEWS = 'openspec/spec-relay/views';
+
+function writeView(root, resolved, html) {
+  const views = path.resolve(root, VIEWS);
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  if (path.dirname(resolved) === views && !fs.existsSync(path.join(views, '.gitignore'))) {
+    fs.writeFileSync(path.join(views, '.gitignore'), '# Generated by spec-relay render.mjs; the Markdown is the source of truth.\n*\n');
+  }
+  fs.writeFileSync(resolved, html);
+}
+
+// Builds with images in Markdown resolved against docDir and linked relative to the page.
+function withImages(root, docDir, resolved, build) {
+  imageSource = (src) => {
+    const abs = insideRoot(root, path.join(path.relative(path.resolve(root), docDir), src));
+    return abs ? path.relative(path.dirname(resolved), abs).split(path.sep).map(encodeURIComponent).join('/') : null;
+  };
+  try { return build(path.dirname(resolved)); } finally { imageSource = (src) => src; }
+}
+
+const specFile = (capability) => `spec-${changeKey(capability)}.html`;
+
+// --spec CAPABILITY writes one capability's page; --spec all writes specs.html
+// (the list) and a page for every capability next to it.
+function renderSpecs({ root, spec, out, L, code, stamp }) {
+  const views = path.resolve(root, VIEWS);
+  const list = capabilities(root);
+  const one = (capability, resolved, nav) => {
+    const html = withImages(root, path.join(root, SPECS, ...capability.split('/')), resolved, (outDir) => {
+      const view = specView({ root, capability, L, outDir });
+      return page({ title: capability, kind: L.specKind, meta: stamp, ...view, L, lang: code, mode: 'read', nav, note: L.specNote });
+    });
+    writeView(root, resolved, html);
+    return path.relative(root, resolved).replace(/\\/g, '/');
+  };
+  if (spec === 'all') {
+    if (out) return { ok: false, problems: ['--out cannot be used with --spec all; the pages go to openspec/spec-relay/views/'] };
+    const index = path.join(views, 'specs.html');
+    const view = specIndex({ root, L, list, href: specFile });
+    writeView(root, index, page({ title: L.specIndexTitle, kind: L.specIndexKind, meta: stamp, ...view, L, lang: code, mode: 'read', note: L.specNote }));
+    const pages = list.map((capability) => one(capability, path.join(views, specFile(capability)), `<a href="specs.html">${escapeHtml(L.toIndex)}</a>`));
+    return { ok: true, out: path.relative(root, index).replace(/\\/g, '/'), pages };
+  }
+  const capability = capabilityPath(spec);
+  if (!capability) return { ok: false, problems: [`not a capability: ${spec}`] };
+  if (!list.includes(capability)) return { ok: false, problems: [`spec not found: ${SPECS}/${capability}/spec.md`] };
+  return { ok: true, out: one(capability, path.resolve(root, out ?? path.join(views, specFile(capability))), '') };
+}
+
+export function render({ root = process.cwd(), change, file, spec, out, lang, now = new Date() }) {
   const code = pickLang(root, lang);
   const L = LABELS[code];
   const stamp = `${L.generated} ${timeStamp(now)}`;
-  const views = path.resolve(root, 'openspec/spec-relay/views');
+  const views = path.resolve(root, VIEWS);
+  if (spec) return renderSpecs({ root, spec, out, L, code, stamp });
   let build;
   let name;
+  let docDir;
   if (change) {
     const found = findChange(root, change);
     if (!found) return { ok: false, problems: [`change not found: ${change}`] };
     const schema = readText(path.join(found.dir, '.openspec.yaml')) === null ? '' : changeSchema(found.dir);
     const reviewed = fs.existsSync(path.join(found.dir, 'review.md'));
     name = change;
+    docDir = found.dir;
     build = (outDir) => {
       const view = reviewed ? reviewView({ root, dir: found.dir, schema: schema || 'spec-relay-extract', L, outDir }) : genericChangeView(found.dir);
       const meta = [schema, found.archived ? L.archived : '', stamp].filter(Boolean).join(' · ');
@@ -1240,40 +1463,30 @@ export function render({ root = process.cwd(), change, file, out, lang, now = ne
     const text = readText(path.resolve(root, file));
     if (text === null) return { ok: false, problems: [`file not found: ${file}`] };
     name = path.basename(file).replace(/\.md$/i, '');
+    docDir = path.dirname(path.resolve(root, file));
     build = () => page({ title: name, kind: L.document, meta: stamp, docs: [{ id: 'doc', title: name, html: `<div class="doc">${markdown(text, { headingOffset: 2 })}</div>` }], L, lang: code });
-  } else return { ok: false, problems: ['pass --change NAME or --file PATH'] };
+  } else return { ok: false, problems: ['pass --change NAME, --file PATH or --spec CAPABILITY|all'] };
 
   const resolved = path.resolve(root, out ?? path.join(views, `${name}.html`));
-  const docDir = change ? findChange(root, change).dir : path.dirname(path.resolve(root, file));
-  imageSource = (src) => {
-    const abs = insideRoot(root, path.join(path.relative(path.resolve(root), docDir), src));
-    return abs ? path.relative(path.dirname(resolved), abs).split(path.sep).map(encodeURIComponent).join('/') : null;
-  };
-  let html;
-  try { html = build(path.dirname(resolved)); } finally { imageSource = (src) => src; }
-  fs.mkdirSync(path.dirname(resolved), { recursive: true });
-  if (path.dirname(resolved) === views && !fs.existsSync(path.join(views, '.gitignore'))) {
-    fs.writeFileSync(path.join(views, '.gitignore'), '# Generated by spec-relay render.mjs; the Markdown is the source of truth.\n*\n');
-  }
-  fs.writeFileSync(resolved, html);
+  writeView(root, resolved, withImages(root, docDir, resolved, build));
   return { ok: true, out: path.relative(root, resolved).replace(/\\/g, '/') };
 }
 
 export function main(argv) {
   const opts = {};
   for (let i = 0; i < argv.length; i += 2) {
-    const key = { '--change': 'change', '--file': 'file', '--root': 'root', '--out': 'out', '--lang': 'lang' }[argv[i]];
+    const key = { '--change': 'change', '--file': 'file', '--spec': 'spec', '--root': 'root', '--out': 'out', '--lang': 'lang' }[argv[i]];
     if (!key || argv[i + 1] === undefined) return usage();
     opts[key] = argv[i + 1];
   }
-  if (!opts.change === !opts.file) return usage();
+  if ([opts.change, opts.file, opts.spec].filter(Boolean).length !== 1) return usage();
   const result = render(opts);
   console.log(JSON.stringify(result, null, 2));
   return result.ok ? 0 : 1;
 }
 
 function usage() {
-  console.error('Usage: node render.mjs --change NAME | --file PATH.md [--root DIR] [--out FILE] [--lang ja|en]');
+  console.error('Usage: node render.mjs --change NAME | --file PATH.md | --spec CAPABILITY|all [--root DIR] [--out FILE] [--lang ja|en]');
   return 2;
 }
 

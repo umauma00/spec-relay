@@ -1,6 +1,6 @@
 ---
 name: spec-relay-view
-description: Turn spec-relay's Markdown artifacts (an OpenSpec change or one Markdown file) into a fixed-design HTML page for a person to review. Use before asking a person to review spec-relay artifacts, and whenever they ask to see them as HTML.
+description: Turn spec-relay's Markdown artifacts (an OpenSpec change, the approved specs, or one Markdown file) into a fixed-design HTML page for a person to review or read. Use before asking a person to review spec-relay artifacts, and whenever they ask to see them or the specs as HTML.
 user-invocable: true
 ---
 
@@ -34,6 +34,8 @@ under PowerShell):
 ```text
 node "<kit>/scripts/render.mjs" --change <change-name>
 node "<kit>/scripts/render.mjs" --file <path/to/file.md>
+node "<kit>/scripts/render.mjs" --spec <context>/<name>
+node "<kit>/scripts/render.mjs" --spec all
 ```
 
 - `--change` finds the change under `openspec/changes/`, or its newest copy under
@@ -54,6 +56,22 @@ node "<kit>/scripts/render.mjs" --file <path/to/file.md>
     that names nothing. Tell the person about these cautions; do not hide them.
   Any other change (a port) gets each of its Markdown files in order, without
   progress.
+- `--spec` shows the approved specs under `openspec/specs/` for reading, after
+  the reviews. `--spec <context>/<name>` writes one capability's page
+  (`spec-<context>-<name>.html`); `--spec all` writes `specs.html`, a list of
+  every capability grouped by context, and a page for each, linked from it.
+  - A capability page has the same design as a review page, without seals,
+    progress or the filter: the purpose, each requirement with its scenarios
+    and its source lines (from `trace.md` of the archived extract change and of
+    every archived amend change, the newest winning), and the screens of the
+    archived extract.
+  - An amend change still in progress that names the capability is shown on
+    the requirements it would change or add, with a caution: until it is
+    archived the spec has not changed. Do not tell the person the spec already
+    says the new wording.
+  - A search box (with script on) narrows the requirements by any word of
+    their text.
+  - `--out` cannot be used with `--spec all`.
 - Screenshots are not copied into the page. The page links the image file named
   in `screens.md` (inside the repository, `png`, `jpg`, `gif`, `webp` or `bmp`)
   by a relative path, so the image must stay where it is, and a page sent to
