@@ -36,6 +36,7 @@ node "<kit>/scripts/render.mjs" --change <change-name>
 node "<kit>/scripts/render.mjs" --file <path/to/file.md>
 node "<kit>/scripts/render.mjs" --spec <context>/<name>
 node "<kit>/scripts/render.mjs" --spec all
+node "<kit>/scripts/render.mjs" --guide all
 ```
 
 - `--change` finds the change under `openspec/changes/`, or its newest copy under
@@ -81,6 +82,16 @@ node "<kit>/scripts/render.mjs" --spec all
     screens); full-width and half-width letters match each other.
   - `--out` cannot be used with `--spec all`. `--file` of a file named
     `specs.md` would overwrite the list; render such a file with `--out`.
+- `--guide all` shows the optional code guide (`openspec/spec-relay/guide/`,
+  see docs/GUIDE.md): `guide.html` with the stack, a diagram of the modules
+  and what they depend on, a diagram of the tables each module owns, and three
+  ways in (modules, pages and URLs, features), and `guide-<module>.html` for
+  each module with every code file's explanation, a caution where the code
+  changed after it was written, and the saved questions and answers.
+  `--guide index` writes only `guide.html`, `--guide <module>` one module's
+  page. The diagrams are drawn by the script from the target design's
+  `architecture.md` each time; never draw them yourself. `--out` cannot be
+  used with `--guide`.
 - Screenshots are not copied into the page. The page links the image file named
   in `screens.md` (inside the repository, `png`, `jpg`, `gif`, `webp` or `bmp`)
   by a relative path, so the image must stay where it is, and a page sent to

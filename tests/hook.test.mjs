@@ -117,6 +117,9 @@ test('agents may not write the source, baselines, archives, schemas, settings or
   assert.match(edit(dir, 'openspec/spec-relay/lessons.md', { agentId: 'i1', agentType: 'spec-relay-implementer' }), /only the orchestrator writes/);
   assert.match(edit(dir, 'openspec/spec-relay/lessons.md', { agentId: 'c1', agentType: 'spec-relay:spec-relay-checker' }), /only the orchestrator writes/);
   assert.equal(edit(dir, 'openspec/changes/extract-billing-invoice/trace.md', sub), null);
+  assert.match(edit(dir, 'openspec/spec-relay/guide/qa/billing.md', { agentId: 'g1', agentType: 'spec-relay-guide-writer' }), /questions and answers are the person's/);
+  assert.equal(edit(dir, 'openspec/spec-relay/guide/code/billing.md', { agentId: 'g1', agentType: 'spec-relay-guide-writer' }), null);
+  assert.equal(edit(dir, 'openspec/spec-relay/guide/qa/billing.md'), null, 'the orchestrator saves one on the person\'s word');
   assert.equal(edit(dir, 'openspec/spec-relay/plan.md', { agentId: 'o1', agentType: 'spec-relay:spec-relay-orchestrator' }), null);
   assert.equal(edit(dir, 'openspec/spec-relay/lessons.md'), null, 'the orchestrator writes the lessons');
   // Viewing is not writing.

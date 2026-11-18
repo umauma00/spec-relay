@@ -6,6 +6,7 @@ import path from 'node:path';
 import { register } from 'node:module';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { startServer, progressPage, interactive, askPrompt, pageName, activeChanges, signature } from '../scripts/canvas.mjs';
+import { init as guideInit, stamp as guideStamp, fileAnchor, parseQa } from '../scripts/guide.mjs';
 import { tempDir, write } from './helpers.mjs';
 
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,6 +21,20 @@ function repo() {
   write(dir, 'openspec/changes/extract-auth-login/screens.md', '# Screens\n\n### Screen: Login\n- **Screenshot**: openspec/spec-relay/screens/login.png\n');
   write(dir, 'openspec/spec-relay/screens/login.png', 'PNG');
   write(dir, 'secret.txt', 'SECRET');
+  return dir;
+}
+
+// A repository with an archived target design and a started code guide.
+function guided() {
+  const dir = repo();
+  write(dir, 'openspec/config.yaml', 'context: |\n  Artifact language: ja\n  Source root: src\n  Target root: new\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-target-design/.openspec.yaml', 'schema: spec-relay-target\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-target-design/architecture.md', '# Architecture\n\n## Modules\n| Context | Module path | Public API | Events published | Depends on |\n|---|---|---|---|---|\n| billing | new/billing | InvoiceService | - | - |\n');
+  write(dir, 'new/billing/InvoiceService.java', 'class InvoiceService {\n  int total() { return 0; }\n}\n');
+  write(dir, 'new/billing/Other.java', 'class Other {}\n');
+  guideInit(dir);
+  write(dir, 'openspec/spec-relay/guide/code/billing.md', '# Module: billing\n\n## Overview\nInvoices.\n\n## Files\n\n### File: new/billing/InvoiceService.java\nAdds.\n');
+  guideStamp(dir);
   return dir;
 }
 
@@ -179,6 +194,68 @@ test('the page of an active change writes review.md for the person, and only tha
   } finally { await server.close(); }
 });
 
+test('the code guide: its pages, questions with an id, the agent\'s answer under the item, and "helpful" saves it', async () => {
+  const dir = guided();
+  assert.deepEqual(pageName(dir, { view: 'guide' }), { ok: true, name: 'guide', anchor: null });
+  assert.deepEqual(pageName(dir, { view: 'guide', name: 'new/billing/InvoiceService.java' }), { ok: true, name: 'guide-billing', anchor: fileAnchor('new/billing/InvoiceService.java') });
+  assert.equal(pageName(dir, { view: 'guide', name: 'nowhere/x.java' }).ok, false);
+  assert.match(pageName(repo(), { view: 'guide' }).problem, /no code guide yet/);
+  const asked = [];
+  const server = await startServer({ root: dir, ask: async (m) => { asked.push(m); }, log: () => {} });
+  try {
+    const base = `http://127.0.0.1:${server.port}/${server.token}`;
+    const index = await fetchText(server.url('guide'));
+    assert.equal(index.status, 200);
+    assert.match(index.text, /<a href="guide\.html" aria-current="page">コードガイド<\/a>/, 'the guide is in the links once it exists');
+    assert.match(index.text, /href="guide-billing\.html"/);
+    assert.match((await fetchText(server.url('progress'))).text, /<a href="guide\.html">コードガイド<\/a>/);
+    assert.equal((await fetchText(server.url('guide-nope'))).status, 404);
+    const page = 'openspec/spec-relay/views/guide-billing.html';
+    const ask = (body) => fetch(`${base}/ask`, { method: 'POST', headers: { 'X-Spec-Relay': 'ask' }, body: JSON.stringify({ page, question: 'why 0?', ...body }) }).then((r) => r.json());
+    const q = await ask({ item: { label: 'F1', title: 'new/billing/InvoiceService.java' } });
+    assert.deepEqual(q, { ok: true, id: 'q1' });
+    assert.match(asked[0].prompt, /post_answer, input \{"id": "q1"/);
+    const other = await ask({ item: { label: 'F2', title: 'new/billing/Other.java' } });
+    const plain = await fetch(`${base}/ask`, { method: 'POST', headers: { 'X-Spec-Relay': 'ask' }, body: JSON.stringify({ page: 'openspec/spec-relay/views/extract-auth-login.html', question: 'x' }) }).then((r) => r.json());
+    assert.deepEqual(plain, { ok: true }, 'a review page\'s question gets no id');
+    assert.doesNotMatch(asked[2].prompt, /post_answer/);
+
+    assert.equal(server.answer('q99', 'x').ok, false);
+    assert.equal(server.answer(q.id, '  ').ok, false);
+    const before = JSON.parse((await fetchText(`${base}/state`)).text).version;
+    assert.deepEqual(server.answer(q.id, '**Zero** for now.'), { ok: true, page: 'guide-billing' });
+    server.answer(other.id, 'Not explained yet.');
+    assert.ok(JSON.parse((await fetchText(`${base}/state`)).text).version > before, 'the page reloads to show the answer');
+    const config = (html) => JSON.parse(html.match(/<script type="application\/json" id="canvas-config">(.*?)<\/script>/)[1]);
+    let answers = config((await fetchText(server.url('guide-billing'))).text).answers;
+    assert.deepEqual(answers.map((a) => [a.id, a.label, a.title, a.html, a.savable]), [
+      ['q1', 'F1', 'new/billing/InvoiceService.java', '<p><strong>Zero</strong> for now.</p>', true],
+      ['q2', 'F2', 'new/billing/Other.java', '<p>Not explained yet.</p>', false],
+    ], 'only an answer about an explained file can be saved');
+    assert.equal(config((await fetchText(server.url('guide'))).text).answers.length, 0, 'answers stay on the page they were asked on');
+
+    const save = (headers, body) => fetch(`${base}/qa`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+    assert.equal((await save({}, { page, id: 'q1' })).status, 403);
+    assert.equal((await save({ 'X-Spec-Relay': 'qa', Origin: 'http://evil.example' }, { page, id: 'q1' })).status, 403);
+    assert.equal((await save({ 'X-Spec-Relay': 'qa' }, { page: 'openspec/spec-relay/views/guide.html', id: 'q1' })).status, 404, 'only on the page it was asked on');
+    assert.equal((await save({ 'X-Spec-Relay': 'qa' }, { page, id: 'q2' })).status, 400);
+    const saved = await save({ 'X-Spec-Relay': 'qa' }, { page, id: 'q1' });
+    assert.equal(saved.status, 200);
+    const qa = parseQa(fs.readFileSync(path.join(dir, 'openspec/spec-relay/guide/qa/billing.md'), 'utf8'));
+    assert.deepEqual(qa.map((e) => [e.question, e.file, e.answer]), [['why 0?', 'new/billing/InvoiceService.java', '**Zero** for now.']]);
+    assert.equal((await save({ 'X-Spec-Relay': 'qa' }, { page, id: 'q1' })).status, 200, 'saving twice writes once');
+    assert.equal(parseQa(fs.readFileSync(path.join(dir, 'openspec/spec-relay/guide/qa/billing.md'), 'utf8')).length, 1);
+    const after = await fetchText(server.url('guide-billing'));
+    answers = config(after.text).answers;
+    assert.deepEqual(answers.map((a) => a.id), ['q2'], 'a saved answer is shown from the file instead');
+    assert.match(after.text, /class="qa-saved"/);
+
+    assert.equal(server.go('guide-billing', 'f-0123456789'), `${server.url('guide-billing')}#f-0123456789`);
+    assert.equal(JSON.parse((await fetchText(`${base}/state`)).text).goto.path, 'openspec/spec-relay/views/guide-billing.html#f-0123456789');
+    assert.doesNotMatch(server.go('guide', '"><x'), /#/, 'an anchor is a plain id or nothing');
+  } finally { await server.close(); }
+});
+
 test('the state moves when the files change and when the agent sends the canvas elsewhere; any --lang works', async () => {
   const dir = repo();
   const server = await startServer({ root: dir, lang: 'English' });
@@ -229,7 +306,9 @@ export async function joinSession(config) { globalThis.__canvas = { config, sent
     assert.deepEqual(await action('open_spec')({ instanceId: 'i1', input: { name: 'billing/invoice' }, session }), { ok: true, shown: 'spec-billing-invoice' });
     assert.equal((await action('get_status')({ instanceId: 'i1', session })).changes[0].name, 'extract-auth-login');
     assert.deepEqual(await action('get_review_edits')({ instanceId: 'i1', input: {}, session }), { edits: [] });
-    assert.ok(!canvas.actions.some((x) => /tick|decision|write|archive/i.test(x.name)), 'the agent has no action that writes');
+    assert.ok(!canvas.actions.some((x) => /tick|decision|write|archive|save/i.test(x.name)), 'the agent has no action that writes');
+    await assert.rejects(async () => action('open_guide')({ instanceId: 'i1', input: {}, session }), /no code guide yet/);
+    await assert.rejects(async () => action('post_answer')({ instanceId: 'i1', input: { id: 'q1', answer: 'a' }, session }), /no question q1/);
     const base = a.url.replace(/\/r\/.*$/, '');
     await fetch(`${base}/ask`, { method: 'POST', headers: { 'X-Spec-Relay': 'ask' }, body: JSON.stringify({ question: 'q' }) });
     assert.equal(globalThis.__canvas.sent[0].mode, 'enqueue');

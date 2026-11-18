@@ -33,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 import { recordSteps } from './metrics.mjs';
 import { checkboxes, readIf, capabilitySegments, checkReview, checkPortDone, baseName, archivedChange, baselineHash, configValue, cleanValue, language } from './gate.mjs';
 import { finishState } from './finish.mjs';
+import { summary as guideSummary } from './guide.mjs';
 
 export { language };
 
@@ -65,6 +66,7 @@ const WORDS = {
     finish: 'Finish: check the whole system, list what is left, hand over',
     finishReview: 'waiting for the hand-over review',
     changedAfterFinish: 'the code changed after the hand-over; finish again',
+    guide: (done, of, stale) => `Code guide (optional): ${done} of ${of} files explained${stale ? `, ${stale} out of date` : ''}`,
     writing: (n, of) => `writing artifacts ${n}/${of}`,
     waitingReview: (n, of) => `waiting for review ${n}/${of}`,
     gateFails: 'all ticked, but gate.mjs review fails',
@@ -91,6 +93,7 @@ const WORDS = {
     finish: '仕上げ: 全体の確認・残りもの・引き渡し',
     finishReview: '引き渡しのレビュー待ち',
     changedAfterFinish: '引き渡しの後にコードが変わった・仕上げをやり直す',
+    guide: (done, of, stale) => `コードガイド（任意）: ${of}ファイル中${done}ファイル説明済み${stale ? `・古い説明 ${stale}` : ''}`,
     writing: (n, of) => `成果物 ${n}/${of}`,
     waitingReview: (n, of) => `レビュー待ち ${n}/${of}`,
     gateFails: '全項目チェック済み・gate.mjs review 未通過',
@@ -452,6 +455,9 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
     todoList.push({ id: todoList.length + 1, key: 'finish', title: `${words.finish}${detail ? (lang === 'ja' ? `【${detail}】` : ` [${detail}]`) : ''}`, description: finish.waiting ? words.person : '', status: finish.status });
     if (!here && finish.status !== 'completed') here = { capability: null, step: 'finish', owner: finish.waiting ? 'person' : 'agent', ...(finish.waiting ? { waiting: true } : {}) };
   }
+  // The code guide is optional: it shows only once started, and is never where the work is.
+  const guide = guideSummary(root);
+  if (guide) todoList.push({ id: todoList.length + 1, key: 'guide', title: words.guide(guide.explained, guide.files, guide.stale), description: '', status: guide.explained === guide.files && guide.stale === 0 ? 'completed' : 'in-progress' });
   return {
     plan, total, ported, reviewed, finished,
     current: here,
