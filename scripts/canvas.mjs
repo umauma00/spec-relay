@@ -39,7 +39,7 @@ const WORDS = {
     send: '送る', cancel: 'やめる', sending: '送っています…', sent: 'チャットに送りました。', failed: '送れませんでした', empty: '質問を書いてください。',
     notRepo: 'このフォルダには openspec/ がありません。spec-relay を導入したリポジトリでチャットを開いてください。',
     notFound: 'この画面はありません（変更や仕様が消えたか、名前が違います）。上の「進み具合」から選んでください。',
-    noLink: 'canvas ではこのリンクを開けません。ファイルはエディターで開いてください。',
+    noLink: 'canvas ではこのリンクを開けません（canvas の画面どうしのリンクだけが開きます）。',
     gone: 'チャットのセッションが終わったため、この画面はもう更新されません。',
     note: 'この画面は表示用です。正は Markdown のファイルです。判断はチャットで伝えるか review.md に書きます。openspec/ のファイルが変わると画面も変わります。',
     generated: '生成',
@@ -54,7 +54,7 @@ const WORDS = {
     send: 'Send', cancel: 'Cancel', sending: 'Sending…', sent: 'Sent to the chat.', failed: 'Could not send', empty: 'Write a question first.',
     notRepo: 'This folder has no openspec/. Open the chat in a repository where spec-relay is set up.',
     notFound: 'There is no such page (the change or spec is gone, or the name is wrong). Pick one from Progress above.',
-    noLink: 'This link does not open in the canvas. Open the file in your editor.',
+    noLink: 'This link does not open in the canvas (only links between canvas pages do).',
     gone: 'The chat session has ended, so this page no longer updates.',
     note: 'This page is a view. The Markdown files are the source of truth. Decisions go in the chat or in review.md. The page follows the files under openspec/ as they change.',
     generated: 'Generated',
@@ -67,7 +67,8 @@ const CHANGE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 function changeExists(root, name) {
   if (!CHANGE_NAME.test(name) || name === 'archive' || /^\.+$/.test(name)) return false;
-  return fs.existsSync(path.join(root, 'openspec/changes', name, '.openspec.yaml')) || fs.existsSync(path.join(root, 'openspec/changes', name, 'proposal.md')) || Boolean(archivedChange(root, name));
+  const has = (dir) => fs.existsSync(path.join(dir, '.openspec.yaml')) || fs.existsSync(path.join(dir, 'proposal.md'));
+  return has(path.join(root, 'openspec/changes', name)) || Boolean(archivedChange(root, name)) || (/^\d{4}-\d{2}-\d{2}-/.test(name) && has(path.join(root, 'openspec/changes/archive', name)));
 }
 
 // Every active change, with how many of its review items are confirmed (null without review.md).
@@ -105,7 +106,7 @@ ${hereItem ? `<p class="next-step"><b>${escapeHtml(here.waiting ? W.you : W.agen
   const docs = [{ id: 'todo', title: W.todo, html: `<div class="doc">${markdown(checklist(report))}</div>` }];
   const changes = activeChanges(root);
   docs.push({ id: 'changes', title: W.changes, html: changes.length
-    ? table([W.change, W.schema, W.confirmed, ''], changes.map((c) => `<tr><td class="mono">${escapeHtml(c.name)}</td><td>${escapeHtml(c.schema.replace(/^spec-relay-/, ''))}</td><td>${c.total === null ? '—' : `${c.done} / ${c.total}`}</td><td>${CHANGE_NAME.test(c.name) ? link(`${encodeURIComponent(c.name)}.html`, W.open) : ''}</td></tr>`))
+    ? table([W.change, W.schema, W.confirmed, ''], changes.map((c) => `<tr><td class="mono">${escapeHtml(c.name)}</td><td>${escapeHtml(c.schema.replace(/^spec-relay-/, ''))}</td><td>${c.total === null ? '—' : `${c.done} / ${c.total}`}</td><td>${changeExists(root, c.name) ? link(`${encodeURIComponent(c.name)}.html`, W.open) : ''}</td></tr>`))
     : `<p>${escapeHtml(W.none)}</p>` });
   if (report.capabilities.length) {
     const grouped = report.capabilities.some((c) => c.group);
@@ -191,14 +192,16 @@ const CANVAS_SCRIPT = String.raw`(() => {
     finally { pending = false; send.disabled = false; }
   });
   // Links the canvas cannot show (images, source files, other sites) would leave it with no way back.
-  d.addEventListener('click', (e) => {
+  const hold = (e) => {
     const a = e.target.closest ? e.target.closest('a[href]') : null;
     if (!a || a.getAttribute('href').startsWith('#')) return;
     const u = new URL(a.href, location.href);
     if (u.origin === location.origin && u.pathname.startsWith(pages) && u.pathname.endsWith('.html') && !u.pathname.slice(pages.length).includes('/')) return;
     e.preventDefault();
     toast(W.noLink);
-  }, true);
+  };
+  d.addEventListener('click', hold, true);
+  d.addEventListener('auxclick', hold, true);
   // After a reload, put the focus back where it was.
   const was = store('spec-relay-canvas-focus');
   if (was) { store('spec-relay-canvas-focus', null); const el = d.getElementById(was); if (el) el.focus({ preventScroll: true }); }
@@ -238,7 +241,8 @@ export function interactive(html, { lang, pagePath, title, version, seq, nonce }
 <script nonce="${nonce}">${CANVAS_SCRIPT}</script>`;
   return html
     .replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, () => `<meta http-equiv="Content-Security-Policy" content="${csp(nonce)}">`)
-    .replace(/<script>/g, () => `<script nonce="${nonce}">`)
+    // Only render.mjs's own script (the last one on its page) runs; anything else stays inert.
+    .replace(/<script>(?![\s\S]*<script>)/, () => `<script nonce="${nonce}">`)
     .replace('</style>', () => `${CANVAS_CSS}</style>`)
     .replace(/(<p class="meta">[^<]*<\/p>)/, (m) => `${m}\n${nav}`)
     .replace(/<\/body>\s*<\/html>\s*$/, () => `${dialog}\n</body>\n</html>\n`);
@@ -377,9 +381,9 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         try { body = JSON.parse(await readBody(req)); } catch { return send(res, 400, 'text/plain; charset=utf-8', 'bad request'); }
         if (!body || typeof body.question !== 'string' || !body.question.trim()) return send(res, 400, 'text/plain; charset=utf-8', 'no question');
         // The page is named by the server, not by what the page sent.
-        const pagePath = typeof body.page === 'string' && body.page.startsWith(`${VIEWS}/`) ? body.page : '';
-        const built = pagePath ? pageHtml(path.posix.basename(pagePath, '.html')) : null;
-        await ask(askPrompt({ ...body, page: pagePath, title: built?.title ?? '' }, lang()));
+        const name = typeof body.page === 'string' && body.page.startsWith(`${VIEWS}/`) ? path.posix.basename(body.page, '.html') : '';
+        const built = name && CHANGE_NAME.test(name) ? pageHtml(name) : null;
+        await ask(askPrompt({ ...body, page: built ? `${VIEWS}/${name}.html` : '', title: built?.title ?? '' }, lang()));
         return send(res, 200, 'application/json; charset=utf-8', '{"ok":true}');
       }
       if (req.method !== 'GET' || rest[0] !== 'r') return send(res, 404, 'text/plain; charset=utf-8', 'not found');

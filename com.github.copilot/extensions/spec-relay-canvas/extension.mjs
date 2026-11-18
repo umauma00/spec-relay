@@ -38,6 +38,17 @@ function serverFor(root) {
   return entry;
 }
 
+// A canvas no longer shows this repository: stop its server once no canvas does.
+async function release(key, instanceId) {
+  const entry = servers.get(key);
+  if (!entry) return;
+  entry.instances.delete(instanceId);
+  if (entry.instances.size > 0) return;
+  // Forget the server before closing it, so an open that comes meanwhile starts a new one.
+  servers.delete(key);
+  try { await (await entry.starting).close(); } catch { /* already gone */ }
+}
+
 // The server of the canvas an action names, or of the only open repository.
 async function serverOf(ctx) {
   const key = instances.get(ctx.instanceId) ?? keyOf(rootOf(ctx));
@@ -94,23 +105,18 @@ session = await joinSession({
         const entry = serverFor(root);
         const server = await entry.starting;
         const before = instances.get(ctx.instanceId);
-        if (before && before !== keyOf(root)) servers.get(before)?.instances.delete(ctx.instanceId);
         entry.instances.add(ctx.instanceId);
         instances.set(ctx.instanceId, keyOf(root));
-        // Opening a canvas that is already open may only focus it: move it to the page too.
-        if (before) server.go(page.name);
+        // The same canvas moved to another repository: stop the old server when nothing else shows it.
+        if (before && before !== keyOf(root)) await release(before, ctx.instanceId);
+        // Opening a canvas that is already open may only focus it: move it when a page was asked for.
+        if (before === keyOf(root) && ctx.input?.view) server.go(page.name);
         return { url: server.url(page.name), title: 'spec-relay', status: path.basename(root) };
       },
       onClose: async (ctx) => {
         const key = instances.get(ctx.instanceId);
         instances.delete(ctx.instanceId);
-        const entry = key ? servers.get(key) : null;
-        if (!entry) return;
-        entry.instances.delete(ctx.instanceId);
-        if (entry.instances.size > 0) return;
-        // Forget the server before closing it, so an open that comes meanwhile starts a new one.
-        servers.delete(key);
-        try { await (await entry.starting).close(); } catch { /* already gone */ }
+        if (key) await release(key, ctx.instanceId);
       },
     }),
   ],
