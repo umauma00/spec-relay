@@ -4,7 +4,7 @@
 // and the reviewer's name: the canvas writes them to review.md as their own edit.
 // The optional code guide (openspec/spec-relay/guide/) is shown too: an answer the
 // agent sends back with post_answer appears under the question's item, and only
-// the person's "this helped" button saves it to the guide's Q&A file.
+// the person's "Helpful (save to the Q&A)" button saves it to the guide's Q&A file.
 // The agent's actions only read, move the canvas and show answers; none of them writes a file.
 //
 // The only file that touches the Copilot SDK (the canvas API is experimental and
@@ -118,7 +118,7 @@ session = await joinSession({
         {
           name: 'post_answer',
           description: 'Show your answer to a question the person asked on a code guide page (its prompt gives the id) under the question\'s item. It writes no file: the person decides on the page whether to save it.',
-          inputSchema: { type: 'object', additionalProperties: false, required: ['id', 'answer'], properties: { id: { type: 'string', description: 'The question id from the prompt, such as q3.' }, answer: { type: 'string', description: 'The answer, in Markdown (at most 20000 characters).' } } },
+          inputSchema: { type: 'object', additionalProperties: false, required: ['id', 'answer'], properties: { id: { type: 'string', description: 'The question id from the prompt, such as q3-1a2b.' }, answer: { type: 'string', description: 'The answer, in Markdown (at most 20000 characters).' } } },
           handler: async (ctx) => {
             const server = await serverOf(ctx);
             const result = server.answer(ctx.input?.id, ctx.input?.answer);

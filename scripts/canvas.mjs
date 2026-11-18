@@ -223,7 +223,8 @@ const CANVAS_SCRIPT = String.raw`(() => {
       b.addEventListener('click', async () => {
         b.disabled = true;
         try {
-          const res = await fetch(base + '/qa', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'qa' }, body: JSON.stringify({ page: cfg.page, id: a.id }) });
+          const res = await fetch(base + '/qa', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'qa' }, body: JSON.stringify({ page: cfg.page, id: a.id, rev: a.rev }) });
+          if (res.status === 409) { location.reload(); return; }
           if (!res.ok) throw new Error(String(res.status));
           b.remove(); toast(W.qaSaved);
         } catch (err) { b.disabled = false; toast(W.qaFailed + ' (' + err.message + ')'); }
@@ -531,6 +532,8 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
   // (kept while the server runs; only the ones the person saves reach a file).
   const questions = new Map();
   let asked = 0;
+  // Ids differ from one server to the next, so a late answer to a question asked before a restart finds nothing.
+  const salt = crypto.randomBytes(2).toString('hex');
   const guideModule = (name) => (name.startsWith('guide-') ? guideModules(root).find((m) => `guide-${m.key}` === name) ?? null : null);
   const isGuidePage = (name) => name === 'guide' || Boolean(guideModule(name));
   const hasGuide = () => guideModules(root).length > 0 && fs.existsSync(path.join(root, GUIDE));
@@ -592,9 +595,9 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         if (built?.guide) {
           // A question on the code guide gets an id, so its answer can come back to this page.
           asked += 1;
-          id = `q${asked}`;
+          id = `q${asked}-${salt}`;
           const item = body.item && typeof body.item === 'object' ? { label: oneLine(body.item.label, 20), title: oneLine(body.item.title, 300) } : null;
-          questions.set(id, { id, page: name, item, question: oneLine(body.question, 500), answer: null, saved: false });
+          questions.set(id, { id, page: name, item, question: oneLine(body.question, 500), answer: null, rev: 0, saved: false });
           if (questions.size > 200) questions.delete(questions.keys().next().value);
         }
         await ask(askPrompt({ ...body, id, page: built ? `${VIEWS}/${name}.html` : '', title: built?.title ?? '' }, lang()));
@@ -612,6 +615,8 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         const mod = name ? guideModule(name) : null;
         if (!entry || entry.page !== name || !mod || entry.answer === null || !entry.item) return reply(404, { ok: false, problem: 'no answer to save on this page' });
         if (entry.saved) return reply(200, { ok: true, file: entry.file });
+        // Only the answer the person read: one the agent replaced since is shown first.
+        if (body.rev !== entry.rev) return reply(409, { ok: false, problem: 'the answer changed since the page was shown' });
         const result = saveQa(root, { module: mod.key, file: entry.item.title, question: entry.question, answer: entry.answer, now: now() });
         if (!result.ok) return reply(400, { ok: false, problem: result.problem });
         entry.saved = true;
@@ -660,7 +665,7 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         const built = pageHtml(name);
         // A saved answer is shown from the Q&A file instead.
         const answers = built?.guide ? [...questions.values()].filter((q) => q.page === name && q.answer !== null && !q.saved).map((q) => ({
-          id: q.id, label: q.item?.label ?? '', title: q.item?.title ?? '', question: q.question, html: markdown(q.answer), saved: q.saved,
+          id: q.id, rev: q.rev, label: q.item?.label ?? '', title: q.item?.title ?? '', question: q.question, html: markdown(q.answer), saved: q.saved,
           savable: Boolean(built.module && q.item && built.files.includes(q.item.title)),
         })) : null;
         const html = interactive(built ? built.html : notFoundPage({ lang: code, now: now() }), { lang: code, pagePath: rel, title: built ? built.title : WORDS[code].title, version: currentVersion(), seq: goto.seq, nonce, review: built?.review ?? null, answers, guide: hasGuide() });
@@ -696,6 +701,7 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
       const answer = String(text ?? '').replace(/\r\n?/g, '\n').trim().slice(0, 20000);
       if (!answer) return { ok: false, problem: 'the answer is empty' };
       entry.answer = answer;
+      entry.rev += 1;
       version += 1;
       cache.clear();
       return { ok: true, page: entry.page };

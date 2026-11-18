@@ -15,13 +15,15 @@
 // it never approves anything.
 //
 //   node guide.mjs init  [--root DIR]               folders, stack.md, routes.md; prints each module's files
-//   node guide.mjs stamp [--module NAME] [--root DIR]  writes each explained file's hash under its heading
+//   node guide.mjs stamp [--module NAME] [--file PATH]... [--root DIR]
+//                                                   writes the hash under each heading that has none; --file
+//                                                   (repeatable, or all) also replaces it for files explained again
 //   node guide.mjs check [--root DIR]               references that do not exist, stale and missing explanations
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { archivedChange, headedRows, section, plain, targetFiles, readIf } from './gate.mjs';
+import { archivedChange, headedRows, section, plain, targetFiles, readIf, configValue, cleanValue } from './gate.mjs';
 import { escapeHtml, markdown, inline, parseRefs, capabilities, readItem } from './render.mjs';
 
 export const GUIDE = 'openspec/spec-relay/guide';
@@ -37,9 +39,23 @@ const MODULE_KEY = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 const rel = (p) => p.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '').replace(/\/+$/, '');
 const fold = (p) => (process.platform === 'win32' || process.platform === 'darwin' ? p.toLowerCase() : p);
-export const fileHash = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex').slice(0, 16);
-const hashOf = (root, file) => { try { return fileHash(fs.readFileSync(path.join(root, file))); } catch { return null; } };
-const read = (root, file) => { try { return fs.readFileSync(path.join(root, file), 'utf8').replace(/^\uFEFF/, ''); } catch { return null; } };
+// A file's hash as the rest of the kit hashes text: without a BOM and with CRLF
+// read as LF, so a Windows checkout (core.autocrlf) hashes the same as any other.
+export const fileHash = (buffer) => {
+  const text = Buffer.from(buffer).toString('latin1').replace(/^\xEF\xBB\xBF/, '').replace(/\r\n/g, '\n');
+  return crypto.createHash('sha256').update(text, 'latin1').digest('hex').slice(0, 16);
+};
+// A path under the repository that really is inside it (no link out of it), or null.
+function inRepo(root, file) {
+  try {
+    const base = fs.realpathSync(root);
+    const real = fs.realpathSync(path.join(root, file));
+    const r = path.relative(base, real);
+    return r && !r.startsWith('..') && !path.isAbsolute(r) ? real : null;
+  } catch { return null; }
+}
+const hashOf = (root, file) => { const real = inRepo(root, file); try { return real ? fileHash(fs.readFileSync(real)) : null; } catch { return null; } };
+const read = (root, file) => { const real = inRepo(root, file); try { return real ? fs.readFileSync(real, 'utf8').replace(/^\uFEFF/, '') : null; } catch { return null; } };
 const stripComments = (text) => text.replace(/<!--[\s\S]*?-->/g, '');
 
 // A module's file name: its context in lower case, words joined by hyphens.
@@ -54,6 +70,17 @@ const designText = (root, name) => {
 const column = (row, re) => { const i = row.header.findIndex((h) => re.test(h)); return i >= 0 ? (row.cells[i] ?? '').trim() : ''; };
 const listCell = (cell) => plain(cell).split(/[,、;]|<br\s*\/?>/i).map((s) => s.trim()).filter((s) => s && s !== '-' && !/^(none|なし)$/i.test(s));
 
+// The target root as configured, relative to the repository ('' when none).
+const targetRoot = (root) => rel(cleanValue(configValue(root, 'Target root', '') ?? ''));
+
+// A module path as written: from the repository root, or from the target root.
+function modulePath(root, written) {
+  const p = rel(written);
+  const target = targetRoot(root);
+  if (!p || !target || target === '.' || fold(p) === fold(target) || fold(p).startsWith(`${fold(target)}/`)) return p;
+  return fs.existsSync(path.join(root, p)) || !fs.existsSync(path.join(root, target, p)) ? p : `${target}/${p}`;
+}
+
 // The modules of architecture.md's "## Modules" table.
 export function modules(root) {
   const text = section(designText(root, 'architecture.md'), /^modules$/i) ?? '';
@@ -64,7 +91,7 @@ export function modules(root) {
     if (!context || !MODULE_KEY.test(key) || out.some((m) => m.key === key)) continue;
     out.push({
       key, context,
-      path: rel(plain(column(row, /^module path/))),
+      path: modulePath(root, plain(column(row, /^module path/))),
       api: plain(column(row, /^public api/)),
       events: listCell(column(row, /^events/)),
       dependsOn: listCell(column(row, /^depends/)).map(moduleKey),
@@ -95,6 +122,10 @@ export function moduleFiles(root, mod, files = targetFiles(root) ?? []) {
   return files.filter((f) => fold(f).startsWith(prefix)).sort();
 }
 const isCode = (file) => CODE_EXT.has(path.extname(file).toLowerCase());
+// Code files of the target that no module's path covers (an entry point, shared configuration code).
+function unassigned(mods, files) {
+  return files.filter((f) => isCode(f) && !mods.some((m) => m.path && fold(f).startsWith(`${fold(m.path)}/`))).sort();
+}
 
 // ---------------------------------------------------------------- the guide's own files
 
@@ -133,15 +164,22 @@ export function parseRoutes(text) {
 }
 
 // qa/<module>.md: "### Q: <question>", then "- File:", "- Hash:", "- Saved:" and the answer.
+// The fields are the lines right under the heading, up to the first other line:
+// a "- File:" line in the answer stays answer text. A heading inside a code fence
+// is answer text too.
 export function parseQa(text) {
   const out = [];
   let entry = null;
+  let fields = false;
+  let fenced = false;
   for (const line of (text ?? '').replace(/^\uFEFF/, '').split(/\r?\n/)) {
-    const q = line.match(/^###\s+Q:\s*(.*)$/);
-    if (q) { entry = { question: q[1].trim(), file: '', hash: '', saved: '', answer: [] }; out.push(entry); continue; }
+    const q = !fenced && line.match(/^###\s+Q:\s*(.*)$/);
+    if (q) { entry = { question: q[1].trim(), file: '', hash: '', saved: '', answer: [] }; out.push(entry); fields = true; continue; }
     if (!entry) continue;
-    const field = !entry.answer.some((l) => l.trim()) && line.match(/^-\s+(File|Hash|Saved):\s*(.*)$/i);
+    const field = fields && line.match(/^-\s+(File|Hash|Saved):\s*(.*)$/i);
     if (field) { entry[field[1].toLowerCase()] = field[2].trim().replace(/^`|`$/g, ''); continue; }
+    fields = false;
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
     entry.answer.push(line);
   }
   for (const e of out) e.answer = e.answer.join('\n').trim();
@@ -179,6 +217,7 @@ export function init(root) {
   if (!fs.existsSync(path.join(root, ROUTES))) { fs.writeFileSync(path.join(root, ROUTES), ROUTES_TEMPLATE); wrote.push(ROUTES); }
   return {
     ok: true, wrote,
+    unassigned: unassigned(mods, files),
     modules: mods.map((m) => {
       const all = moduleFiles(root, m, files);
       return { module: m.key, context: m.context, path: m.path, guide: `${CODE}/${m.key}.md`, code: all.filter(isCode), other: all.filter((f) => !isCode(f)).length };
@@ -186,8 +225,11 @@ export function init(root) {
   };
 }
 
-// Writes "<!-- hash: ... -->" under every "### File:" heading, so a later check
-// knows which explanations the code has moved away from. A saved Q&A entry whose
+// Writes "<!-- hash: ... -->" under every "### File:" heading that has none, so a
+// later check knows which explanations the code has moved away from. A hash that
+// is there is changed only for the files named in `files` (explanations written
+// again), or for all with files 'all': stamping never hides a stale explanation.
+// A saved Q&A entry whose
 // "- Hash:" is empty (one the orchestrator wrote on the person's word) gets the
 // file's hash now; a filled one is never changed.
 function stampQa(root, key) {
@@ -196,21 +238,27 @@ function stampQa(root, key) {
   try { text = fs.readFileSync(file, 'utf8'); } catch { return 0; }
   const eol = /\r\n/.test(text) ? '\r\n' : '\n';
   const lines = text.split(/\r?\n/);
-  let target = null, filled = 0;
+  // Read as parseQa reads it: fields only right under the heading, headings only outside fences.
+  let target = null, empty = -1, fields = false, fenced = false, filled = 0;
+  const fill = () => { const hash = target && empty >= 0 ? hashOf(root, target) : null; if (hash) { lines[empty] = `- Hash: ${hash}`; filled += 1; } };
   for (let i = 0; i < lines.length; i += 1) {
-    if (/^###\s+Q:/.test(lines[i])) { target = null; continue; }
-    const f = lines[i].match(/^-\s+File:\s*(.*)$/i);
-    if (f) { target = rel(f[1].trim().replace(/^`|`$/g, '')); continue; }
-    if (target && /^-\s+Hash:\s*$/i.test(lines[i])) {
-      const hash = hashOf(root, target);
-      if (hash) { lines[i] = `- Hash: ${hash}`; filled += 1; }
+    if (!fenced && /^###\s+Q:/.test(lines[i])) { fill(); target = null; empty = -1; fields = true; continue; }
+    const f = fields && lines[i].match(/^-\s+(File|Hash|Saved):\s*(.*)$/i);
+    if (f) {
+      if (/^file$/i.test(f[1])) target = rel(f[2].trim().replace(/^`|`$/g, ''));
+      else if (/^hash$/i.test(f[1]) && !f[2].trim()) empty = i;
+      continue;
     }
+    if (fields) { fill(); target = null; empty = -1; fields = false; }
+    if (/^\s*(```|~~~)/.test(lines[i])) fenced = !fenced;
   }
+  fill();
   if (filled) fs.writeFileSync(file, lines.join(eol));
   return filled;
 }
 
-export function stamp(root, { module } = {}) {
+export function stamp(root, { module, files = [] } = {}) {
+  const again = files === 'all' ? null : new Set((Array.isArray(files) ? files : [files]).filter(Boolean).map((f) => fold(rel(String(f)))));
   const mods = modules(root).filter((m) => !module || m.key === moduleKey(module));
   if (module && !mods.length) return { ok: false, problems: [`no module ${module} in architecture.md`] };
   const result = [];
@@ -226,10 +274,13 @@ export function stamp(root, { module } = {}) {
       if (/^\s*(```|~~~)/.test(lines[i])) fenced = !fenced;
       const head = !fenced && lines[i].match(/^###\s+File:\s*(.+?)\s*$/i);
       if (!head) continue;
-      const hash = hashOf(root, rel(head[1].replace(/`/g, '')));
+      const named = rel(head[1].replace(/`/g, ''));
+      const hash = hashOf(root, named);
       if (!hash) continue;
       const line = `<!-- hash: ${hash} -->`;
-      if (/^<!--\s*hash:\s*[0-9a-f]{16}\s*-->\s*$/i.test(lines[i + 1] ?? '')) { if (lines[i + 1] !== line) { lines[i + 1] = line; stamped += 1; } } else { lines.splice(i + 1, 0, line); stamped += 1; }
+      if (/^<!--\s*hash:\s*[0-9a-f]{16}\s*-->\s*$/i.test(lines[i + 1] ?? '')) {
+        if (lines[i + 1] !== line && (again === null || again.has(fold(named)))) { lines[i + 1] = line; stamped += 1; }
+      } else { lines.splice(i + 1, 0, line); stamped += 1; }
     }
     if (stamped) fs.writeFileSync(file, lines.join(eol));
     result.push({ module: m.key, stamped, qa: stampQa(root, m.key) });
@@ -255,6 +306,7 @@ export function check(root) {
     const guideFile = `${CODE}/${m.key}.md`;
     const guide = parseCodeGuide(read(root, guideFile));
     const own = moduleFiles(root, m, files);
+    if (!own.some(isCode)) problems.push(`module ${m.key}: no code files under its module path "${m.path || '(none)'}" in architecture.md (a path from the repository root or from the target root)`);
     const explained = new Set(guide.files.map((b) => fold(b.file)));
     const stale = [];
     const gone = [];
@@ -288,7 +340,7 @@ export function check(root) {
       if (ref.symbol && !text.includes(lastName(ref.symbol))) problems.push(`routes.md: ${r.url}: \`${ref.symbol}\` does not appear in ${ref.file}`);
     }
   }
-  return { ok: problems.length === 0, modules: report, problems };
+  return { ok: problems.length === 0, modules: report, unassigned: unassigned(mods, files), problems };
 }
 
 // How far the guide is, for the to-do list: null when there is no guide.
@@ -305,7 +357,7 @@ export function summary(root) {
     explained += own.filter((f) => guide.files.some((b) => fold(b.file) === fold(f))).length;
     stale += guide.files.filter((b) => { const h = hashOf(root, b.file); return !h || b.hash !== h; }).length;
   }
-  return { files: total, explained, stale };
+  return { files: total, explained, stale, unassigned: unassigned(mods, files).length };
 }
 
 // Saves one question and its answer under the module, with the file's hash now,
@@ -320,11 +372,17 @@ export function saveQa(root, { module, file, question, answer, now = new Date() 
   const block = guide.files.find((b) => fold(b.file) === fold(target));
   if (!block) return { ok: false, problem: `${target} is not explained in ${CODE}/${key}.md` };
   const q = String(question ?? '').replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500);
-  // Headings in the answer would end the entry: they stay as text.
-  const a = String(answer ?? '').replace(/\r\n?/g, '\n').trim().slice(0, 20000).replace(/^(#{1,6})(?=\s)/gm, '\\$1');
+  // Only a "### Q:" line outside a code fence would start another entry: it stays as text.
+  let fenced = false;
+  const a = String(answer ?? '').replace(/\r\n?/g, '\n').trim().slice(0, 20000).split('\n').map((line) => {
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    return !fenced && /^###\s+Q:/.test(line) ? `\\${line}` : line;
+  }).join('\n');
   if (!q || !a) return { ok: false, problem: 'the question and the answer are both needed' };
   const out = path.join(root, QA, `${key}.md`);
   fs.mkdirSync(path.dirname(out), { recursive: true });
+  // Never append through a link out of the repository.
+  if (!inRepo(root, QA) || (fs.existsSync(out) && (fs.lstatSync(out).isSymbolicLink() || !inRepo(root, `${QA}/${key}.md`)))) return { ok: false, problem: `${QA}/${key}.md is a link or outside the repository` };
   const head = fs.existsSync(out) ? '' : `# Questions and answers: ${mod.context}\n\n<!-- Saved from the canvas when the person found an answer helpful. -->\n`;
   fs.appendFileSync(out, `${head}\n### Q: ${q}\n- File: ${block.file}\n- Hash: ${hashOf(root, block.file) ?? ''}\n- Saved: ${now.toISOString().slice(0, 10)}\n\n${a}\n`);
   return { ok: true, file: `${QA}/${key}.md` };
@@ -362,7 +420,8 @@ const WORDS = {
 };
 export const guideWords = (lang) => WORDS[lang === 'ja' ? 'ja' : 'en'];
 export const guidePage = (key) => (key ? `guide-${key}` : 'guide');
-export const fileAnchor = (file) => `f-${fileHash(Buffer.from(rel(file))).slice(0, 10)}`;
+// The same anchor however the path's case is written where case does not count (Windows, macOS).
+export const fileAnchor = (file) => `f-${fileHash(Buffer.from(fold(rel(file)))).slice(0, 10)}`;
 
 // The guide page for a module (its name or key), a file under the target root, or a page or URL of routes.md.
 export function locate(root, wanted) {
@@ -377,8 +436,10 @@ export function locate(root, wanted) {
       const g = parseCodeGuide(read(root, `${CODE}/${m.key}.md`));
       if (g.files.some((b) => fold(b.file) === fold(f))) return { page: guidePage(m.key), anchor: fileAnchor(g.files.find((b) => fold(b.file) === fold(f)).file) };
     }
-    const m = mods.find((x) => x.path && fold(f).startsWith(`${fold(x.path)}/`));
-    return m ? { page: guidePage(m.key), anchor: fileAnchor(f) } : null;
+    // A file not explained yet: only one that is there, under a module's path.
+    const there = (targetFiles(root) ?? []).find((x) => fold(x) === fold(f));
+    const m = there && mods.find((x) => x.path && fold(there).startsWith(`${fold(x.path)}/`));
+    return m ? { page: guidePage(m.key), anchor: fileAnchor(there) } : null;
   };
   const route = parseRoutes(read(root, ROUTES)).find((r) => r.url === name || `${r.method} ${r.url}` === name);
   if (route) return (route.refs[0] && byFile(route.refs[0].file)) ?? { page: guidePage(), anchor: null };
@@ -530,7 +591,9 @@ export function guideView({ root, module, L, lang, href = (name, anchor) => `${e
 export function main(argv) {
   const [command, ...rest] = argv;
   const opts = { root: process.cwd() };
+  const files = [];
   for (let i = 0; i < rest.length; i += 2) {
+    if (rest[i] === '--file' && rest[i + 1] !== undefined) { files.push(rest[i + 1]); continue; }
     const key = { '--root': 'root', '--module': 'module' }[rest[i]];
     if (!key || rest[i + 1] === undefined) return usage();
     opts[key] = rest[i + 1];
@@ -538,7 +601,7 @@ export function main(argv) {
   const root = path.resolve(opts.root);
   let result;
   if (command === 'init') result = init(root);
-  else if (command === 'stamp') result = stamp(root, { module: opts.module });
+  else if (command === 'stamp') result = stamp(root, { module: opts.module, files: files.includes('all') ? 'all' : files });
   else if (command === 'check') result = check(root);
   else return usage();
   // ASCII with \uXXXX escapes, so a console code page (CP932 on Japanese Windows) cannot garble it.
@@ -547,7 +610,7 @@ export function main(argv) {
 }
 
 function usage() {
-  console.error('Usage: node guide.mjs init|stamp|check [--module NAME] [--root DIR]');
+  console.error('Usage: node guide.mjs init|stamp|check [--module NAME] [--file PATH|all]... [--root DIR]');
   return 2;
 }
 

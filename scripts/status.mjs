@@ -457,7 +457,7 @@ export function status(root, { capability, language: lang = 'en' } = {}) {
   }
   // The code guide is optional: it shows only once started, and is never where the work is.
   const guide = guideSummary(root);
-  if (guide) todoList.push({ id: todoList.length + 1, key: 'guide', title: words.guide(guide.explained, guide.files, guide.stale), description: '', status: guide.explained === guide.files && guide.stale === 0 ? 'completed' : 'in-progress' });
+  if (guide) todoList.push({ id: todoList.length + 1, key: 'guide', title: words.guide(guide.explained, guide.files, guide.stale), description: '', status: guide.files > 0 && guide.explained === guide.files && guide.stale === 0 ? 'completed' : 'in-progress' });
   return {
     plan, total, ported, reviewed, finished,
     current: here,

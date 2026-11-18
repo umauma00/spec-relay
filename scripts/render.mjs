@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkboxes, questionIds, tableRows, changeSchema, archivedChange } from './gate.mjs';
-import { guideView, guidePage, guideWords, modules as guideModules, GUIDE_CSS } from './guide.mjs';
+import { guideView, guidePage, guideWords, modules as guideModules, moduleKey, GUIDE_CSS } from './guide.mjs';
 import { ledgerSummary } from './sites.mjs';
 import { leftoverRows } from './finish.mjs';
 
@@ -1615,7 +1615,8 @@ function renderGuide({ root, guide, lang, now }) {
     const pages = guideModules(root).map((m) => write({ guide: m.key, nav: back }, guidePage(m.key))).filter((r) => r.ok).map((r) => r.out);
     return { ...index, pages };
   }
-  return write({ guide, nav: back }, guidePage(String(guide).toLowerCase()));
+  // The file is named by the module's key ("Sales Orders" -> guide-sales-orders.html), as every link names it.
+  return write({ guide, nav: back }, guidePage(moduleKey(String(guide))));
 }
 
 export function render({ root = process.cwd(), change, file, spec, guide, out, lang, now = new Date() }) {

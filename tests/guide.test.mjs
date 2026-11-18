@@ -5,7 +5,7 @@ import path from 'node:path';
 import { modules, dataOwnership, stackFacts, init, stamp, check, saveQa, parseQa, parseCodeGuide, locate, fileAnchor, summary, main } from '../scripts/guide.mjs';
 import { render } from '../scripts/render.mjs';
 import { status } from '../scripts/status.mjs';
-import { tempDir, write, quiet } from './helpers.mjs';
+import { tempDir, write, quiet, crlf } from './helpers.mjs';
 
 const ARCH = '# Architecture\n\n## Modules\n| Context | Module path | Public API | Events published | Depends on |\n|---|---|---|---|---|\n| platform | new/platform | Clock | - | - |\n| billing | new/billing | InvoiceService | InvoiceIssued | platform |\n| Sales Orders | new/sales | OrderApi | OrderPlaced | billing, platform |\n\n## Data ownership\n| Table or file | Owning module |\n|---|---|\n| invoices | billing |\n| orders | Sales Orders |\n';
 const CONVENTIONS = '# Conventions\n\n## Runtime and frameworks\n- Java 21, Spring Boot 3.3\n- PostgreSQL 16\n\n## Commands\n| Purpose | Command |\n|---|---|\n| Build | `./gradlew build` |\n| Test | `./gradlew test` |\n';
@@ -81,7 +81,7 @@ test('stamp records each explained file\'s hash, and check finds what the code n
   assert.equal(result.ok, false);
 });
 
-test('a saved answer needs an explained file, keeps its headings as text, and an empty hash is filled by stamp', () => {
+test('a saved answer needs an explained file, cannot start another entry or change its fields, and an empty hash is filled by stamp', () => {
   const dir = repo();
   init(dir);
   write(dir, 'openspec/spec-relay/guide/code/billing.md', BILLING);
@@ -89,7 +89,8 @@ test('a saved answer needs an explained file, keeps its headings as text, and an
   assert.match(saveQa(dir, { module: 'billing', file: 'new/billing/InvoiceController.java', question: 'q', answer: 'a' }).problem, /not explained/);
   assert.match(saveQa(dir, { module: 'nope', file: 'x', question: 'q', answer: 'a' }).problem, /no module/);
   assert.match(saveQa(dir, { module: 'billing', file: 'new/billing/InvoiceService.java', question: ' ', answer: 'a' }).problem, /both needed/);
-  const saved = saveQa(dir, { module: 'billing', file: 'new/billing/InvoiceService.java', question: 'Why\nint?\n### Q: forged', answer: 'Because.\n# heading\n- File: other', now: new Date('2026-11-18T00:00:00Z') });
+  const answer = '- File: new/billing/Other.java holds the rest.\n- Hash: 0000000000000000\n\n```py\n# add the lines\n### Q: in a fence\n```\n### Q: forged\n# heading';
+  const saved = saveQa(dir, { module: 'billing', file: 'new/billing/InvoiceService.java', question: 'Why\nint?\n### Q: forged', answer, now: new Date('2026-11-18T00:00:00Z') });
   assert.deepEqual(saved, { ok: true, file: 'openspec/spec-relay/guide/qa/billing.md' });
   let qa = parseQa(read(dir, saved.file));
   assert.equal(qa.length, 1);
@@ -97,13 +98,51 @@ test('a saved answer needs an explained file, keeps its headings as text, and an
   assert.equal(qa[0].file, 'new/billing/InvoiceService.java');
   assert.match(qa[0].hash, /^[0-9a-f]{16}$/);
   assert.equal(qa[0].saved, '2026-11-18');
-  assert.equal(qa[0].answer, 'Because.\n\\# heading\n- File: other');
-  // An entry the orchestrator wrote on the person's word, with the hash left empty.
-  fs.appendFileSync(path.join(dir, saved.file), '\n### Q: Where is the total?\n- File: new/billing/InvoiceService.java\n- Hash:\n- Saved: 2026-11-18\n\nLine 2.\n');
+  assert.equal(qa[0].answer, '- File: new/billing/Other.java holds the rest.\n- Hash: 0000000000000000\n\n```py\n# add the lines\n### Q: in a fence\n```\n\\### Q: forged\n# heading', 'fields end at the blank line; only a heading that would start an entry is escaped');
+  // An entry the orchestrator wrote on the person's word, with the hash left empty; an empty "- Hash:" in an answer is text.
+  fs.appendFileSync(path.join(dir, saved.file), '\n### Q: Where is the total?\n- File: new/billing/InvoiceService.java\n- Hash:\n- Saved: 2026-11-18\n\nLine 2.\n- Hash:\n');
   assert.equal(stamp(dir).modules.find((m) => m.module === 'billing').qa, 1);
+  assert.match(read(dir, saved.file), /Line 2\.\n- Hash:\n$/);
   qa = parseQa(read(dir, saved.file));
   assert.equal(qa[1].hash, qa[0].hash);
   assert.equal(parseCodeGuide(read(dir, 'openspec/spec-relay/guide/code/billing.md')).files[0].hash, qa[0].hash);
+});
+
+test('stamp adds missing hashes only, unless a file is named; hashes ignore CRLF and the BOM', () => {
+  const dir = repo();
+  init(dir);
+  write(dir, 'openspec/spec-relay/guide/code/billing.md', `${BILLING}\n### File: new/billing/InvoiceController.java\nShows one.\n`);
+  stamp(dir);
+  const first = parseCodeGuide(read(dir, 'openspec/spec-relay/guide/code/billing.md')).files.map((b) => b.hash);
+  write(dir, 'new/billing/InvoiceService.java', '\uFEFF' + crlf(read(dir, 'new/billing/InvoiceService.java')));
+  assert.deepEqual(check(dir).modules.find((m) => m.module === 'billing').stale, [], 'a Windows checkout of the same file is not stale');
+  write(dir, 'new/billing/InvoiceService.java', 'class InvoiceService { }\n');
+  write(dir, 'new/billing/InvoiceController.java', 'class InvoiceController { }\n');
+  assert.equal(stamp(dir).modules.find((m) => m.module === 'billing').stamped, 0, 'stamping again never hides a stale explanation');
+  assert.deepEqual(check(dir).modules.find((m) => m.module === 'billing').stale, ['new/billing/InvoiceService.java', 'new/billing/InvoiceController.java']);
+  assert.equal(stamp(dir, { files: ['new\\billing\\InvoiceService.java'] }).modules.find((m) => m.module === 'billing').stamped, 1);
+  assert.deepEqual(check(dir).modules.find((m) => m.module === 'billing').stale, ['new/billing/InvoiceController.java']);
+  assert.equal(quiet(() => main(['stamp', '--root', dir, '--file', 'all'])), 0);
+  assert.deepEqual(check(dir).modules.find((m) => m.module === 'billing').stale, []);
+  assert.notDeepEqual(parseCodeGuide(read(dir, 'openspec/spec-relay/guide/code/billing.md')).files.map((b) => b.hash), first);
+});
+
+test('a module path may be written from the target root; code under no module and a module without code are reported', () => {
+  const dir = repo();
+  const td = 'openspec/changes/archive/2026-11-01-target-design/architecture.md';
+  write(dir, td, ARCH.replace('| new/billing |', '| billing |').replace('| new/sales |', '| new/nothing |'));
+  write(dir, 'new/Main.java', 'class Main {}\n');
+  assert.equal(modules(dir).find((m) => m.key === 'billing').path, 'new/billing');
+  const started = init(dir);
+  assert.deepEqual(started.unassigned, ['new/Main.java', 'new/sales/OrderApi.java']);
+  assert.deepEqual(started.modules.find((m) => m.module === 'billing').code, ['new/billing/InvoiceController.java', 'new/billing/InvoiceService.java']);
+  const result = check(dir);
+  assert.ok(result.problems.some((p) => /module sales-orders: no code files under its module path "new\/nothing"/.test(p)));
+  assert.deepEqual(result.unassigned, ['new/Main.java', 'new/sales/OrderApi.java']);
+  const empty = repo();
+  write(empty, td, '# Architecture\n\n## Modules\n| Context | Module path | Public API | Events published | Depends on |\n|---|---|---|---|---|\n| x | new/none | - | - | - |\n');
+  init(empty);
+  assert.equal(status(empty).todoList.find((t) => t.key === 'guide').status, 'in-progress', '0 of 0 files is never complete');
 });
 
 test('locate finds the guide page of a module, a file or a URL', () => {
@@ -117,6 +156,7 @@ test('locate finds the guide page of a module, a file or a URL', () => {
   assert.deepEqual(locate(dir, 'new/sales/OrderApi.java'), { page: 'guide-sales-orders', anchor: fileAnchor('new/sales/OrderApi.java') }, 'a file not explained yet is found by its module path');
   assert.deepEqual(locate(dir, 'GET /invoices/{id}'), { page: 'guide-billing', anchor: fileAnchor('new/billing/InvoiceController.java') });
   assert.equal(locate(dir, 'elsewhere/x.java'), null);
+  assert.equal(locate(dir, 'new/billing/Nope.java'), null, 'a file that is not there has no place');
 });
 
 test('render --guide writes the first page with the diagrams and the three ways in, and a page per module', () => {
@@ -149,6 +189,7 @@ test('render --guide writes the first page with the diagrams and the three ways 
   assert.match(after, /この説明を書いた後にコードが変わりました/);
   assert.match(after, /保存した後にコードが変わりました/);
   assert.equal(render({ root: dir, guide: 'nope' }).ok, false);
+  assert.equal(render({ root: dir, guide: 'Sales Orders' }).out, 'openspec/spec-relay/views/guide-sales-orders.html', 'a module named as written gets the file every link names');
 });
 
 test('the to-do list gets one optional line for the guide once it is started', () => {
@@ -156,7 +197,7 @@ test('the to-do list gets one optional line for the guide once it is started', (
   assert.equal(status(dir).todoList.find((t) => t.key === 'guide'), undefined);
   assert.equal(summary(dir), null);
   init(dir);
-  assert.deepEqual(summary(dir), { files: 4, explained: 0, stale: 0 });
+  assert.deepEqual(summary(dir), { files: 4, explained: 0, stale: 0, unassigned: 0 });
   write(dir, 'openspec/spec-relay/guide/code/billing.md', BILLING);
   stamp(dir);
   const line = status(dir, { language: 'en' }).todoList.find((t) => t.key === 'guide');
@@ -174,4 +215,22 @@ test('the command line runs init, stamp and check', () => {
   write(dir, 'openspec/spec-relay/guide/code/billing.md', '# Module: billing\n\n### File: new/billing/Gone.java\nx\n');
   assert.equal(quiet(() => main(['check', '--root', dir])), 1);
   assert.equal(quiet(() => main(['nothing'])), 2);
+});
+
+test('the guide reads and appends only inside the repository', (t) => {
+  const dir = repo();
+  init(dir);
+  write(dir, 'openspec/spec-relay/guide/code/billing.md', BILLING);
+  stamp(dir);
+  const outside = tempDir();
+  write(outside, 'qa.md', 'theirs\n');
+  write(outside, 'code.md', '# Module: sales\n\n## Overview\nSECRET\n');
+  try {
+    fs.symlinkSync(path.join(outside, 'qa.md'), path.join(dir, 'openspec/spec-relay/guide/qa/billing.md'));
+    fs.symlinkSync(path.join(outside, 'code.md'), path.join(dir, 'openspec/spec-relay/guide/code/sales-orders.md'));
+  } catch { t.skip('cannot make links here'); return; }
+  assert.match(saveQa(dir, { module: 'billing', file: 'new/billing/InvoiceService.java', question: 'q', answer: 'a' }).problem, /link or outside/);
+  assert.equal(read(outside, 'qa.md'), 'theirs\n');
+  render({ root: dir, guide: 'sales-orders' });
+  assert.doesNotMatch(read(dir, 'openspec/spec-relay/views/guide-sales-orders.html'), /SECRET/);
 });

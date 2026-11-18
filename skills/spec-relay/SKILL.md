@@ -755,38 +755,45 @@ reads it and it approves nothing. See docs/GUIDE.md.
    `openspec/spec-relay/guide/` with `stack.md` (from conventions.md and the
    build files), a `routes.md` to fill, and prints each module's code files
    and the guide file to write (`code/<module>.md`). It never overwrites a
-   file that is there.
+   file that is there. Tell the person about `unassigned` code files (under
+   no module path of architecture.md): the guide does not cover them.
 3. Run a wave of writers (Working in parallel): give each module to the
    `spec-relay-guide-writer` agent with its guide file, its module path and
    its list of code files as init printed them, and give `routes.md` to one
    more writer (the routes task). One writer per guide file: for a module
    too large for one writer, give the rest of its files to a writer in the
    next wave, to add to the same file. Save and compare the guard around the
-   wave as usual.
-4. Run `node "<kit>/scripts/guide.mjs" stamp` (it writes each explained file's
-   hash under its heading), then `node "<kit>/scripts/guide.mjs" check`. Give
-   the `problems` back to the writer of that file (a name not in the file, a
-   line that does not exist, a handler that is gone), and a module with
-   `unexplained` files too, then stamp and check again.
+   wave as usual (it does not cover `guide/`; the hook, when on, refuses a
+   subagent's write to `guide/qa/`).
+4. Run `node "<kit>/scripts/guide.mjs" stamp` (it writes the file's hash under
+   each heading that has none), then `node "<kit>/scripts/guide.mjs" check`.
+   Give the `problems` back to the writer of that file (a name not in the
+   file, a line that does not exist, a handler that is gone, a module path
+   with no code), and a module with `unexplained` files too, then stamp and
+   check again. A hash that is there changes only with `--file <path>` (one
+   per file written again) or `--file all`: never pass them for a file whose
+   explanation was not rewritten, or its out-of-date warning disappears.
 5. Show it: `node "<kit>/scripts/render.mjs" --guide all` writes
    `openspec/spec-relay/views/guide.html` and a page per module; in the
    canvas, `open_canvas` with input `{ "view": "guide" }` or the action
    `open_guide` (name: a module, a file of the target code or a URL of
    routes.md, which opens the page at that file).
 6. **Questions from the canvas.** A question the person types on a guide page
-   arrives as `[canvas] ...` with an id such as `q3`. Answer it in the chat
+   arrives as `[canvas] ...` with an id such as `q3-1a2b`. Answer it in the chat
    from the code, then send the same answer to the canvas:
    `invoke_canvas_action` (instanceId `spec-relay`, actionName `post_answer`,
-   input `{ "id": "q3", "answer": "<Markdown>" }`). It shows under the item,
-   and on a module's page the person can press "this helped" to save it to
-   `qa/<module>.md` with the file's hash. Never save an answer yourself unless
+   input `{ "id": "q3-1a2b", "answer": "<Markdown>" }`). It shows under the
+   item, and on a module's page the person can press "Helpful (save to the
+   Q&A)" to save it to `qa/<module>.md` with the file's hash. The ids last
+   while the canvas is open; after it was closed, answer in the chat only. Never save an answer yourself unless
    the person asks in the chat; then append an entry to `qa/<module>.md` in
    the same form (`### Q: <question>`, `- File: <path>`, `- Hash:` left empty,
    `- Saved: <date>`, a blank line, the answer) and run `guide.mjs stamp`,
-   which fills the hash. Subagents never write `qa/`.
+   which fills the empty hash. Subagents never write `qa/`.
 7. After later changes to the code, `guide.mjs check` and the guide's pages
-   show which explanations and saved answers are older than the code: give
-   those files to a writer again, then stamp. `status.mjs` shows one optional
+   show which explanations and saved answers are older than the code (the
+   canvas does not watch the code: run the action `refresh`): give those files
+   to a writer again, then `guide.mjs stamp --file <path>` for each. `status.mjs` shows one optional
    TODO line for the guide once `guide/` exists; it is never where the work is.
 
 ## Progress in the TODO list
