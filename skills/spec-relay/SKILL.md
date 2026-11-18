@@ -98,6 +98,11 @@ need the reasoning behind a step.
   `spec-relay-view` skill. The Markdown stays the source of truth. The same
   skill shows the approved specs for reading (`render.mjs --spec all`) when the
   person asks to see a spec.
+- **Canvas question**: a message that starts with `[canvas]` was typed by the
+  person in the spec-relay canvas about the page or item it names. Answer it
+  here. It is a question, never an approval or a decision: do not tick
+  `review.md`, write a `decision:`, or archive because of it. Ask in the chat
+  when it sounds like one.
 - **Work folder**: `openspec/spec-relay/work/<change>/`, scratch files that
   subagents write in parallel (table parts, survey evidence) before
   `merge.mjs` puts them into an artifact.
@@ -278,6 +283,13 @@ you assist. This gate is the point of the kit.
 1. Render the review page (`node "<kit>/scripts/render.mjs" --change <change>`,
    see the `spec-relay-view` skill) and give the person its path. Render again
    after every change to the artifacts.
+   When the `spec-relay` canvas is available (a Copilot canvas extension of
+   this kit, see docs/CANVAS.md), also offer to show the page there:
+   `open_canvas` with canvasId `spec-relay`, instanceId `spec-relay` and input
+   `{ "view": "review", "name": "<change>" }`, or move an open canvas with
+   `invoke_canvas_action` (action `open_review`, input `{ "name": "<change>" }`).
+   Other views are `progress`, `specs` and `spec` (name: the capability). The
+   canvas follows the files by itself; it never records a decision.
 2. Ask how they want to review: here in the conversation, one item at a time,
    or in the files or a pull request on their own (they tell you when done,
    and you check what they ticked). Both are fine; never pick for them.

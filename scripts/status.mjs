@@ -520,9 +520,16 @@ export function checklist(report, { problems = false } = {}) {
   return lines.join('\n');
 }
 
+// A step's state in words, as the table shows it (the canvas uses it too).
+export function stepLabel(lang, state) {
+  const words = WORDS[lang] ?? WORDS.en;
+  return state.status === 'completed' ? words.done : say(words, state.detail) || (state.status === 'in-progress' ? '…' : words.notStarted);
+}
+export const stepName = (lang, id) => (WORDS[lang] ?? WORDS.en)[id];
+
 export function markdown(report) {
   const words = WORDS[report.language] ?? WORDS.en;
-  const cell = (state) => (state.status === 'completed' ? words.done : say(words, state.detail) || (state.status === 'in-progress' ? '…' : words.notStarted));
+  const cell = (state) => stepLabel(report.language, state);
   const grouped = report.capabilities.some((c) => c.group);
   const head = [...(grouped ? [words.group] : []), words.capability, ...STEPS.map((s) => words[s.id])];
   const rows = report.capabilities.map((c) => `| ${grouped ? `${c.group ?? ''} | ` : ''}\`${c.capability}\`${c.counted === false ? ` (${words.notInPlan})` : ''} | ${STEPS.map((s) => cell(c.steps[s.id])).join(' | ')} |`);

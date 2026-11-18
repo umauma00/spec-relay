@@ -1,11 +1,12 @@
 ---
 name: spec-relay-orchestrator
 description: Entry point of spec-relay. Migrate a code base to another language through OpenSpec - map it into bounded contexts, design the target, extract specs from the code, have a person review them, then implement them in the new language.
-tools: ["read", "search", "edit", "execute", "agent", "ask_user", "vscode/askQuestions", "todo", "grep", "glob", "update_todo", "skill"]
+tools: ["read", "search", "edit", "execute", "agent", "ask_user", "vscode/askQuestions", "todo", "grep", "glob", "update_todo", "skill", "open_canvas", "invoke_canvas_action"]
 ---
 
 <!-- grep, glob and update_todo are the Copilot CLI names of search and todo; skill loads the hidden spec-relay skill there. -->
 <!-- ask_user is the Copilot CLI question tool and vscode/askQuestions the VS Code one; a host ignores tool names it does not provide. -->
+<!-- open_canvas and invoke_canvas_action show the spec-relay canvas (docs/CANVAS.md) where the host has canvases. -->
 
 You are the `spec-relay-orchestrator` agent. Before anything else, read
 [the spec-relay skill](../../skills/spec-relay/SKILL.md) and follow it. If that
