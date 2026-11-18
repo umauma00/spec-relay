@@ -424,6 +424,30 @@ test('guard --compare counts a review.md the person changed in the canvas as the
   write(dir, 'openspec/changes/extract-a/review.md', `${file('extract-a')}- [x] R2 sneaked\n`);
   write(dir, 'openspec/changes/extract-b/review.md', '- [x] R1 a\n');
   assert.deepEqual(guardCompare(dir, 'wave-1').changed, ['openspec/changes/extract-a/review.md', 'openspec/changes/extract-b/review.md']);
+  // Edits logged before the snapshot never vouch for a change after it: the person
+  // ticks R1 in the canvas, the orchestrator unticks it, a new wave starts and a
+  // subagent ticks it to the very same bytes.
+  write(dir, 'openspec/changes/extract-b/review.md', '- [ ] R1 a\n');
+  const open = file('extract-b');
+  assert.equal(writeReview(dir, 'extract-b', { action: 'tick', id: 'R1', hash: sha256(open) }).ok, true);
+  const ticked = file('extract-b');
+  write(dir, 'openspec/changes/extract-b/review.md', open.toString());
+  guardSave(dir, 'wave-2');
+  write(dir, 'openspec/changes/extract-b/review.md', ticked.toString());
+  assert.deepEqual(guardCompare(dir, 'wave-2').changed, ['openspec/changes/extract-b/review.md']);
+  // Within the wave too: the person ticks and unticks, then a subagent ticks.
+  write(dir, 'openspec/changes/extract-b/review.md', open.toString());
+  guardSave(dir, 'wave-3');
+  writeReview(dir, 'extract-b', { action: 'tick', id: 'R1', hash: sha256(file('extract-b')) });
+  writeReview(dir, 'extract-b', { action: 'untick', id: 'R1', hash: sha256(file('extract-b')) });
+  write(dir, 'openspec/changes/extract-b/review.md', ticked.toString());
+  assert.deepEqual(guardCompare(dir, 'wave-3').changed, ['openspec/changes/extract-b/review.md']);
+  // A snapshot from before 0.18.0 has no mark: no canvas edit counts.
+  write(dir, 'openspec/changes/extract-b/review.md', open.toString());
+  guardSave(dir, 'wave-4');
+  fs.rmSync(path.join(dir, 'openspec/spec-relay/work/guard/wave-4.canvas-log'));
+  writeReview(dir, 'extract-b', { action: 'tick', id: 'R1', hash: sha256(file('extract-b')) });
+  assert.deepEqual(guardCompare(dir, 'wave-4').changed, ['openspec/changes/extract-b/review.md']);
 });
 
 test('guard --save and --compare list only the protected files that changed', async () => {

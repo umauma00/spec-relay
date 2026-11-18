@@ -169,7 +169,7 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 - 元コード（元のフォルダーが `.` のときは `openspec/` と移行先のフォルダー以外のすべて）、`openspec/specs/`、`openspec/changes/archive/`、`openspec/schemas/`、`openspec/spec-relay/tools/`（固定した OpenSpec）、`openspec/config.yaml`、キット自体への書き込み
 - サブエージェントによる review.md・questions.md・crosscheck.md・port の proposal.md と design.md・計画（plan.md）・学びの記録（lessons.md）の書き込み
 - port のテスト実行の記録（`verify.json`）への書き込み（編集ツールでも、`Set-Content`・リダイレクト・`node -e` などのシェルコマンドでも。書くのは `verify.mjs` だけ）
-- canvas での書き込みの記録（`openspec/spec-relay/canvas-log.jsonl`）への書き込み（編集ツールでも、シェルコマンドでも。書くのは canvas だけ）
+- canvas での書き込みの記録（`openspec/spec-relay/local/canvas-log.jsonl`）への書き込み（編集ツールでも、シェルコマンドでも。書くのは canvas だけ）
 
 有効にするには、`openspec/config.yaml` の context に次の1行を足すか、`on` に変えます（導入時なら `--hooks on`。導入済みのリポジトリでは `--hooks` は反映されないので、この行を自分で直します）。フックが有効な間、AI の編集ツールは config.yaml を書けず、この行や config.yaml を書き換えるシェルコマンドも拒否されます（無効の間も、AI には変えないように指示しています）。
 
@@ -184,7 +184,7 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 
 ## 0.17.0 から更新するとき
 
-0.18.0 で、canvas のレビュー画面から review.md に書き込めるようになりました（確認済みにする・判断を書く・レビュー担当の名前）。自分でファイルを直したのと同じ扱いで、変更の完了（アーカイブ）は今までどおりチャットで伝えます（[詳しく](docs/CANVAS.md)）。書き込みは `openspec/spec-relay/canvas-log.jsonl` に記録され、`gate.mjs guard --compare` はそれをサブエージェントの変更と区別します。プラグインを更新すれば入ります。スキーマや成果物に変更はありません。
+0.18.0 で、canvas のレビュー画面から review.md に書き込めるようになりました（確認済みにする・判断を書く・レビュー担当の名前）。自分でファイルを直したのと同じ扱いで、変更の完了（アーカイブ）は今までどおりチャットで伝えます（[詳しく](docs/CANVAS.md)）。書き込みは `openspec/spec-relay/local/canvas-log.jsonl` に記録され、`gate.mjs guard --compare` はそれをサブエージェントの変更と区別します。プラグインを更新すれば入ります。スキーマや成果物に変更はありません。
 
 ## 0.16.0 から更新するとき
 

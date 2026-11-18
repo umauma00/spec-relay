@@ -72,10 +72,10 @@ test('an archive waits for a passing gate, a change name and the orchestrator', 
   assert.match(shell(dir, "sed -i 's/: on$/: off/' openspec/config.yaml"), /Hook enforcement line included/);
   assert.equal(shell(dir, 'Select-String -Path openspec/config.yaml -Pattern "Hook enforcement"'), null);
   // The record of the person's canvas edits is the canvas's to write.
-  assert.match(shell(dir, "Add-Content openspec/spec-relay/canvas-log.jsonl '{}'"), /only the canvas writes canvas-log/);
-  assert.match(shell(dir, 'echo {} >> openspec\\spec-relay\\canvas-log.jsonl'), /only the canvas writes canvas-log/);
-  assert.match(shell(dir, 'node -e "require(\'fs\').appendFileSync(\'openspec/spec-relay/canvas-log.jsonl\', \'x\')"'), /only the canvas writes canvas-log/);
-  assert.equal(shell(dir, 'Get-Content openspec/spec-relay/canvas-log.jsonl'), null, 'reading it is fine');
+  assert.match(shell(dir, "Add-Content openspec/spec-relay/local/canvas-log.jsonl '{}'"), /only the canvas writes canvas-log/);
+  assert.match(shell(dir, 'echo {} >> openspec\\spec-relay\\local\\canvas-log.jsonl'), /only the canvas writes canvas-log/);
+  assert.match(shell(dir, 'node -e "require(\'fs\').appendFileSync(\'openspec/spec-relay/local/canvas-log.jsonl\', \'x\')"'), /only the canvas writes canvas-log/);
+  assert.equal(shell(dir, 'Get-Content openspec/spec-relay/local/canvas-log.jsonl'), null, 'reading it is fine');
   // Other ways to write the call.
   write(dir, 'openspec/changes/extract-billing-invoice/review.md', 'Reviewer: Uma\n- [ ] R1 Add two numbers\n');
   for (const command of ['npx @fission-ai/openspec@2.0.0 archive extract-billing-invoice --yes', 'openspec.ps1 archive extract-billing-invoice', 'openspec --no-color archive extract-billing-invoice', '(openspec archive extract-billing-invoice --yes)', 'powershell -Command "openspec archive extract-billing-invoice --yes"']) {
@@ -112,7 +112,7 @@ test('agents may not write the source, baselines, archives, schemas, settings or
   assert.match(edit(dir, 'openspec/spec-relay/lessons.md', sub), /only the orchestrator writes/);
   assert.match(edit(dir, 'openspec/changes/port-billing-invoice/crosscheck.md', sub), /only the orchestrator writes/);
   assert.match(edit(dir, 'openspec/changes/port-billing-invoice/verify.json'), /only verify\.mjs writes/);
-  assert.match(edit(dir, 'openspec/spec-relay/canvas-log.jsonl'), /only the canvas writes canvas-log/);
+  assert.match(edit(dir, 'openspec/spec-relay/local/canvas-log.jsonl'), /only the canvas writes canvas-log/);
   assert.match(edit(dir, 'openspec/changes/port-billing-invoice/verify.json', sub), /only verify\.mjs writes/);
   assert.match(edit(dir, 'openspec/spec-relay/lessons.md', { agentId: 'i1', agentType: 'spec-relay-implementer' }), /only the orchestrator writes/);
   assert.match(edit(dir, 'openspec/spec-relay/lessons.md', { agentId: 'c1', agentType: 'spec-relay:spec-relay-checker' }), /only the orchestrator writes/);

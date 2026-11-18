@@ -637,7 +637,8 @@ export const PLAN = 'openspec/spec-relay/plan.md';
 // What the person's corrections taught; only the orchestrator writes it.
 export const LESSONS = 'openspec/spec-relay/lessons.md';
 // The person's edits of review.md made in the canvas (review-edit.mjs writes it; agents never do).
-export const CANVAS_LOG = 'openspec/spec-relay/canvas-log.jsonl';
+// One machine's record, like the metrics: under local/, never committed.
+export const CANVAS_LOG = 'openspec/spec-relay/local/canvas-log.jsonl';
 
 // The capabilities of the plan's capability list: top-level items under the
 // "## Capabilities" heading (as status.mjs reads it), not follow-up notes.
@@ -840,6 +841,9 @@ export function guardHash(root) {
 
 const GUARD_DIR = 'openspec/spec-relay/work/guard';
 const snapshotFile = (root, name) => path.join(root, GUARD_DIR, `${name}.json`);
+// Where the canvas log ended when the snapshot was taken: only later canvas edits count.
+const logMark = (root, name) => path.join(root, GUARD_DIR, `${name}.canvas-log`);
+const logSize = (root) => { try { return fs.statSync(path.join(root, CANVAS_LOG)).size; } catch { return 0; } };
 
 export function guardSave(root, name) {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(name)) return { ok: false, problems: [`not a snapshot name: ${name} (letters, digits and hyphens)`] };
@@ -849,6 +853,7 @@ export function guardSave(root, name) {
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, `${JSON.stringify(files, null, 1)}\n`);
+    fs.writeFileSync(logMark(root, name), `${logSize(root)}\n`);
   } catch (error) { return { ok: false, problems: [`could not write ${GUARD_DIR}/${name}.json: ${error.message}`] }; }
   return { ok: true, snapshot: `${GUARD_DIR}/${name}.json`, files: Object.keys(files).length, ...(warnings.length ? { warnings } : {}) };
 }
@@ -862,21 +867,29 @@ export function guardCompare(root, name) {
     return { ok: false, problems: [`no snapshot ${GUARD_DIR}/${name}.json; run gate.mjs guard --save ${name} before the wave`] };
   }
   const now = guardFiles(root);
-  // A review.md the person changed in the canvas (a chain of logged edits from the
-  // snapshot's hash to today's) is theirs, not a subagent's.
-  const edges = new Map();
-  try {
-    for (const line of fs.readFileSync(path.join(root, CANVAS_LOG), 'utf8').split(/\r?\n/)) {
+  // A review.md the person changed in the canvas is theirs, not a subagent's: the
+  // canvas edits logged after the snapshot, replayed in order, lead without a gap
+  // from the snapshot's hash to today's. Any other change breaks the chain.
+  let mark = null;
+  try { mark = Number(fs.readFileSync(logMark(root, name), 'utf8').trim()); } catch { /* an older snapshot: no canvas edits count */ }
+  const chains = new Map();
+  if (Number.isInteger(mark) && mark >= 0) {
+    let entries = [];
+    try {
+      const buffer = fs.readFileSync(path.join(root, CANVAS_LOG));
+      if (buffer.length >= mark) entries = buffer.subarray(mark).toString('utf8').split(/\r?\n/);
+    } catch { /* no log */ }
+    for (const line of entries) {
       let e;
       try { e = JSON.parse(line); } catch { continue; }
-      if (e && typeof e.file === 'string' && typeof e.before === 'string' && typeof e.after === 'string') edges.set(`${e.file}\0${e.before}`, e.after);
+      if (!e || typeof e.file !== 'string' || typeof e.before !== 'string' || typeof e.after !== 'string') continue;
+      const chain = chains.get(e.file) ?? { at: before[e.file], broken: false };
+      if (chain.at !== e.before) chain.broken = true;
+      chain.at = e.after;
+      chains.set(e.file, chain);
     }
-  } catch { /* no canvas edits */ }
-  const byCanvas = (f) => {
-    let at = before[f];
-    for (let n = 0; n < 10000 && at !== now[f]; n += 1) { at = edges.get(`${f}\0${at}`); if (!at) return false; }
-    return at === now[f];
-  };
+  }
+  const byCanvas = (f) => { const chain = chains.get(f); return Boolean(chain) && !chain.broken && chain.at === now[f]; };
   const touched = Object.keys(now).filter((f) => f in before && before[f] !== now[f]);
   const canvas = touched.filter(byCanvas).sort();
   const changed = touched.filter((f) => !canvas.includes(f)).sort();
@@ -1151,7 +1164,7 @@ function readTarget(file) {
   try { buffer = fs.readFileSync(file); } catch { return { binary: true, buffer: Buffer.alloc(0) }; }
   if ((buffer[0] === 0xff && buffer[1] === 0xfe) || (buffer[0] === 0xfe && buffer[1] === 0xff)) return { utf16: true, buffer };
   if (buffer.length > 4 * 1024 * 1024 || buffer.includes(0)) return { binary: true, buffer };
-  return { text: buffer.toString('utf8').replace(/^﻿/, '').replace(/\r\n?/g, '\n') };
+  return { text: buffer.toString('utf8').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n') };
 }
 
 // The sha256 of every target file, as verify.mjs records it.

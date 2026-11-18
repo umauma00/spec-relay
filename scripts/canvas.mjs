@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { view, page, labels, escapeHtml, markdown, parseReview, capabilities, timeStamp } from './render.mjs';
 import { status, checklist, stepLabel, stepName, STEPS } from './status.mjs';
 import { language, changeSchema, archivedChange } from './gate.mjs';
-import { writeReview, sha256 } from './review-edit.mjs';
+import { writeReview, sha256, utf8Text, reviewerOf, decisionOf } from './review-edit.mjs';
 
 export const VIEWS = 'openspec/spec-relay/views';
 
@@ -46,6 +46,9 @@ const WORDS = {
     decisionTitle: '判断を書く', reviewerTitle: 'レビュー担当の名前',
     editHint: 'review.md に書き込みます。あなたが自分でファイルを直したのと同じ扱いです。変更を完了（アーカイブ）してよいかは、チャットで伝えてください。',
     saving: '保存しています…', saved: 'review.md に保存しました。', changed: 'review.md がほかで変わっていたので、読み直しました。もう一度操作してください。', saveFailed: '保存できませんでした', emptyValue: '書いてから保存してください。',
+    needDecision: '先に判断を書いてください。', notUtf8: 'review.md が UTF-8 ではないため書き込めません。UTF-8 で保存し直してください。',
+    busy: 'ほかのプログラムが review.md を使っていて書き込めませんでした。閉じてからもう一度押してください。', noLine: 'review.md にこの項目の行が見つかりません。',
+    howto: '正しければ「確認済みにする」を押す（review.md に書き込まれます）',
     send: '送る', cancel: 'やめる', sending: '送っています…', sent: 'チャットに送りました。', failed: '送れませんでした', empty: '質問を書いてください。',
     notRepo: 'このフォルダには openspec/ がありません。spec-relay を導入したリポジトリでチャットを開いてください。',
     notFound: 'この画面はありません（変更や仕様が消えたか、名前が違います）。上の「進み具合」から選んでください。',
@@ -66,6 +69,9 @@ const WORDS = {
     decisionTitle: 'Write the decision', reviewerTitle: 'Reviewer name',
     editHint: 'This writes to review.md, the same as editing the file yourself. Whether the change may be completed (archived) you tell in the chat.',
     saving: 'Saving…', saved: 'Saved to review.md.', changed: 'review.md had changed elsewhere, so the page was reloaded. Try again.', saveFailed: 'Could not save', emptyValue: 'Write something first.',
+    needDecision: 'Write the decision first.', notUtf8: 'review.md is not UTF-8, so it cannot be written. Save it again as UTF-8.',
+    busy: 'Another program is using review.md, so it could not be written. Close it and try again.', noLine: 'review.md has no line for this item.',
+    howto: 'If it is right, press "Mark confirmed" (it is written to review.md)',
     send: 'Send', cancel: 'Cancel', sending: 'Sending…', sent: 'Sent to the chat.', failed: 'Could not send', empty: 'Write a question first.',
     notRepo: 'This folder has no openspec/. Open the chat in a repository where spec-relay is set up.',
     notFound: 'There is no such page (the change or spec is gone, or the name is wrong). Pick one from Progress above.',
@@ -223,18 +229,25 @@ const CANVAS_SCRIPT = String.raw`(() => {
       const res = await fetch(base + '/review', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'review' }, body: JSON.stringify({ page: cfg.page, hash, action, id, value }) });
       let j = {};
       try { j = await res.json(); } catch (e) { /* not JSON */ }
-      if (res.status === 409) { reload(W.changed); return false; }
-      if (!res.ok || !j.ok) throw new Error(j.problem || String(res.status));
+      if (res.status === 409) return false;
+      if (!res.ok || !j.ok) throw new Error((j.code && W[j.code]) || j.problem || String(res.status));
       hash = j.hash;
       return true;
     };
-    const run = async (steps, report) => {
+    // A stale page reloads; what was typed in the dialog comes back with it.
+    const run = async (steps, report, draft) => {
       if (writing) return;
       writing = true;
       try {
-        for (const [action, id, value] of steps) if (!(await post(action, id, value))) return;
+        for (const [action, id, value] of steps) {
+          if (!(await post(action, id, value))) {
+            if (draft) store('spec-relay-canvas-draft', JSON.stringify({ page: cfg.page, ...draft }));
+            reload(W.changed);
+            return;
+          }
+        }
         reload(W.saved);
-      } catch (err) { report(W.saveFailed + ' (' + err.message + ')'); }
+      } catch (err) { report(W.saveFailed + ': ' + err.message); }
       finally { writing = false; }
     };
     const edit = (kind, id, value, then) => {
@@ -267,9 +280,18 @@ const CANVAS_SCRIPT = String.raw`(() => {
       if (!value) { emsg.textContent = W.emptyValue; etext.focus(); return; }
       esave.disabled = true; emsg.textContent = W.saving;
       const steps = job.kind === 'reviewer' ? [['reviewer', null, value]] : [['decision', job.id, value], ...(job.then ? [[job.then, job.id]] : [])];
-      await run(steps, (m) => { emsg.textContent = m; });
+      await run(steps, (m) => { emsg.textContent = m; }, { kind: job.kind, id: job.id, then: job.then || null, value });
       esave.disabled = false;
     });
+    let draft = null;
+    try { draft = JSON.parse(store('spec-relay-canvas-draft') || 'null'); } catch (e) { draft = null; }
+    if (draft) {
+      store('spec-relay-canvas-draft', null);
+      if (draft.page === cfg.page && (draft.kind === 'reviewer' || R.items.some((it) => it.id === draft.id))) {
+        edit(draft.kind, draft.id, draft.value, draft.then || undefined);
+        emsg.textContent = W.changed;
+      }
+    }
   }
   // Links the canvas cannot show (images, source files, other sites) would leave it with no way back.
   const hold = (e) => {
@@ -313,11 +335,12 @@ const CANVAS_SCRIPT = String.raw`(() => {
 // that write review.md.
 export function interactive(html, { lang, pagePath, title, version, seq, nonce, review = null }) {
   const W = WORDS[lang];
+  const L = labels(lang);
   const current = path.posix.basename(pagePath);
   const nav = `<nav class="canvas-nav" aria-label="${escapeHtml(W.nav)}"><a href="progress.html"${current === 'progress.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.progress)}</a><a href="specs.html"${current === 'specs.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.specs)}</a></nav>
 <p class="ask-row ask-page"><button type="button" class="ask" id="ask-page">${escapeHtml(W.askPage)}</button>${review ? ` <button type="button" class="ask mark" id="edit-reviewer">${escapeHtml(review.reviewer ? `${W.reviewer}: ${review.reviewer}` : W.reviewerSet)}</button>` : ''}</p>`;
   const words = Object.fromEntries(['ask', 'askAbout', 'sending', 'sent', 'failed', 'empty', 'noLink', 'gone',
-    ...(review ? ['tick', 'untick', 'decide', 'decideTick', 'decisionTitle', 'reviewerTitle', 'saving', 'saved', 'changed', 'saveFailed', 'emptyValue'] : [])].map((k) => [k, W[k]]));
+    ...(review ? ['tick', 'untick', 'decide', 'decideTick', 'decisionTitle', 'reviewerTitle', 'saving', 'saved', 'changed', 'saveFailed', 'emptyValue', 'needDecision', 'notUtf8', 'busy', 'noLine'] : [])].map((k) => [k, W[k]]));
   const config = JSON.stringify({ page: pagePath, title, version, seq, words, review }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const dialog = `<dialog class="ask-box" id="ask-box" aria-labelledby="ask-title" aria-describedby="ask-about"><form method="dialog"><h2 id="ask-title">${escapeHtml(W.askTitle)}</h2><p class="about" id="ask-about"></p>
 <textarea id="ask-text" maxlength="4000" aria-labelledby="ask-title" aria-describedby="ask-about ask-hint ask-msg"></textarea>
@@ -332,6 +355,9 @@ ${review ? `<dialog class="ask-box" id="edit-box" aria-labelledby="edit-title"><
     // Only render.mjs's own script (the last one on its page) runs; anything else stays inert.
     .replace(/<script>(?![\s\S]*<script>)/, () => `<script nonce="${nonce}">`)
     .replace('</style>', () => `${CANVAS_CSS}</style>`)
+    // The canvas follows the files: no "render again", and the tick is a button here.
+    .replace(`<footer>${escapeHtml(L.note)}</footer>`, () => `<footer>${escapeHtml(W.note)}</footer>`)
+    .replace(`<li>${L.howto[2]}</li>`, () => (review ? `<li>${escapeHtml(W.howto)}</li>` : `<li>${L.howto[2]}</li>`))
     .replace(/(<p class="meta">[^<]*<\/p>)/, (m) => `${m}\n${nav}`)
     .replace(/<\/body>\s*<\/html>\s*$/, () => `${dialog}\n</body>\n</html>\n`);
 }
@@ -404,9 +430,15 @@ function insideRoot(root, rel) {
 }
 
 // The review.md of an active change, when it is a plain file at its own path
-// (no link out of the change folder): the only file the canvas writes.
-function reviewFile(root, name) {
-  if (!CHANGE_NAME.test(name) || name === 'archive' || /^\.+$/.test(name)) return null;
+// (no link out of the change folder): the only file the canvas writes. The name
+// is the folder's own, as read from the disk (on Windows a name in another case
+// opens the same folder, and the log and the guard must name it the same way).
+function reviewFile(root, wanted) {
+  if (!CHANGE_NAME.test(wanted) || wanted === 'archive' || /^\.+$/.test(wanted)) return null;
+  let names = [];
+  try { names = fs.readdirSync(path.join(root, 'openspec/changes'), { withFileTypes: true }).filter((e) => e.isDirectory() && e.name !== 'archive').map((e) => e.name); } catch { return null; }
+  const name = names.find((n) => n === wanted) ?? (process.platform === 'win32' ? names.find((n) => n.toLowerCase() === wanted.toLowerCase()) : undefined);
+  if (!name) return null;
   const dir = path.join(root, 'openspec/changes', name);
   if (!fs.existsSync(path.join(dir, '.openspec.yaml')) && !fs.existsSync(path.join(dir, 'proposal.md'))) return null;
   const rel = `openspec/changes/${name}/review.md`;
@@ -414,24 +446,23 @@ function reviewFile(root, name) {
   if (!file) return null;
   const expected = path.join(fs.realpathSync(root), ...rel.split('/'));
   const same = process.platform === 'win32' ? file.toLowerCase() === expected.toLowerCase() : file === expected;
-  try { return same && fs.lstatSync(expected).isFile() ? expected : null; } catch { return null; }
+  try { return same && fs.lstatSync(expected).isFile() ? { file: expected, name } : null; } catch { return null; }
 }
 
-// What the page needs to write review.md: the hash it was built from, its items and the reviewer.
+// What the page needs to write review.md: the hash it was built from, its items
+// and the reviewer, read as the gate reads them. Null for a file that is not
+// UTF-8: the canvas never rewrites one.
 function reviewState(file) {
   const buffer = fs.readFileSync(file);
-  const text = buffer.toString('utf8');
+  const text = utf8Text(buffer);
+  if (text === null) return null;
   const seen = new Set();
   const items = parseReview(text).flatMap((g) => g.items).filter((i) => i.id && !seen.has(i.id) && seen.add(i.id))
-    .map((i) => ({ id: i.id, done: i.done, q: i.letter === 'Q', decided: Boolean(i.decision), decision: i.decision ?? '' }));
-  let fenced = false;
-  let reviewer = null;
-  for (const line of text.split(/\r?\n/)) {
-    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
-    const m = !fenced && line.match(/^\s*\**Reviewer\**\s*:\s*(.*)$/i);
-    if (m) { reviewer = m[1].replace(/<!--[\s\S]*?-->/g, '').replace(/[*_]/g, '').trim() || null; break; }
-  }
-  return { hash: sha256(buffer), items, reviewer };
+    .map((i) => {
+      const decision = i.decision === null ? '' : decisionOf(`decision: ${i.decision}`);
+      return { id: i.id, done: i.done, q: i.letter === 'Q', decided: Boolean(decision), decision };
+    });
+  return { hash: sha256(buffer), items, reviewer: reviewerOf(text) };
 }
 
 const sameToken = (a, b) => {
@@ -475,8 +506,8 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
       let review = null;
       if (!capability && name !== 'specs' && changeExists(root, name)) {
         // The hash is read before the page, so a file that changes meanwhile makes the edit stale, never wrong.
-        const file = reviewFile(root, name);
-        try { review = file ? reviewState(file) : null; } catch { review = null; }
+        const found = reviewFile(root, name);
+        try { review = found ? reviewState(found.file) : null; } catch { review = null; }
         result = view({ root, change: name, lang: code, now: now(), at });
       }
       built = result?.ok ? { html: result.html, title: result.title, review } : null;
@@ -523,9 +554,14 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
           || (action === 'reviewer' ? typeof value !== 'string' : typeof id !== 'string')
           || (action === 'decision' && typeof value !== 'string')) return reply(400, { ok: false, problem: 'bad request' });
         const name = typeof body.page === 'string' && body.page.startsWith(`${VIEWS}/`) ? path.posix.basename(body.page, '.html') : '';
-        if (!name || !reviewFile(root, name)) return reply(404, { ok: false, problem: 'this page has no review.md to write' });
-        const result = writeReview(root, name, { action, id: action === 'reviewer' ? undefined : id, value, hash });
-        if (!result.ok) return reply(result.status, { ok: false, problem: result.problem });
+        const found = name ? reviewFile(root, name) : null;
+        if (!found) return reply(404, { ok: false, code: 'noFile', problem: 'this page has no review.md to write' });
+        const result = writeReview(root, found.name, { action, id: action === 'reviewer' ? undefined : id, value, hash });
+        if (!result.ok) {
+          // A stale page is reloaded next: look at the files again at once, so it gets today's file.
+          if (result.status === 409) { checked = 0; cache.clear(); }
+          return reply(result.status, { ok: false, code: result.code, problem: result.problem });
+        }
         if (!result.unchanged) {
           // The pages show the new file at once, and the next look at the files does not count this write twice.
           version += 1;

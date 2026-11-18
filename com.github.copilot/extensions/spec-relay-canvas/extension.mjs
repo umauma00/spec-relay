@@ -99,12 +99,13 @@ session = await joinSession({
         {
           name: 'get_review_edits',
           description: 'What the person changed in review.md from the canvas (ticks, decisions, the reviewer), oldest first. Read review.md again after any of them.',
-          inputSchema: { type: 'object', additionalProperties: false, properties: { since: { type: 'string', description: 'Only edits after this ISO time.' } } },
+          inputSchema: { type: 'object', additionalProperties: false, properties: { since: { type: 'string', description: 'Only edits after this date-time (ISO 8601, with Z or an offset such as +09:00).' } } },
           handler: async (ctx) => {
             const key = instances.get(ctx.instanceId);
             const root = key ? servers.get(key)?.root ?? rootOf(ctx) : rootOf(ctx);
-            const since = typeof ctx.input?.since === 'string' ? ctx.input.since : undefined;
-            return { edits: canvasEdits(root, { since }).slice(-200) };
+            const result = canvasEdits(root, { since: typeof ctx.input?.since === 'string' ? ctx.input.since : undefined });
+            if (!result.ok) throw new CanvasError('bad_input', result.problem);
+            return { edits: result.edits.slice(-200) };
           },
         },
         { name: 'open_progress', description: 'Show the progress page in the open canvas.', handler: (ctx) => go(ctx, 'progress') },

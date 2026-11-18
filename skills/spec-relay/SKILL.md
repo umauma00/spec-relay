@@ -106,7 +106,7 @@ need the reasoning behind a step.
 - **Canvas edit**: a tick, an untick, a `decision:` or the `Reviewer:` line the
   person wrote in `review.md` with the canvas buttons. It is their own edit of
   the file, the same as typing it there; the canvas records each one in
-  `openspec/spec-relay/canvas-log.jsonl` (never write that file). It is not an
+  `openspec/spec-relay/local/canvas-log.jsonl` (never write that file). It is not an
   approval to archive.
 - **Work folder**: `openspec/spec-relay/work/<change>/`, scratch files that
   subagents write in parallel (table parts, survey evidence) before

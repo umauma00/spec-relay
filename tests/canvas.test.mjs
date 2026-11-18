@@ -123,6 +123,9 @@ test('the page of an active change writes review.md for the person, and only tha
     assert.deepEqual(first.review.items.map((i) => [i.id, i.done, i.q]), [['R1', true, false], ['R2', false, false], ['Q1', false, true]]);
     assert.equal(first.review.reviewer, null);
     assert.match((await fetchText(server.url('extract-auth-login'))).text, /id="edit-box"[\s\S]*id="edit-reviewer"|id="edit-reviewer"[\s\S]*id="edit-box"/);
+    const reviewHtml = (await fetchText(server.url('extract-auth-login'))).text;
+    assert.match(reviewHtml, /<li>正しければ「確認済みにする」を押す/);
+    assert.doesNotMatch(reviewHtml, /にして作り直す|作り直してください/);
     assert.equal((await config('progress')).review, null, 'other pages write nothing');
     assert.equal((await config('2026-11-01-extract-old')).review, null, 'an archived change is a record');
     const page = 'openspec/spec-relay/views/extract-auth-login.html';
@@ -149,7 +152,23 @@ test('the page of an active change writes review.md for the person, and only tha
     assert.equal((await state()).version, v + 3, 'and is not counted again as a file change');
     const after = await config('extract-auth-login');
     assert.deepEqual([after.review.hash, after.review.reviewer, after.review.items[2].decided], [named.hash, 'Uma', true]);
-    assert.equal(fs.readFileSync(path.join(dir, 'openspec/spec-relay/canvas-log.jsonl'), 'utf8').trim().split('\n').length, 3);
+    assert.equal(fs.readFileSync(path.join(dir, 'openspec/spec-relay/local/canvas-log.jsonl'), 'utf8').trim().split('\n').length, 3);
+    // A file changed elsewhere: the write is refused and the next page has today's hash at once.
+    const file = path.join(dir, 'openspec/changes/extract-auth-login/review.md');
+    await config('extract-auth-login');
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('- [x] R1', '- [ ] R1'));
+    const stale = await edit({ action: 'tick', id: 'R1', hash: named.hash });
+    assert.deepEqual([stale.status, (await stale.json()).code], [409, 'stale']);
+    assert.equal((await config('extract-auth-login')).review.items[0].done, false, 'no cached page with the old file');
+    // A placeholder is no decision; a file that is not UTF-8 gets no buttons.
+    fs.writeFileSync(file, 'Reviewer: Uma\n- [ ] Q1 Rounding: decision: ...\n');
+    await new Promise((r) => setTimeout(r, 1100));
+    assert.equal((await config('extract-auth-login')).review.items[0].decided, false);
+    fs.writeFileSync(file, Buffer.from([0x52, 0x65, 0x76, 0x69, 0x65, 0x77, 0x65, 0x72, 0x3a, 0x20, 0x82, 0xa4, 0x0a]));
+    await new Promise((r) => setTimeout(r, 1100));
+    assert.equal((await config('extract-auth-login')).review, null);
+    const canvasPage = (await fetchText(server.url('progress'))).text;
+    assert.doesNotMatch(canvasPage, /作り直して/, 'the canvas follows the files by itself');
     if (process.platform !== 'win32') {
       // A review.md that links elsewhere is not written through.
       write(dir, 'openspec/changes/extract-linked/.openspec.yaml', 'schema: spec-relay-extract\n');
