@@ -110,6 +110,75 @@ test('the server serves the pages and images under its token, and nothing else',
   } finally { await server.close(); }
 });
 
+test('the page of an active change writes review.md for the person, and only that', async () => {
+  const dir = repo();
+  write(dir, 'openspec/changes/extract-auth-login/review.md', 'Reviewer:\n\n## 1. Requirements\n- [x] R1 Password\n- [ ] R2 Lockout\n\n## 2. Questions\n- [ ] Q1 Rounding\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-extract-old/review.md', '- [ ] R1 x\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-extract-old/.openspec.yaml', 'schema: spec-relay-extract\n');
+  const server = await startServer({ root: dir, log: () => {} });
+  try {
+    const base = `http://127.0.0.1:${server.port}/${server.token}`;
+    const config = async (name) => JSON.parse((await fetchText(server.url(name))).text.match(/<script type="application\/json" id="canvas-config">(.*?)<\/script>/)[1]);
+    const first = await config('extract-auth-login');
+    assert.deepEqual(first.review.items.map((i) => [i.id, i.done, i.q]), [['R1', true, false], ['R2', false, false], ['Q1', false, true]]);
+    assert.equal(first.review.reviewer, null);
+    assert.match((await fetchText(server.url('extract-auth-login'))).text, /id="edit-box"[\s\S]*id="edit-reviewer"|id="edit-reviewer"[\s\S]*id="edit-box"/);
+    const reviewHtml = (await fetchText(server.url('extract-auth-login'))).text;
+    assert.match(reviewHtml, /<li>正しければ「確認済みにする」を押す/);
+    assert.doesNotMatch(reviewHtml, /にして作り直す|作り直してください/);
+    assert.equal((await config('progress')).review, null, 'other pages write nothing');
+    assert.equal((await config('2026-11-01-extract-old')).review, null, 'an archived change is a record');
+    const page = 'openspec/spec-relay/views/extract-auth-login.html';
+    const edit = (body, headers = { 'X-Spec-Relay': 'review' }) => fetch(`${base}/review`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ page, ...body }) });
+    const hash = first.review.hash;
+    assert.equal((await edit({ action: 'tick', id: 'R2', hash }, {})).status, 403, 'a plain form post cannot write');
+    assert.equal((await edit({ action: 'tick', id: 'R2', hash }, { 'X-Spec-Relay': 'review', Origin: 'http://evil.example' })).status, 403);
+    assert.equal((await edit({ action: 'tick', id: 'R2', hash: 'stale' })).status, 409);
+    assert.equal((await edit({ action: 'archive', id: 'R2', hash })).status, 400);
+    assert.equal((await edit({ action: 'tick', id: 'R1', hash, page: 'openspec/spec-relay/views/2026-11-01-extract-old.html' })).status, 404);
+    const q = await edit({ action: 'tick', id: 'Q1', hash });
+    assert.equal(q.status, 400);
+    assert.match((await q.json()).problem, /write the decision first/);
+    const state = async () => (await fetch(`${base}/state`)).json();
+    const v = (await state()).version;
+    const ticked = await (await edit({ action: 'tick', id: 'R2', hash })).json();
+    assert.equal(ticked.ok, true);
+    const decided = await (await edit({ action: 'decision', id: 'Q1', value: 'Half up', hash: ticked.hash })).json();
+    const named = await (await edit({ action: 'reviewer', value: 'Uma', hash: decided.hash })).json();
+    assert.equal(named.ok, true);
+    assert.equal(fs.readFileSync(path.join(dir, 'openspec/changes/extract-auth-login/review.md'), 'utf8'), 'Reviewer: Uma\n\n## 1. Requirements\n- [x] R1 Password\n- [x] R2 Lockout\n\n## 2. Questions\n- [ ] Q1 Rounding: decision: Half up\n');
+    assert.equal((await state()).version, v + 3, 'every write shows at once');
+    await new Promise((r) => setTimeout(r, 1100));
+    assert.equal((await state()).version, v + 3, 'and is not counted again as a file change');
+    const after = await config('extract-auth-login');
+    assert.deepEqual([after.review.hash, after.review.reviewer, after.review.items[2].decided], [named.hash, 'Uma', true]);
+    assert.equal(fs.readFileSync(path.join(dir, 'openspec/spec-relay/local/canvas-log.jsonl'), 'utf8').trim().split('\n').length, 3);
+    // A file changed elsewhere: the write is refused and the next page has today's hash at once.
+    const file = path.join(dir, 'openspec/changes/extract-auth-login/review.md');
+    await config('extract-auth-login');
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('- [x] R1', '- [ ] R1'));
+    const stale = await edit({ action: 'tick', id: 'R1', hash: named.hash });
+    assert.deepEqual([stale.status, (await stale.json()).code], [409, 'stale']);
+    assert.equal((await config('extract-auth-login')).review.items[0].done, false, 'no cached page with the old file');
+    // A placeholder is no decision; a file that is not UTF-8 gets no buttons.
+    fs.writeFileSync(file, 'Reviewer: Uma\n- [ ] Q1 Rounding: decision: ...\n');
+    await new Promise((r) => setTimeout(r, 1100));
+    assert.equal((await config('extract-auth-login')).review.items[0].decided, false);
+    fs.writeFileSync(file, Buffer.from([0x52, 0x65, 0x76, 0x69, 0x65, 0x77, 0x65, 0x72, 0x3a, 0x20, 0x82, 0xa4, 0x0a]));
+    await new Promise((r) => setTimeout(r, 1100));
+    assert.equal((await config('extract-auth-login')).review, null);
+    const canvasPage = (await fetchText(server.url('progress'))).text;
+    assert.doesNotMatch(canvasPage, /作り直して/, 'the canvas follows the files by itself');
+    if (process.platform !== 'win32') {
+      // A review.md that links elsewhere is not written through.
+      write(dir, 'openspec/changes/extract-linked/.openspec.yaml', 'schema: spec-relay-extract\n');
+      fs.symlinkSync(path.join(dir, 'secret.txt'), path.join(dir, 'openspec/changes/extract-linked/review.md'));
+      assert.equal((await config('extract-linked')).review, null);
+      assert.equal((await edit({ action: 'tick', id: 'R1', hash, page: 'openspec/spec-relay/views/extract-linked.html' })).status, 404);
+    }
+  } finally { await server.close(); }
+});
+
 test('the state moves when the files change and when the agent sends the canvas elsewhere; any --lang works', async () => {
   const dir = repo();
   const server = await startServer({ root: dir, lang: 'English' });
@@ -159,6 +228,8 @@ export async function joinSession(config) { globalThis.__canvas = { config, sent
     assert.notEqual(new URL(c.url).port, new URL(a.url).port, 'another repository gets its own server');
     assert.deepEqual(await action('open_spec')({ instanceId: 'i1', input: { name: 'billing/invoice' }, session }), { ok: true, shown: 'spec-billing-invoice' });
     assert.equal((await action('get_status')({ instanceId: 'i1', session })).changes[0].name, 'extract-auth-login');
+    assert.deepEqual(await action('get_review_edits')({ instanceId: 'i1', input: {}, session }), { edits: [] });
+    assert.ok(!canvas.actions.some((x) => /tick|decision|write|archive/i.test(x.name)), 'the agent has no action that writes');
     const base = a.url.replace(/\/r\/.*$/, '');
     await fetch(`${base}/ask`, { method: 'POST', headers: { 'X-Spec-Relay': 'ask' }, body: JSON.stringify({ question: 'q' }) });
     assert.equal(globalThis.__canvas.sent[0].mode, 'enqueue');

@@ -12,9 +12,10 @@
 //     openspec/ and the target root), under openspec/specs/, openspec/changes/archive/,
 //     openspec/schemas/, openspec/spec-relay/tools/ (the pinned OpenSpec), openspec/spec-relay/db/ (the
 //     exported database definitions), of openspec/config.yaml, and inside the kit itself;
-//   - any agent edit of a change's verify.json (verify.mjs writes it);
+//   - any agent edit of a change's verify.json (verify.mjs writes it) or of
+//     openspec/spec-relay/local/canvas-log.jsonl (the canvas writes it);
 //   - subagent edits of review.md, questions.md, crosscheck.md, a port's proposal.md and design.md, the plan and the lessons;
-//   - shell commands that write a verify.json;
+//   - shell commands that write a verify.json or the canvas log;
 //   - shell commands that mention the "Hook enforcement" setting.
 // Shell commands that write files some other way are not parsed; the wave guard
 // (gate.mjs guard) still finds those changes afterwards.
@@ -26,7 +27,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkReview, checkPortDone, changeSchema, configValue, cleanValue, nextSteps, language, readIf, PLAN, LESSONS } from './gate.mjs';
+import { checkReview, checkPortDone, changeSchema, configValue, cleanValue, nextSteps, language, readIf, PLAN, LESSONS, CANVAS_LOG } from './gate.mjs';
 
 const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Tool names of the Copilot runtime (CLI hooks reference; VS Code's Copilot
@@ -43,14 +44,17 @@ const WRITES = /(?:^|[\s;&|(])(?:set-content|add-content|out-file|clear-content|
 // Whether a shell command writes a port's verify.json, which only verify.mjs
 // writes: a write command or redirection aimed at it, a .NET file write, or a
 // one-line script (node, python) that names it. Reading it is fine.
-const RECEIPT = String.raw`[^\s;|&]*verify(?:\.json|\*)`;
-const RECEIPT_WRITES = [
-  new RegExp(String.raw`(?:^|[\s;&|(])(?:set-content|add-content|out-file|clear-content|new-item|ni|copy-item|cp|copy|move-item|mv|move|rename-item|ren|remove-item|rm|del|erase|tee|tee-object|truncate|dd)\b[^;|&]*${RECEIPT}`, 'i'),
-  new RegExp(String.raw`>>?\s*["']?${RECEIPT}`, 'i'),
-  new RegExp(String.raw`\[(?:system\.)?io\.file\]::\w+\([^)]*${RECEIPT}`, 'i'),
-  new RegExp(String.raw`(?:^|[\s;&|(])(?:node|python3?|py|perl|ruby|php)(?:\.exe)?\b[^;|&]*\s-(?:e|p|c|r)\b[^;|&]*${RECEIPT}`, 'i'),
+const writesTo = (target) => [
+  new RegExp(String.raw`(?:^|[\s;&|(])(?:set-content|add-content|out-file|clear-content|new-item|ni|copy-item|cp|copy|move-item|mv|move|rename-item|ren|remove-item|rm|del|erase|tee|tee-object|truncate|dd)\b[^;|&]*${target}`, 'i'),
+  new RegExp(String.raw`>>?\s*["']?${target}`, 'i'),
+  new RegExp(String.raw`\[(?:system\.)?io\.file\]::\w+\([^)]*${target}`, 'i'),
+  new RegExp(String.raw`(?:^|[\s;&|(])(?:node|python3?|py|perl|ruby|php)(?:\.exe)?\b[^;|&]*\s-(?:e|p|c|r)\b[^;|&]*${target}`, 'i'),
 ];
+const RECEIPT_WRITES = writesTo(String.raw`[^\s;|&]*verify(?:\.json|\*)`);
 export const writesReceipt = (command) => /verify(?:\.json|\*)/i.test(command) && RECEIPT_WRITES.some((pattern) => pattern.test(command));
+// The same for the record of the person's canvas edits, which only the canvas writes.
+const CANVAS_LOG_WRITES = writesTo(String.raw`[^\s;|&]*canvas-log(?:\.jsonl|\*)`);
+export const writesCanvasLog = (command) => /canvas-log(?:\.jsonl|\*)/i.test(command) && CANVAS_LOG_WRITES.some((pattern) => pattern.test(command));
 
 // The repository root above `start` that spec-relay set up, or null.
 export function findRoot(start) {
@@ -120,6 +124,7 @@ export function protectedPath(root, file, { subagent = false, pluginRoot = KIT_R
     ['openspec/spec-relay/tools', 'the pinned OpenSpec is installed by setup.mjs'],
     ['openspec/spec-relay/db', 'the database definitions are exported from the database by the person and are read-only like the source code'],
   ]) if (under(rel, dir)) return why;
+  if (fold(rel) === fold(CANVAS_LOG)) return 'only the canvas writes canvas-log.jsonl, the record of the person\'s own edits in the canvas';
   if (/^openspec\/changes\/[^/]+\/verify\.json$/i.test(rel)) return 'only verify.mjs writes verify.json, the record of the last verify run; run it again instead';
   if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions|crosscheck)\.md$/i.test(rel) || /^openspec\/changes\/port-[^/]+\/(proposal|design)\.md$/i.test(rel) || [PLAN, LESSONS].some((p) => fold(p) === fold(rel)))) {
     return 'only the orchestrator writes review.md, questions.md, crosscheck.md, a port\'s proposal.md and design.md, the plan and the lessons';
@@ -229,6 +234,9 @@ export function decide(payload, { pluginRoot = process.env.PLUGIN_ROOT || proces
       }
       if (writesReceipt(command)) {
         return 'only verify.mjs writes verify.json, the record of the last verify run; run node "<kit>/scripts/verify.mjs" --change <port change> instead';
+      }
+      if (writesCanvasLog(command)) {
+        return 'only the canvas writes canvas-log.jsonl, the record of the person\'s own edits in the canvas';
       }
       for (const call of archiveCalls(command)) {
         const why = archiveDenial(root, call, subagent);
