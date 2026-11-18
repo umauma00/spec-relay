@@ -136,15 +136,25 @@ artifacts:
       - **B1 - logic comparison**: record what the source program does as
         cases (input and output) and run the same inputs through the new code,
         with the kit's compare (docs/COMPARE.md). For contexts with
-        calculations and business rules. The cases come from either a small
-        recorder that calls the source code's logic directly, without screens
-        or sign-in (C#: a console project or test that references the old
-        assemblies; PHP: a CLI script that includes the old files), which needs
-        the source code to build and run locally; or records of the program's
-        real runs brought in when it cannot run here (batch input and output
-        files, report data, rows the program wrote), with personal data masked.
-        Suggest B1 whenever either is possible: it is the level that compares
-        with the source program instead of with what an AI read.
+        calculations and business rules. The cases come from one of three
+        places, by how the source program can be run:
+        - *direct*: a small recorder calls the source code's logic by itself,
+          without screens or sign-in (C#: a console project or test that
+          references the old assemblies; PHP: a CLI script that includes the
+          old files). Needs logic that can be called by itself and builds here.
+        - *over HTTP*: when the logic sits in a page or a code-behind and
+          cannot be called by itself (code at the top of a PHP page, ASP.NET
+          WebForms event handlers, a controller that only runs in its server),
+          the kit's `http.mjs` sends requests to the RUNNING source program
+          and records what it answers (status, redirect, the text a user
+          reads, the form fields, JSON, CSV). Needs a test copy of the old
+          system that the person runs, with its own test database.
+        - *production records*: records of the program's real runs brought in
+          when it cannot run here (batch input and output files, report data,
+          rows the program wrote), with personal data masked.
+        Suggest B1 whenever one is possible: it is the level that compares
+        with the source program instead of with what an AI read. Write the
+        way (direct, HTTP, records) in the context's Notes cell.
       - **B2 - screen operation replay**: record browser operations with
         Playwright and replay them against the old and the new system. Only for
         important flows; needs both systems running.
@@ -166,9 +176,16 @@ artifacts:
       - **Running the source program**: what is needed to run it for B1, B2 or
         C, or "not runnable". When it is not runnable, say which records of
         its real runs exist (B1 can still use them) or "none" (then only A
-        applies).
-      - **Sign-in**: for B2 and C, the test account comes from environment
-        variables the person sets (name the variables). Never write a
+        applies). For B1 over HTTP, B2 and C: the address of the test copy
+        the person runs (for example `http://localhost:8080`), its encoding
+        when it is not UTF-8 (Shift_JIS, EUC-JP), and how its test database
+        is put back to the starting state before a recording. Requests can
+        change data: a system on another machine is written here only when
+        the person names it as a test system, and nothing here may ever
+        point at production.
+      - **Sign-in**: for B1 over HTTP, B2 and C, the test account comes from
+        environment variables the person sets (name the variables; a recorded
+        request holds `${env:NAME}` in their place). Never write a
         password, token or connection string into any file.
       - **Recorded data**: where recorded inputs, outputs and screenshots live
         (under the target root's tests; B1 cases in
@@ -258,6 +275,9 @@ artifacts:
         exceptions`, `- [ ] D91 The data access mapping` and `- [ ] D92 The
         schema changes and the test database`. Leave the heading empty when
         data.md says None.
+      Keep the template's fixed items (A0, A90, A91, V1-V4, E90, U90) also
+      when a section holds little: `gate.mjs review` fails when one is
+      missing, because each is a decision only the person can take.
       Do not tick any box. Only the reviewer decides.
     requires:
       - architecture

@@ -109,6 +109,13 @@ export function runCommand(command, cwd, { timeoutMs, platform = process.platfor
   });
 }
 
+// Adds a process another script started (a server under test) to the ones
+// Ctrl+C stops; returns the function that forgets it again.
+export function track(child) {
+  running.add(child);
+  return () => { running.delete(child); };
+}
+
 // Ctrl+C stops the command that is running too (on POSIX the command runs in
 // its own process group, which the terminal does not signal).
 export function stopAllOnSignal() {

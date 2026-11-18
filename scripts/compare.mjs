@@ -29,6 +29,9 @@
 // new code and writes one `{"id": "...", "output": ...}` line per case to stdout
 // (anything else goes to stderr). With --actual FILE, the outputs are read from
 // that JSONL file instead (written by the new code some other way).
+// A driver `spec-relay-http --base URL --start "<command>"` is the kit's own:
+// the cases are HTTP requests recorded with http.mjs, and the new system,
+// started by that command, answers them (see http.mjs).
 //
 // Prints a summary and the first differences (paths and short values), and
 // exits 0 when every case matches, 1 when one differs or nothing could be
@@ -40,6 +43,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCommand, MAX_TIMEOUT_MS, stopAllOnSignal } from './run.mjs';
 import { chainProblem } from './gate.mjs';
+import { HTTP_DRIVER, isHttpDriver, parseHttpOptions, runHttpDriver } from './http.mjs';
 
 export const COMPARE_COMMAND = 'spec-relay-compare';
 const RULE_KEYS = ['ignore', 'tolerance', 'numbersAsText', 'trim', 'unordered', 'missingIsNull'];
@@ -79,8 +83,18 @@ export function parseOptions(argv) {
   if (!opts.driver === !opts.actual) return { problem: 'give one of --driver "<command>" and --actual <file>' };
   const chained = opts.driver ? chainProblem(opts.driver) : null;
   if (chained) return { problem: `the driver ${chained}` };
+  if (isHttpDriver(opts.driver)) {
+    const http = httpDriverOptions(opts.driver);
+    if (http.problem) return { problem: `the driver ${HTTP_DRIVER}: ${http.problem}` };
+  }
   if (opts.timeout !== undefined && !(Number(opts.timeout) > 0 && Number(opts.timeout) * 60000 <= MAX_TIMEOUT_MS)) return { problem: `--timeout-minutes ${opts.timeout} is not a number of minutes` };
   return opts;
+}
+
+// The options of a `spec-relay-http ...` driver, or { problem }.
+export function httpDriverOptions(driver) {
+  const argv = words(driver.trim().slice(HTTP_DRIVER.length));
+  return argv ? parseHttpOptions(argv, 'driver') : { problem: 'an unclosed quote' };
 }
 
 // --- paths ------------------------------------------------------------------
@@ -326,12 +340,12 @@ export function readOutputs(content, label, problems) {
 
 // Compares the cases of a folder with the new code's outputs. Resolves to
 // { ok, count, passed, failed: [{ id, file, line, diffs }], problems, sha256, seconds, timedOut, driverExit, output }.
-export async function compare({ cases: casesDir, driver, actual, cwd = process.cwd(), timeoutMs, run = runCommand }) {
+export async function compare({ cases: casesDir, driver, actual, cwd = process.cwd(), timeoutMs, run = runCommand, http = runHttpDriver }) {
   const started = Date.now();
   const problems = [];
   const dir = path.resolve(cwd, casesDir);
   const { cases, rules, sha256 } = readCases(dir, problems, cwd);
-  const rulesText = rules.text;
+  let rulesText = rules.text;
   const result = (extra = {}) => {
     const failed = extra.failed ?? [];
     const ok = problems.length === 0 && failed.length === 0 && cases.length > 0;
@@ -342,7 +356,15 @@ export async function compare({ cases: casesDir, driver, actual, cwd = process.c
   if (problems.length) return result({ unrun: cases.length });
   let outputs;
   let driverOutput;
-  if (driver) {
+  if (driver && isHttpDriver(driver)) {
+    // The kit's own driver: the new system answers the recorded requests.
+    const ran = await http(words(driver.trim().slice(HTTP_DRIVER.length)) ?? [], cases, cwd, { timeoutMs });
+    problems.push(...ran.problems);
+    // The map loosens the comparison like a rule, so it is shown with the rules.
+    rulesText = [...rulesText, ...(ran.rules ?? [])];
+    if (ran.problems.length) return result({ unrun: cases.length - ran.outputs.size, ...(ran.output ? { output: ran.output } : {}) });
+    outputs = ran.outputs;
+  } else if (driver) {
     const input = cases.map((c) => JSON.stringify({ id: c.id, input: c.input })).join('\n') + '\n';
     const ran = await run(driver, cwd, { timeoutMs, input, captureStdout: true });
     if (ran.exitCode !== 0) {
@@ -392,6 +414,8 @@ export function report(r) {
 export function portOptionProblem(opts) {
   if (opts.cwd) return '--cwd is not allowed in a port command; it runs in the target root';
   if (opts.actual) return '--actual is not allowed in a port command: give a --driver that runs the new code, so the verify run compares the code as it is now';
+  // A system someone started earlier may run older code than the files hold.
+  if (isHttpDriver(opts.driver) && !httpDriverOptions(opts.driver).start) return `the ${HTTP_DRIVER} driver of a port command needs --start "<command>": the verify run starts the new system itself, so it compares the code as it is now`;
   return null;
 }
 

@@ -88,7 +88,18 @@ unspecified behavior you found (below).
   the cases only from its standard input, never opens the case files, and
   writes logs to stderr. When a case differs, fix the new code; when you
   believe the recording is wrong, record it again from the source program
-  and report why. Tick a task
+  and report why. When design.md's B1 driver is `spec-relay-http` (the
+  logic cannot be called by itself), write the requests instead of a
+  recorder: `tests/golden/inputs/<capability>.jsonl`, one
+  `{"id", "input": {"path", "form", ...}}` per line in the order a user
+  would act, for every scenario and edge case, signing in with
+  `${env:NAME}` values and never a real password. Record them only when the
+  task says the person confirmed the test copy of the old system runs:
+  `node "<kit>/scripts/http.mjs" record --base <its address> --inputs
+  tests/golden/inputs/<capability>.jsonl --out tests/golden/<capability
+  with - for />/recorded.jsonl` (`--charset shift_jis` for an old Japanese
+  system). Never pass `--allow-host` on your own, never point `--base` at
+  anything but the address the task gives, and never edit the recorded file. Tick a task
   only after its verification passes, and run the boundary check before you
   report.
 - When a task gives you crosscheck rows to fix, fix the code or the test so it

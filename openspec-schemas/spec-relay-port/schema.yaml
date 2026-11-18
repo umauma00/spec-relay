@@ -95,8 +95,15 @@ artifacts:
         `spec-relay-compare --cases tests/golden/<capability with - for />
         --driver "<command that runs the driver>"` (docs/COMPARE.md): the
         kit compares, case by case, the source program's recorded output with
-        the new code's. Every rule in the cases folder's `rules.json` loosens
-        the comparison: list each under Decisions with the reason. The kit's
+        the new code's. For cases recorded over HTTP (verification.md says
+        so), the driver is the kit's own: `--driver "spec-relay-http --base
+        http://localhost:<port> --start '<command that starts the new
+        system>'"`, with `--map tests/golden/http-map.json` when the new
+        system's paths or field names differ on purpose; the run starts the
+        new system, sends it the recorded requests and stops it. Every rule
+        in the cases folder's `rules.json` loosens the comparison, and so
+        does every line of the map: list each under Decisions with the
+        reason. The kit's
         `verify.mjs` runs these commands and the boundary check and records the
         result; `gate.mjs port-done` fails without a passing run on the
         current code.
@@ -137,7 +144,13 @@ artifacts:
         `spec-relay-compare`: one task writes the recorder for the source code
         (or the conversion of its records) and records the cases, with inputs
         for every scenario and for the edge cases of the Language mapping; one
-        writes the driver that runs the inputs through the new code.
+        writes the driver that runs the inputs through the new code. Over
+        HTTP, the first task writes the requests
+        (`tests/golden/inputs/<capability>.jsonl`, outside the cases folder)
+        and records them from the running source program with the kit's
+        `http.mjs record`, after the person confirmed that the test copy runs
+        and its database is at the starting state; no driver is written, and
+        a second task writes the map when design.md names one.
       - When design.md lists carried files, one task copies them unchanged.
       - The last group runs the boundary check from conventions.md.
       - Order by dependency. A final group may only run integration checks and
