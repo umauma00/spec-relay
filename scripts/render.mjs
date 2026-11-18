@@ -861,7 +861,7 @@ function amendments(root, capability) {
   try { entries = fs.readdirSync(archive); } catch { /* none */ }
   entries.map((entry) => entry.match(/^(\d{4}-\d{2}-\d{2})-(amend-.+?)(?:-v(\d+))?$/))
     .filter((m) => m && has(path.join(archive, m[0])))
-    .sort((x, y) => x[1].localeCompare(y[1]) || x[2].localeCompare(y[2]) || Number(x[3] ?? 1) - Number(y[3] ?? 1))
+    .sort((x, y) => (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0) || (x[2] < y[2] ? -1 : x[2] > y[2] ? 1 : 0) || Number(x[3] ?? 1) - Number(y[3] ?? 1))
     .forEach((m) => list.push({ dir: path.join(archive, m[0]), name: m[0].slice(11), archived: true }));
   let active = [];
   try { active = fs.readdirSync(path.join(root, 'openspec/changes')).sort(); } catch { /* none */ }
@@ -916,13 +916,14 @@ export function specView({ root, capability, L, outDir }) {
   const unmatched = [];
   const find = (name) => spec.requirements.find((r) => norm(r.name) === norm(name)) ?? null;
   for (const a of pending) {
-    const text = readInside(root, path.join(a.dir, 'specs', ...capability.split('/'), 'spec.md')) ?? '';
+    const deltaDir = path.join(a.dir, 'specs', ...capability.split('/'));
+    const text = readInside(root, path.join(deltaDir, 'spec.md')) ?? '';
     const renamed = renames(text);
     const pendingTrace = new Map([...trace, ...traceOf(a.dir)]);
-    const entry = (base) => { if (!byBaseline.has(base)) byBaseline.set(base, { changes: [], renamedTo: null, req: null }); return byBaseline.get(base); };
+    const entry = (base) => { if (!byBaseline.has(base)) byBaseline.set(base, { changes: [], renamedTo: null, req: null, reqs: [] }); return byBaseline.get(base); };
     for (const r of renamed) {
       const base = find(r.from);
-      if (!base) { unmatched.push({ req: { name: r.from, kind: 'renamed', body: [`→ ${r.to}`], scenarios: [] }, change: a.name, trace: pendingTrace }); continue; }
+      if (!base) { unmatched.push({ req: { name: r.from, kind: 'renamed', body: [`→ ${r.to}`], scenarios: [] }, change: a.name, trace: pendingTrace, dir: deltaDir }); continue; }
       const e = entry(base);
       e.changes.push(a.name);
       e.renamedTo = r.to;
@@ -930,9 +931,11 @@ export function specView({ root, capability, L, outDir }) {
     for (const req of parseSpec(text).requirements) {
       if (req.kind === 'renamed') continue;
       const base = req.kind === 'added' ? null : find(req.name) ?? spec.requirements.find((b) => renamed.some((r) => norm(r.to) === norm(req.name) && norm(r.from) === norm(b.name))) ?? null;
-      if (!base) { unmatched.push({ req, change: a.name, trace: pendingTrace }); continue; }
+      if (!base) { unmatched.push({ req, change: a.name, trace: pendingTrace, dir: deltaDir }); continue; }
       const e = entry(base);
       if (!e.changes.includes(a.name)) e.changes.push(a.name);
+      // Two amendments of one requirement: each shows its own wording.
+      e.reqs.push({ req, change: a.name, dir: deltaDir });
       e.req = req;
       e.trace = pendingTrace;
     }
@@ -953,15 +956,21 @@ export function specView({ root, capability, L, outDir }) {
     const t = new Map(e.trace ?? c.trace);
     if (e.req && !t.has(norm(e.req.name)) && t.has(norm(req.name))) t.set(norm(e.req.name), t.get(norm(req.name)));
     const ctx = { ...c, amend: true, baseline: () => req, trace: t };
-    const shown = e.req ? { ...e.req, name: e.req.name } : { ...req, kind: e.renamedTo ? 'renamed' : req.kind };
-    const body = requirementBody({ data: shown }, e.req ? ctx : { ...ctx, amend: false });
+    let body;
+    if (!e.reqs.length) body = requirementBody({ data: { ...req, kind: 'renamed' } }, { ...ctx, amend: false });
+    else {
+      const each = e.reqs.map((x) => ({ ...x, body: inDocDir(x.dir, () => requirementBody({ data: x.req }, ctx)) }));
+      const last = each[each.length - 1].body;
+      body = each.length === 1 ? last : { ...last, notes: [...new Set(each.flatMap((x) => x.body.notes))],
+        html: each.map((x) => `<p class="label">${escapeHtml(x.change)}</p>${x.body.html}`).join('\n') };
+    }
     const tag = e.renamedTo && !body.tag ? deltaTag('renamed', L) : body.tag;
     const title = e.renamedTo ? `${req.name} → ${e.renamedTo}` : req.name;
     return readItem(`R${k + 1}`, anchor(`R${k + 1}`), title, 'req', { ...body, tag }, [amendingNote(e.changes), ...body.notes]);
   });
-  unmatched.forEach(({ req, change, trace: t }, k) => {
+  unmatched.forEach(({ req, change, trace: t, dir: deltaDir }, k) => {
     const n = spec.requirements.length + k + 1;
-    const body = requirementBody({ data: req }, { ...c, amend: true, trace: t, baseline: () => null });
+    const body = inDocDir(deltaDir, () => requirementBody({ data: req }, { ...c, amend: true, trace: t, baseline: () => null }));
     const notes = [amendingNote([change]), ...(req.kind === 'added' ? [] : [L.noBaseline]), ...body.notes.filter((x) => x !== L.noBaseline)];
     reqs.push(readItem(`R${n}`, anchor(`R${n}`), req.name, 'req', { ...body, tag: body.tag || deltaTag(req.kind, L) }, notes));
   });
@@ -1348,7 +1357,7 @@ const SCRIPT = String.raw`(() => {
         el.hidden = !words.every((w) => fold(el.textContent).includes(w));
         if (!el.hidden) shown += 1;
         // A match inside a folded list (the requirement names of the index) unfolds it.
-        el.querySelectorAll('details.reqs').forEach((x) => { x.open = words.length > 0 && !el.hidden && words.some((w) => fold(x.textContent).includes(w)); });
+        el.querySelectorAll('details.reqs').forEach((x) => { if (words.length) x.open = !el.hidden && words.some((w) => fold(x.textContent).includes(w)); });
         const li = d.querySelector('.toc li[data-for="' + CSS.escape(el.id) + '"]');
         if (li) li.hidden = el.hidden;
       });
@@ -1368,7 +1377,7 @@ const SCRIPT = String.raw`(() => {
 
 // mode 'review' shows what review.md records (progress, the filter, the keys, the
 // dock); mode 'read' is for approved specs: no seals or progress, a search box instead.
-export function page({ title, kind, meta, brief = '', groups = [], docs = [], L, lang, mode = 'review', nav = '', note = L.note }) {
+export function page({ title, kind, meta, brief = '', groups = [], docs = [], L, lang, mode = 'review', nav = '', note = L.note, view = '' }) {
   const all = groups.flatMap((g) => g.items);
   const open = all.filter((x) => !x.done);
   const read = mode === 'read';
@@ -1422,7 +1431,7 @@ ${s.html}
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="generator" content="spec-relay render.mjs">
+<meta name="generator" content="spec-relay render.mjs">${view ? `\n<meta name="spec-relay-view" content="${escapeHtml(view)}">` : ''}
 <meta name="color-scheme" content="light dark">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data: file:">
 <title>${escapeHtml(title)}</title>
@@ -1500,7 +1509,7 @@ function renderSpecs({ root, spec, out, L, code, stamp }) {
   const one = (capability, resolved, nav) => {
     const html = withImages(root, path.join(root, SPECS, ...capability.split('/')), resolved, (outDir) => {
       const view = specView({ root, capability, L, outDir });
-      return page({ title: capability, kind: L.specKind, meta: stamp, ...view, L, lang: code, mode: 'read', nav, note: L.specNote });
+      return page({ title: capability, kind: L.specKind, meta: stamp, ...view, L, lang: code, mode: 'read', nav, note: L.specNote, view: 'spec' });
     });
     writeView(root, resolved, html);
     return path.relative(root, resolved).replace(/\\/g, '/');
@@ -1510,13 +1519,18 @@ function renderSpecs({ root, spec, out, L, code, stamp }) {
     const index = path.join(views, 'specs.html');
     writeView(root, index, withImages(root, path.join(root, SPECS), index, () => page({ title: L.specIndexTitle, kind: L.specIndexKind, meta: stamp, ...specIndex({ root, L, list, href: specHref }), L, lang: code, mode: 'read', note: L.specNote })));
     const pages = list.map((capability) => one(capability, path.join(views, specFile(capability)), back));
+    // Only pages this option wrote (they carry its marker) are removed; a failed removal is not an error.
     const keep = new Set(list.map(specFile));
-    for (const f of fs.readdirSync(views)) if (/^spec-.+\.html$/.test(f) && !keep.has(f)) fs.rmSync(path.join(views, f), { force: true });
+    for (const f of fs.readdirSync(views)) {
+      if (!/^spec-.+\.html$/.test(f) || keep.has(f)) continue;
+      const file = path.join(views, f);
+      try { if (fs.readFileSync(file, 'utf8').includes('<meta name="spec-relay-view" content="spec">')) fs.rmSync(file, { force: true, maxRetries: 3 }); } catch { /* leave it */ }
+    }
     return { ok: true, out: path.relative(root, index).replace(/\\/g, '/'), pages };
   }
   const capability = capabilityPath(spec, list);
   if (!capability) return { ok: false, problems: [`spec not found: ${SPECS}/${String(spec).replace(/\\/g, '/')}/spec.md`] };
-  return { ok: true, out: one(capability, path.resolve(root, out ?? path.join(views, specFile(capability))), out ? '' : back) };
+  return { ok: true, out: one(capability, path.resolve(root, out ?? path.join(views, specFile(capability))), !out && fs.existsSync(path.join(views, 'specs.html')) ? back : '') };
 }
 
 export function render({ root = process.cwd(), change, file, spec, out, lang, now = new Date() }) {

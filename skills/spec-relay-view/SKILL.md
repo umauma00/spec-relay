@@ -60,8 +60,9 @@ node "<kit>/scripts/render.mjs" --spec all
   the reviews. `--spec <context>/<name>` writes one capability's page
   (`spec-<context>-<name>.html`); `--spec all` writes `specs.html`, a list of
   every capability grouped by context, and a page for each, linked from it, and
-  prints their paths under `pages`. It removes pages of capabilities that no
-  longer exist. (A capability literally named `all` is rendered alone with
+  prints their paths under `pages`. It removes the pages it wrote earlier for
+  capabilities that no longer exist. A single page links back to the list only
+  once `specs.html` exists, so run `--spec all` first. (A capability literally named `all` is rendered alone with
   `--spec all/`.)
   - A capability page has the same design as a review page, without seals,
     progress, the filter or the single-key shortcuts: the purpose, each
@@ -72,7 +73,8 @@ node "<kit>/scripts/render.mjs" --spec all
   - An amend change still in progress that names the capability is shown on
     the requirements it would change, rename or add (and on any requirement it
     names that the spec does not have), with a caution: until it is archived the
-    spec has not changed. Do not tell the person the spec already says the new
+    spec has not changed. When two amendments change one requirement, each
+    wording is shown under the change's name. Do not tell the person the spec already says the new
     wording.
   - A search box (with script on) keeps the items that contain every word
     typed, in any of their text (requirements, scenarios, source lines,

@@ -479,3 +479,17 @@ test('archived amendments count in date and version order; a spec linked from ou
   assert.doesNotMatch(html(dir, 'specs'), /SECRET/);
   assert.equal(render({ root: dir, spec: 'billing/link' }).ok, false);
 });
+
+test('two amendments of one requirement each show their wording; only pages --spec wrote are removed; no link to a missing list', () => {
+  const dir = specs();
+  render({ root: dir, spec: 'billing/invoice' });
+  assert.doesNotMatch(html(dir, 'spec-billing-invoice'), /← 仕様の一覧/, 'specs.html does not exist yet');
+  write(dir, 'openspec/changes/amend-a/specs/billing/invoice/spec.md', '## MODIFIED Requirements\n\n### Requirement: Total\nThe system SHALL add the lines, ALPHA.\n');
+  write(dir, 'openspec/changes/amend-b/specs/billing/invoice/spec.md', '## MODIFIED Requirements\n\n### Requirement: Total\nThe system SHALL add the lines, BETA.\n');
+  write(dir, 'notes/spec-notes.md', '# Notes\n');
+  render({ root: dir, file: 'notes/spec-notes.md' });
+  render({ root: dir, spec: 'all' });
+  const page = html(dir, 'spec-billing-invoice');
+  assert.match(page, /id="R1"[\s\S]*?amend-a, amend-b[\s\S]*?amend-a<\/p>[\s\S]*?ALPHA[\s\S]*?amend-b<\/p>[\s\S]*?BETA[\s\S]*?id="R2"/);
+  assert.equal(fs.existsSync(path.join(dir, 'openspec/spec-relay/views/spec-notes.html')), true, 'a page of --file is not removed');
+});
