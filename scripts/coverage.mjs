@@ -287,18 +287,54 @@ export function checkSourceMap(root, dir, capability, problems) {
 
 const withoutRequirementId = (s) => norm(plain(s).replace(/^R\d+\s*[.:)-]?\s*/i, ''));
 
+// The Source cells of trace.md by requirement name (lowercase, without its R<n>).
+function traceSources(text) {
+  const rows = new Map();
+  for (const [name = '', source = ''] of tableRows(text ?? '')) {
+    const key = withoutRequirementId(name);
+    if (key) rows.set(key, [...(rows.get(key) ?? []), source.replace(/\\\|/g, '|')]);
+  }
+  return rows;
+}
+
+// The source references of every requirement in a change's trace.md:
+// Map<requirement name (lowercase, without R<n>), [{ file, symbol, from, to }]>.
+export function traceRefs(dir) {
+  const refs = new Map();
+  for (const [key, sources] of traceSources(readIf(path.join(dir, 'trace.md'), []))) {
+    refs.set(key, sources.flatMap((source) => parseRefs(source)).map((ref) => ({ ...ref, file: repoPath(ref.file) })));
+  }
+  return refs;
+}
+
+// The number of lines of a file, read as bytes so that any encoding counts the
+// same (LF, CRLF or CR ends a line), or null when it cannot be read.
+const lineCounts = new Map();
+function lineCount(root, file) {
+  const full = path.join(root, file);
+  let stat;
+  try { stat = fs.statSync(full); } catch { return null; }
+  const key = `${full}\0${stat.size}\0${stat.mtimeMs}`;
+  if (lineCounts.has(key)) return lineCounts.get(key);
+  let count = null;
+  try {
+    const buffer = fs.readFileSync(full);
+    let lf = 0; let cr = 0;
+    for (let i = 0; i < buffer.length; i += 1) { if (buffer[i] === 0x0a) lf += 1; else if (buffer[i] === 0x0d && buffer[i + 1] !== 0x0a) cr += 1; }
+    count = lf + cr + 1;
+  } catch { /* unreadable: no check */ }
+  lineCounts.set(key, count);
+  return count;
+}
+
 // Extract and amend review: every requirement has a trace row whose source
 // references name a symbol or lines in a source file the migration keeps (not
-// the target code, the kit's files or an excluded file).
+// the target code, the kit's files or an excluded file), and the lines exist.
 export function checkTrace(root, dir, requirements, problems) {
   if (requirements.length === 0) return;
   const text = readIf(path.join(dir, 'trace.md'), problems);
   if (text === null) { problems.push('trace.md is missing'); return; }
-  const rows = new Map();
-  for (const [name = '', source = ''] of tableRows(text)) {
-    const key = withoutRequirementId(name);
-    if (key) rows.set(key, [...(rows.get(key) ?? []), source.replace(/\\\|/g, '|')]);
-  }
+  const rows = traceSources(text);
   const survey = archivedChange(root, 'survey');
   const kept = survey ? keptFiles(root, inventoryRows(readIf(path.join(survey, 'inventory.md'), []) ?? '')) : null;
   for (const name of requirements) {
@@ -311,6 +347,12 @@ export function checkTrace(root, dir, requirements, problems) {
       if (file.split('/').includes('..') || !fs.existsSync(path.join(root, file))) problems.push(`the trace of "${name}" points to ${file}, which does not exist`);
       else if (kept && !kept.some((k) => k.toLowerCase() === file.toLowerCase())) problems.push(`the trace of "${name}" points to ${file}, which is not a kept source file (target code, an excluded file or a file outside the source root)`);
       else if (!ref.symbol && ref.from === null) problems.push(`the trace of "${name}" names only the file ${file}; add the symbol or the lines (path:symbol:lines)`);
+      else if (ref.from !== null) {
+        // Lines that are not in the file point nowhere: the implementer and the checker would read other code.
+        const count = lineCount(root, file);
+        if (ref.from < 1 || ref.to < ref.from) problems.push(`the trace of "${name}" gives ${file} the lines ${ref.from}-${ref.to}, which is not a range`);
+        else if (count !== null && ref.to > count) problems.push(`the trace of "${name}" gives ${file} the lines ${ref.from}-${ref.to}, but the file has ${count} lines`);
+      }
     }
   }
 }

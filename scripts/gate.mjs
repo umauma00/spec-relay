@@ -168,6 +168,7 @@ export const column = (header, pattern) => header.findIndex((cell) => pattern.te
 const NOTHING = /^(?:(?:none|なし|無し|n\/a)\.?|-|—|)$/i;
 const HANDLING_COLUMN = /^(handling|扱い)(?![a-z0-9_])/i;
 const POLICY_COLUMN = /^(policy|方針)(?![a-z0-9_])/i;
+const NOTES_COLUMN = /^(notes?|備考|メモ|理由)(?![a-z0-9_])/i;
 
 const withoutId = (s, letter) => norm(plain(s).replace(new RegExp(`^${letter}\\d+\\s*[.:)-]?\\s*`, 'i'), ''));
 
@@ -258,7 +259,7 @@ function checkExtract(root, dir, boxes, problems) {
   }
   const asked = new Set((questions === null ? [] : questionIds(questions)).filter((id) => qItems.has(id)));
   checkCrosscheck(dir, requirements.map((r) => r.name), screens, problems, asked);
-  checkLedger(root, dir, { requirements: requirements.map((r) => r.name), screens, asked, assignment: assignment(root).map, own: specCapabilities(dir)[0] ?? '' }, problems);
+  checkLedger(root, dir, { requirements: requirements.map((r) => r.name), screens, asked, assignment: assignment(root).map, own: specCapabilities(dir)[0] ?? '', boxes }, problems);
   for (const id of questions === null ? [] : questionIds(questions)) {
     const item = qItems.get(id);
     if (!item) { problems.push(`question has no review item: ${id}`); continue; }
@@ -569,7 +570,7 @@ export function inventoryRows(text) {
     const at = (pattern, fallback) => { const i = column(header, pattern); return cells[i >= 0 ? i : fallback] ?? ''; };
     const handling = column(header, HANDLING_COLUMN) >= 0 ? plain(at(HANDLING_COLUMN, -1)).toLowerCase() : '';
     // Paths keep every character (my_module, Copy (1).php, [id].php); only code marks go.
-    return { path: cleanPath(at(/^(path|パス)(?![a-z0-9_])/i, 0)), context: plain(at(/^(context|コンテキスト)(?![a-z0-9_])/i, 1)).toLowerCase(), handling: PLACEHOLDER.test(handling) ? '' : handling };
+    return { path: cleanPath(at(/^(path|パス)(?![a-z0-9_])/i, 0)), context: plain(at(/^(context|コンテキスト)(?![a-z0-9_])/i, 1)).toLowerCase(), handling: PLACEHOLDER.test(handling) ? '' : handling, notes: plain(stripComments(at(NOTES_COLUMN, 3))) };
   }).filter((r) => r.path);
 }
 
@@ -580,6 +581,16 @@ export function inventoryRowFor(rows, file) {
   return rows.find((r) => r.path === file)
     ?? rows.filter((r) => r.path.endsWith('/') && file.startsWith(r.path)).sort((a, b) => b.path.length - a.path.length)[0]
     ?? null;
+}
+
+// The review items every survey and target design has, whatever the system: without
+// them a decision that is the person's (what is left out, who owns shared data, how
+// the code is written) would pass with no tick. Items per context, database or kind
+// are checked where their names are known.
+const SURVEY_ITEMS = [['M1', 'the relationships between contexts'], ['M2', 'the owners of shared data'], ['M3', 'the glossary conflicts'], ['M4', 'the capability list and its order'], ['M5', 'the files marked carry'], ['C1', 'the files marked excluded']];
+const TARGET_ITEMS = [['A0', 'the style'], ['A90', 'data ownership'], ['A91', 'the boundary check'], ['V1', 'runtime and frameworks'], ['V2', 'the language mapping'], ['V3', 'the coding conventions'], ['V4', 'the commands'], ['E90', 'sign-in and recorded data'], ['U90', 'the shared look, carried files and client-side scripts']];
+function requireFixedItems(boxes, items, problems) {
+  for (const [id, what] of items) if (!hasId(boxes, id)) problems.push(`review.md has no ${id} item for ${what} (keep the template's items)`);
 }
 
 function checkSurvey(root, dir, boxes, problems) {
@@ -599,6 +610,11 @@ function checkSurvey(root, dir, boxes, problems) {
   for (const row of rows.filter((r) => r.handling && !HANDLINGS.includes(r.handling))) problems.push(`inventory row "${row.path}" has the handling "${row.handling}"; use port or carry`);
   for (const row of rows.filter((r) => r.handling === 'carry' && (r.path === `${DATABASE_DIR}/` || r.path.startsWith(`${DATABASE_DIR}/`)))) problems.push(`inventory row "${row.path}" carries database definitions; they are port (data.md decides what stays in the database)`);
   for (const row of rows.filter((r) => r.context === 'excluded' && r.handling === 'carry')) problems.push(`inventory row "${row.path}" is excluded and carry at once; a carried file belongs to the context whose module receives it`);
+  // An excluded file is never specified or ported: the person can only judge it with the reason beside it.
+  const unexplained = rows.filter((r) => r.context === 'excluded' && PLACEHOLDER.test(r.notes));
+  for (const row of unexplained.slice(0, 20)) problems.push(`inventory row "${row.path}" is excluded with no reason in Notes (generated code, vendored library, build output, dead code...)`);
+  if (unexplained.length > 20) problems.push(`...and ${unexplained.length - 20} more excluded rows with no reason`);
+  requireFixedItems(boxes, SURVEY_ITEMS, problems);
   const files = sourceFiles(root);
   if (files === null) {
     problems.push(`the source root "${configValue(root, 'Source root', '.')}" in openspec/config.yaml is not a folder inside the repository`);
@@ -711,6 +727,7 @@ function checkTarget(root, dir, boxes, problems) {
       if (!boxes.some((b) => new RegExp(`^${letter}\\d+\\s*[.:)-]?\\s*\\W*${id}(?![\\w-])`, 'i').test(b.plain))) problems.push(`the ${what} of context ${id} has no review item (${letter}<n> ${id})`);
     }
   }
+  requireFixedItems(boxes, TARGET_ITEMS, problems);
   checkData(survey, dir, boxes, problems);
 }
 

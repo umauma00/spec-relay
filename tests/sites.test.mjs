@@ -162,8 +162,8 @@ test('sites.mjs writes the parts of a change from its source map', () => {
   write(dir, 'openspec/changes/archive/2026-11-01-survey/inventory.md', '| Path | Context |\n|---|---|\n| src/ | calc |\n| src/vendor/ | excluded |\n');
   write(dir, 'openspec/changes/extract-calc/source-map.md', '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/ | all | full |\n');
   const result = writeParts(dir, 'extract-calc', 2);
-  assert.deepEqual({ ...result, problems: undefined }, { ok: true, change: 'extract-calc', sites: 3, files: 1, parts: ['openspec/spec-relay/work/extract-calc/sites/01.md', 'openspec/spec-relay/work/extract-calc/sites/02.md'], problems: undefined });
-  assert.match(fs.readFileSync(path.join(dir, result.parts[1]), 'utf8'), /\| `src\/a.php:c` \| 4-4 \| - \|/);
+  assert.deepEqual({ ...result, problems: undefined }, { ok: true, change: 'extract-calc', sites: 3, files: 1, untraced: 0, parts: ['openspec/spec-relay/work/extract-calc/sites/01.md', 'openspec/spec-relay/work/extract-calc/sites/02.md'], problems: undefined });
+  assert.match(fs.readFileSync(path.join(dir, result.parts[1]), 'utf8'), /\| `src\/a.php:c` \| 4-4 \| - \| - \|/);
   assert.equal(writeParts(dir, 'extract-none').ok, false);
 });
 
@@ -643,4 +643,100 @@ test('fourth review: the ledger reads only Site tables, rejects placeholder evid
   ]);
   // A ledger range may have spaces around the dash.
   assert.deepEqual(parseVerdict('covered R1 - R3').refs, ['R1', 'R2', 'R3']);
+});
+
+test('effect lines: a covered site needs a named requirement whose trace reaches each of them', () => {
+  const dir = tempDir();
+  const C = 'openspec/changes/extract-shop-orders';
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only): src\n');
+  // A page with code outside functions: one (file) site, as in old PHP.
+  write(dir, 'src/orders.php', [
+    '<?php',
+    'if (!isset($_SESSION["user"])) { header("Location: login.php"); exit; }',
+    'if (isset($_POST["delete"])) {',
+    '  mysql_query("DELETE FROM orders WHERE id = " . $_POST["delete"]);',
+    '  mail("admin@example.com", "deleted", $_POST["delete"]);',
+    '}',
+    '$rows = mysql_query("SELECT * FROM orders");',
+    'function fmt_yen($n) { return number_format(floor($n)) . " yen"; }',
+    'function audit($m) { file_put_contents("audit.log", $m, FILE_APPEND); }',
+    '',
+  ].join('\n'));
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/inventory.md', '| Path | Context |\n|---|---|\n| src/ | shop |\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md', '1. `shop/orders`\n   - `src/orders.php`\n');
+  write(dir, `${C}/.openspec.yaml`, 'schema: spec-relay-extract\n');
+  write(dir, `${C}/specs/shop/orders/spec.md`, '## Purpose\n\nOrders.\n\n## ADDED Requirements\n\n### Requirement: List orders\nThe system SHALL list.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n\n### Requirement: Delete an order\nThe system SHALL delete.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n');
+  write(dir, `${C}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/orders.php | all | full |\n');
+  const trace = (list, del) => write(dir, `${C}/trace.md`, `| Requirement | Source | Existing tests |\n|---|---|---|\n| List orders | ${list} | none |\n| Delete an order | ${del} | none |\n`);
+  write(dir, `${C}/screens.md`, '### Screen: Orders\n- x\n');
+  write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 List orders | confirmed | x |\n| R2 Delete an order | confirmed | x |\n| S1 Orders | confirmed | x |\n');
+  write(dir, `${C}/questions.md`, 'None\n');
+  const review = (extra = '') => write(dir, `${C}/review.md`, `Reviewer: Uma\n- [x] R1 List orders\n- [x] R2 Delete an order\n- [x] S1 Orders\n${extra}`);
+  const ledger = (file, fmt = 'covered R1', audit = 'covered R2') => write(dir, `${C}/coverage.md`, `| Site | Verdict | Evidence |\n|---|---|---|\n| \`src/orders.php:(file)\` | ${file} | the page |\n| \`src/orders.php:fmt_yen\` | ${fmt} | 8 |\n| \`src/orders.php:audit\` | ${audit} | 9 |\n`);
+  const problems = () => checkReview(dir, 'extract-shop-orders').problems;
+  review();
+
+  // The sloppy ledger: one requirement "covers" the whole page, and the trace never read the delete branch.
+  trace('src/orders.php:7', 'src/orders.php:audit');
+  ledger('covered R1');
+  assert.deepEqual(problems(), [
+    'coverage of src/orders.php:(file) is "covered R1", but no trace of R1 reaches its effect lines (exit 2; redirect 2; db-write 4; mail 5): name the requirement that specifies each line (its trace row must cite the line or the member), or write gap',
+  ]);
+  // The sites file already tells the checker which effect lines no trace reaches.
+  const parts = writeParts(dir, 'extract-shop-orders');
+  assert.equal(parts.untraced, 4);
+  assert.match(fs.readFileSync(path.join(dir, parts.parts[0]), 'utf8'), /\| `src\/orders.php:\(file\)` \| [^|]+ \| [^|]+ \| exit 2; redirect 2; db-write 4; mail 5 \|\n\| `src\/orders.php:fmt_yen` \| 8-8 \| rounding 8 \| - \|\n\| `src\/orders.php:audit` \| 9-9 \| file 9 \| - \|/);
+
+  // Naming more requirements is not enough: their traces must reach the lines.
+  ledger('covered R1, R2');
+  assert.match(problems().join(), /no trace of R1, R2 reaches its effect lines \(exit 2; redirect 2; db-write 4; mail 5\)/);
+  // A screen stands for a redirect (where an action leads), never for a write or a mail.
+  trace('src/orders.php:7', 'src/orders.php:3-6<br>src/orders.php:audit');
+  ledger('covered R1, R2, S1');
+  assert.deepEqual(problems(), ['coverage of src/orders.php:(file) is "covered R1, R2, S1", but no trace of R1, R2 reaches its effect lines (exit 2): name the requirement that specifies each line (its trace row must cite the line or the member), or write gap']);
+  trace('src/orders.php:2<br>src/orders.php:7', 'src/orders.php:3-6<br>src/orders.php:audit');
+  assert.deepEqual(problems(), []);
+  // The requirement must be the one the row names, and a symbol reaches its own member only.
+  ledger('covered R1');
+  assert.match(problems().join(), /no trace of R1 reaches its effect lines \(db-write 4; mail 5\)/);
+  ledger('covered R1, R2', 'covered R1', 'covered R1');
+  assert.match(problems().join(), /coverage of src\/orders.php:audit is "covered R1", but no trace of R1 reaches its effect lines \(file 9\)/);
+  // `(file)` has no name, so a symbol in the trace does not reach it.
+  trace('src/orders.php:page code', 'src/orders.php:3-6<br>src/orders.php:Audit');
+  ledger('covered R1, R2');
+  assert.match(problems().join(), /src\/orders.php:\(file\) is "covered R1, R2", but no trace of R1, R2 reaches its effect lines \(exit 2; redirect 2; db-write 7\)/);
+});
+
+test('"no behavior" on a site with marker lines needs the person\'s C1 item with the count', () => {
+  const dir = tempDir();
+  const C = 'openspec/changes/extract-shop-orders';
+  write(dir, 'openspec/config.yaml', 'context: |\n  Source root (read-only): src\n');
+  write(dir, 'src/log.php', '<?php\nfunction audit($m) { file_put_contents("audit.log", $m, FILE_APPEND); }\nfunction stamp() { return date("Y"); }\nfunction name() { return "x"; }\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/inventory.md', '| Path | Context |\n|---|---|\n| src/ | shop |\n');
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/capabilities.md', '1. `shop/orders`\n   - `src/log.php`\n');
+  write(dir, `${C}/.openspec.yaml`, 'schema: spec-relay-extract\n');
+  write(dir, `${C}/specs/shop/orders/spec.md`, '## Purpose\n\nOrders.\n\n## ADDED Requirements\n\n### Requirement: Name\nThe system SHALL name.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n');
+  write(dir, `${C}/source-map.md`, '## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/log.php | all | full |\n');
+  write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Name | src/log.php:name | none |\n');
+  write(dir, `${C}/screens.md`, 'None\n');
+  write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Name | confirmed | x |\n');
+  write(dir, `${C}/questions.md`, 'None\n');
+  write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/log.php:audit` | no behavior | a log nobody reads |\n| `src/log.php:stamp` | no behavior | unused |\n| `src/log.php:name` | covered R1 | 4 |\n');
+  const review = (extra = '') => write(dir, `${C}/review.md`, `Reviewer: Uma\n- [x] R1 Name\n${extra}`);
+  const problems = () => checkReview(dir, 'extract-shop-orders').problems;
+  review();
+  assert.deepEqual(problems(), ['review.md has no C1 item: 2 sites with marker lines are judged "no behavior" (src/log.php:audit, src/log.php:stamp); add "- [ ] C1 The 2 sites judged no behavior although they hold marker lines have nothing to migrate" under "## 4. Coverage", for the person to decide']);
+  review('- [x] C1 The 1 site judged no behavior has nothing to migrate\n');
+  assert.deepEqual(problems(), ['review item C1 says 1, but 2 sites with marker lines are judged "no behavior"; write the number 2 in the item and untick it, so the person sees the list again']);
+  review('- [x] C1 動作なしと判断した箇所\n');
+  assert.match(problems().join(), /review item C1 states no number of sites/);
+  review('- [ ] C1 動作なしと判断した 2 箇所は移行しなくてよい\n');
+  assert.deepEqual(problems(), ['not ticked: C1 動作なしと判断した 2 箇所は移行しなくてよい']);
+  review('- [x] C1 動作なしと判断した 2 箇所は移行しなくてよい\n');
+  assert.deepEqual(problems(), []);
+  // Without such a site the item is not needed.
+  write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/log.php:audit` | question Q1 | 2 |\n| `src/log.php:stamp` | question Q1 | 3 |\n| `src/log.php:name` | covered R1 | 4 |\n');
+  write(dir, `${C}/questions.md`, '- Q1. Are audit and stamp still used?\n');
+  review('- [x] Q1 audit: decision: keep\n');
+  assert.deepEqual(problems(), []);
 });

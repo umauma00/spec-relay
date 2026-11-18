@@ -35,7 +35,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readIf, sourceFiles, archivedChange, headedRows, PLACEHOLDER, inventoryRows as handledRows, inventoryRowFor } from './gate.mjs';
-import { sourceMapPaths, covers, contextOf, inventoryRows, ownersOf } from './coverage.mjs';
+import { sourceMapPaths, covers, contextOf, inventoryRows, ownersOf, traceRefs } from './coverage.mjs';
 
 // ---------------------------------------------------------------- reading
 
@@ -285,6 +285,14 @@ const MARKERS = [
   ['rounding', /Math\.(Round|Floor|Ceiling|Truncate)|Math\.(round|floor|ceil|trunc)\b|\bround\s*\(|\bfloor\s*\(|\bceil\s*\(|\bintval\s*\(|number_format|\bbcadd|\bbcmul|\bbcdiv|toFixed\s*\(|Decimal\.Round|\bROUND\s*\(|\bCInt\s*\(|\bFix\s*\(|\bInt\s*\(/],
   ['external', /HttpClient|WebClient|WebRequest|curl_exec|SoapClient|Process\.Start|shell_exec|\bexec\s*\(|\bsystem\s*\(|\bpassthru\s*\(|\bproc_open\s*\(|XMLHttpRequest|\bfetch\s*\(|\$\.ajax|\$\.(get|post)\s*\(/],
 ];
+
+// The marker kinds that mean something leaves the site: a write, a message to
+// another system, an error or an end the caller sees. A spec that covers the site
+// must say what happens there, so the ledger ties each of these lines to the
+// trace of a requirement (see untracedEffects). The other kinds (db-read,
+// session, input, config, time, rounding) shape a result that some requirement
+// already has to state; they stay hints for the checker.
+export const EFFECT_KINDS = ['db-write', 'transaction', 'error', 'exit', 'redirect', 'mail', 'file', 'external'];
 
 function markersIn(plainLines, lines) {
   const found = [];
@@ -937,6 +945,29 @@ export function lineText(site) {
   return parts.join(', ');
 }
 
+// ---------------------------------------------------------------- effect lines and the trace
+
+// A symbol as trace.md and the scanner may both write it: without the overload
+// number and the parameter list, with `.` for `::`, `->` and `\`, in lowercase.
+const symbolKey = (s) => s.replace(/#\d+$/, '').replace(/\(.*\)$/, '').replace(/::|->|\\/g, '.').replace(/\s+/g, '').toLowerCase();
+
+// Whether a trace reference reaches a line of a site. A reference with lines
+// reaches those lines; one with a symbol alone reaches the member of that name
+// (and a type's name reaches its members). `(file)` has no name: only lines reach it.
+export function refReaches(ref, site, line) {
+  if (ref.file.toLowerCase() !== site.file.toLowerCase()) return false;
+  if (ref.from !== null) return ref.from <= line && line <= ref.to;
+  const r = symbolKey(ref.symbol ?? ''); const s = symbolKey(site.symbol);
+  if (!r || !s) return false;
+  return r === s || s.endsWith(`.${r}`) || r.endsWith(`.${s}`) || s.startsWith(`${r}.`);
+}
+
+// The effect lines of a site that none of the references reach: [{ kind, line }].
+export function untracedEffects(site, refs) {
+  if (site.binary || site.unreadable || site.large) return [];
+  return site.markers.filter((m) => EFFECT_KINDS.includes(m.kind) && !refs.some((ref) => refReaches(ref, site, m.line)));
+}
+
 // ---------------------------------------------------------------- the ledger
 
 // Rows are matched by site id: the path ignores letter case (Windows), the
@@ -1026,7 +1057,7 @@ function capped(problems, list, say, max = 20) {
 // and `screens` are the names in spec and screens.md order (R1, S1...), `asked`
 // the question ids with a review item, `assignment` the plan's capabilities
 // with their source paths, and `own` this change's capability.
-export function checkLedger(root, dir, { requirements, screens, asked, assignment, own }, problems) {
+export function checkLedger(root, dir, { requirements, screens, asked, assignment, own, boxes = null }, problems) {
   const { text, files, unscanned, carried, sites, rows, duplicates } = readLedger(root, dir, problems);
   capped(problems, unscanned, unscannedText);
   if (text === null) { problems.push('coverage.md is missing (the omission check: run sites.mjs, then the checkers)'); return; }
@@ -1037,15 +1068,29 @@ export function checkLedger(root, dir, { requirements, screens, asked, assignmen
   capped(problems, [...rows.keys()].filter((key) => !ids.has(key)).map((key) => rows.get(key).site), (site) => `coverage.md has a row for a site the scanner does not find: ${site} (a mistyped id, a renamed member, or a file no longer in source-map.md; delete the row)`);
   const bad = [];
   const others = new Map();
+  const traced = traceRefs(dir);
+  const refsOf = (ref) => traced.get(requirements[Number(ref.slice(1)) - 1]?.replace(/[*_`[\]()]/g, '').replace(/\s+/g, ' ').trim().toLowerCase() ?? '') ?? [];
+  const quiet = [];
   for (const site of sites) {
     const row = rows.get(ledgerKey(site.id));
     if (!row) continue;
     const v = row.parsed;
     if (v.kind === 'covered') {
+      let known = true;
       for (const ref of v.refs) {
         const n = Number(ref.slice(1));
         const max = ref[0] === 'R' ? requirements.length : screens.length;
-        if (n < 1 || n > max) bad.push(`coverage of ${site.id} names ${ref}, but the change has ${max === 0 ? 'no' : `only ${ref[0]}1-${ref[0]}${max} as`} ${ref[0] === 'R' ? 'requirements' : 'screens'}`);
+        if (n < 1 || n > max) { known = false; bad.push(`coverage of ${site.id} names ${ref}, but the change has ${max === 0 ? 'no' : `only ${ref[0]}1-${ref[0]}${max} as`} ${ref[0] === 'R' ? 'requirements' : 'screens'}`); }
+      }
+      // "covered" is a claim about every effect of the site. The trace says where each
+      // requirement lives, so an effect line no named requirement's trace reaches is
+      // either a line that requirement never read or behavior the spec left out.
+      // A screen describes where its actions lead, so it may stand for a redirect.
+      if (known) {
+        const cited = v.refs.filter((ref) => ref[0] === 'R');
+        const onScreen = v.refs.some((ref) => ref[0] === 'S');
+        const missing = untracedEffects(site, cited.flatMap(refsOf)).filter((m) => !(onScreen && m.kind === 'redirect'));
+        if (missing.length) bad.push(`coverage of ${site.id} is "covered ${v.refs.join(', ')}", but no trace of ${cited.length ? cited.join(', ') : 'a requirement'} reaches its effect lines (${markerText(missing)}): name the requirement that specifies each line (its trace row must cite the line or the member), or write gap`);
       }
     } else if (v.kind === 'other') {
       const paths = assignment.get(v.capability);
@@ -1065,10 +1110,23 @@ export function checkLedger(root, dir, { requirements, screens, asked, assignmen
     } else if (v.kind === 'question') {
       if (!asked.has(v.question)) bad.push(`coverage of ${site.id} points to ${v.question}, which is not in questions.md with a review item`);
     } else if (v.kind === 'gap') bad.push(`site ${site.id} is a gap: add the requirement it needs (then check it again), or move it to questions.md as "question Q<n>"`);
-    else if (v.kind === 'no-behavior') { if (noEvidence(row.evidence)) bad.push(`coverage of ${site.id} is "no behavior" with no evidence; say why in the Evidence cell`); }
+    else if (v.kind === 'no-behavior') {
+      if (noEvidence(row.evidence)) bad.push(`coverage of ${site.id} is "no behavior" with no evidence; say why in the Evidence cell`);
+      if (site.markers.length) quiet.push(site.id);
+    }
     else bad.push(`coverage of ${site.id} is "${row.verdict.trim() || 'blank'}"; write only covered R<n>/S<n>, no behavior, other capability <path>, question Q<n> or gap, and put reasons in the Evidence cell`);
   }
   capped(problems, bad, (p) => p);
+  // A site that holds marker lines and is still judged "no behavior" is left out of
+  // the new system on a checker's word alone. The review page lists these sites;
+  // the person accepts them with one item that states how many there are, so the
+  // item goes stale (and the gate stops) when another such site appears.
+  if (boxes && quiet.length) {
+    const item = boxes.find((b) => /^C1\b/i.test(b.plain));
+    const stated = item ? Number(item.plain.replace(/^C1\b/i, '').match(/\d+/)?.[0] ?? NaN) : NaN;
+    if (!item) problems.push(`review.md has no C1 item: ${quiet.length} site${quiet.length === 1 ? '' : 's'} with marker lines ${quiet.length === 1 ? 'is' : 'are'} judged "no behavior" (${quiet.slice(0, 3).join(', ')}${quiet.length > 3 ? ', ...' : ''}); add "- [ ] C1 The ${quiet.length} sites judged no behavior although they hold marker lines have nothing to migrate" under "## 4. Coverage", for the person to decide`);
+    else if (stated !== quiet.length) problems.push(`review item C1 ${Number.isNaN(stated) ? 'states no number of sites' : `says ${stated}`}, but ${quiet.length} site${quiet.length === 1 ? '' : 's'} with marker lines ${quiet.length === 1 ? 'is' : 'are'} judged "no behavior"; write the number ${quiet.length} in the item and untick it, so the person sees the list again`);
+  }
 }
 
 // What the review page shows: counts per verdict, the sites that went to
@@ -1101,15 +1159,19 @@ export function writeParts(root, change, per = 40) {
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
   const parts = [];
+  // Effect lines that the trace of no requirement reaches: behavior the specs most likely left out.
+  const allRefs = [...traceRefs(dir).values()].flat();
+  let untraced = 0;
+  for (const s of sites) untraced += untracedEffects(s, allRefs).length;
   for (let k = 0; k * per < sites.length; k += 1) {
     const chunk = sites.slice(k * per, (k + 1) * per);
     const name = `${String(k + 1).padStart(2, '0')}.md`;
-    const rows = chunk.map((s) => `| \`${cell(s.id)}\` | ${lineText(s)} | ${cell(markerText(s.markers)) || '-'} |`);
-    fs.writeFileSync(path.join(out, name), `# Sites ${k * per + 1}-${k * per + chunk.length} of ${sites.length} (${change})\n\n| Site | Lines | Markers |\n|---|---|---|\n${rows.join('\n')}\n`);
+    const rows = chunk.map((s) => `| \`${cell(s.id)}\` | ${lineText(s)} | ${cell(markerText(s.markers)) || '-'} | ${cell(markerText(untracedEffects(s, allRefs))) || '-'} |`);
+    fs.writeFileSync(path.join(out, name), `# Sites ${k * per + 1}-${k * per + chunk.length} of ${sites.length} (${change})\n\n| Site | Lines | Markers | Untraced |\n|---|---|---|---|\n${rows.join('\n')}\n`);
     parts.push(`openspec/spec-relay/work/${change}/sites/${name}`);
   }
   // The parts are written either way; a row the scanner cannot read still fails, so the analyst fixes it now.
-  return { ok: warnings.length === 0, change, sites: sites.length, files: files.length, parts, problems: warnings };
+  return { ok: warnings.length === 0, change, sites: sites.length, files: files.length, untraced, parts, problems: warnings };
 }
 
 export function main(argv) {
