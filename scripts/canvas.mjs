@@ -30,6 +30,7 @@ import { view, page, labels, escapeHtml, markdown, parseReview, capabilities, ti
 import { status, checklist, stepLabel, stepName, STEPS } from './status.mjs';
 import { language, changeSchema, archivedChange } from './gate.mjs';
 import { writeReview, sha256, utf8Text, reviewerOf, decisionOf } from './review-edit.mjs';
+import { GUIDE, guidePage, modules as guideModules, saveQa, locate } from './guide.mjs';
 
 export const VIEWS = 'openspec/spec-relay/views';
 
@@ -38,7 +39,8 @@ const WORDS = {
     kind: 'spec-relay', title: '移行の進み具合', now: 'いま', you: 'あなたの番です', agent: 'AI の番です',
     todo: 'やること', changes: '進行中の変更', change: '変更', schema: '種類', confirmed: '確認済み', open: '開く',
     byCapability: '機能ごと', capability: '機能', spec: '仕様', problems: '問題', none: 'ありません',
-    nav: '画面', progress: '進み具合', specs: '仕様の一覧',
+    nav: '画面', progress: '進み具合', specs: '仕様の一覧', guide: 'コードガイド',
+    answer: 'AI の回答', helpful: '役に立った（Q&A に保存する）', qaSaved: 'Q&A に保存しました。', qaFailed: '保存できませんでした',
     ask: 'これを聞く', askPage: 'この画面について聞く', askTitle: 'チャットに質問を送る', askAbout: '対象',
     askHint: 'チャットに「[canvas]」付きで届きます。質問であって、承認や判断にはなりません。',
     tick: '確認済みにする', untick: '確認を外す', decide: '判断を書く', decideTick: '判断を書いて確認済みにする',
@@ -62,7 +64,8 @@ const WORDS = {
     kind: 'spec-relay', title: 'Migration progress', now: 'Now', you: 'Your turn', agent: "The agent's turn",
     todo: 'To do', changes: 'Changes in progress', change: 'Change', schema: 'Kind', confirmed: 'Confirmed', open: 'Open',
     byCapability: 'By capability', capability: 'Capability', spec: 'Spec', problems: 'Problems', none: 'None',
-    nav: 'Pages', progress: 'Progress', specs: 'Specs',
+    nav: 'Pages', progress: 'Progress', specs: 'Specs', guide: 'Code guide',
+    answer: "The agent's answer", helpful: 'Helpful (save to the Q&A)', qaSaved: 'Saved to the Q&A.', qaFailed: 'Could not save',
     ask: 'Ask about this', askPage: 'Ask about this page', askTitle: 'Send a question to the chat', askAbout: 'About',
     askHint: 'It reaches the chat marked "[canvas]". It is a question, never an approval or a decision.',
     tick: 'Mark confirmed', untick: 'Unmark', decide: 'Write the decision', decideTick: 'Write the decision and confirm',
@@ -172,6 +175,9 @@ dialog.ask-box::backdrop{background:rgba(0,0,0,.35)}
 .ask.mark:hover{background:var(--ink);color:var(--paper)}
 .ask-row .ask{margin-bottom:6px}
 .ask-box input[type=text]{display:block;width:100%;padding:8px;border:1.5px solid var(--ink);background:var(--paper);color:var(--ink);font:15px/1.6 var(--read)}
+.canvas-answer{margin:10px 0 0;padding:10px 12px;border:1.5px solid var(--ai)}
+.canvas-answer .q{font-weight:700;margin:4px 0}
+.canvas-answer .ask{margin-top:8px}
 .canvas-gone{position:sticky;top:0;z-index:8;margin:0;padding:8px 16px;background:var(--ochre);color:var(--paper);font:600 14px/1.4 var(--ui)}
 @media print{.canvas-nav,.ask,.ask-row,dialog.ask-box,.canvas-toast,.canvas-gone{display:none!important}}
 `;
@@ -202,6 +208,31 @@ const CANVAS_SCRIPT = String.raw`(() => {
   });
   const pageAsk = d.getElementById('ask-page');
   if (pageAsk) pageAsk.addEventListener('click', () => open(null));
+  // Answers the agent sent back for questions asked on this page (the code guide), under their item.
+  (cfg.answers || []).forEach((a) => {
+    const all = [...d.querySelectorAll('main .item')], text = (x, sel) => ((x.querySelector(sel) || {}).textContent || '').trim();
+    // The item by its title first (the numbers move when files are added), then by its number.
+    const item = (a.title && all.find((x) => text(x, '.item-head h3') === a.title)) || all.find((x) => text(x, '.item-head .id') === a.label);
+    const box2 = d.createElement('div'); box2.className = 'canvas-answer';
+    const head = d.createElement('p'); head.className = 'label'; head.textContent = W.answer;
+    const q = d.createElement('p'); q.className = 'q'; q.textContent = a.question;
+    const body = d.createElement('div'); body.className = 'doc'; body.innerHTML = a.html;
+    box2.append(head, q, body);
+    if (a.savable && !a.saved) {
+      const b = d.createElement('button'); b.type = 'button'; b.className = 'ask'; b.textContent = W.helpful;
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        try {
+          const res = await fetch(base + '/qa', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'qa' }, body: JSON.stringify({ page: cfg.page, id: a.id, rev: a.rev }) });
+          if (res.status === 409) { location.reload(); return; }
+          if (!res.ok) throw new Error(String(res.status));
+          b.remove(); toast(W.qaSaved);
+        } catch (err) { b.disabled = false; toast(W.qaFailed + ' (' + err.message + ')'); }
+      });
+      box2.appendChild(b);
+    }
+    if (item) item.appendChild(box2); else (d.querySelector('main') || d.body).prepend(box2);
+  });
   // Keys typed in the dialog stay in the dialog (the page has single-key shortcuts).
   box.addEventListener('keydown', (e) => e.stopPropagation());
   box.querySelector('.cancel').addEventListener('click', shut);
@@ -322,7 +353,8 @@ const CANVAS_SCRIPT = String.raw`(() => {
       const res = await fetch(base + '/state', { cache: 'no-store' });
       const s = await res.json();
       misses = 0;
-      if (s.goto && s.goto.seq > cfg.seq) location.href = base + '/r/' + s.goto.path;
+      // Seen once: a jump to an anchor on this same page does not reload it, so it must not repeat.
+      if (s.goto && s.goto.seq > cfg.seq) { cfg.seq = s.goto.seq; location.href = base + '/r/' + s.goto.path; }
       else if (s.version !== cfg.version) { keepFocus(); location.reload(); }
     } catch (err) {
       misses += 1;
@@ -336,15 +368,15 @@ const CANVAS_SCRIPT = String.raw`(() => {
 // between the pages and the ask buttons. `review` ({ hash, items, reviewer }) is
 // given for an active change with a review.md: its page also gets the buttons
 // that write review.md.
-export function interactive(html, { lang, pagePath, title, version, seq, nonce, review = null }) {
+export function interactive(html, { lang, pagePath, title, version, seq, nonce, review = null, answers = null, guide = false }) {
   const W = WORDS[lang];
   const L = labels(lang);
   const current = path.posix.basename(pagePath);
-  const nav = `<nav class="canvas-nav" aria-label="${escapeHtml(W.nav)}"><a href="progress.html"${current === 'progress.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.progress)}</a><a href="specs.html"${current === 'specs.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.specs)}</a></nav>
+  const nav = `<nav class="canvas-nav" aria-label="${escapeHtml(W.nav)}"><a href="progress.html"${current === 'progress.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.progress)}</a><a href="specs.html"${current === 'specs.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.specs)}</a>${guide ? `<a href="guide.html"${current === 'guide.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.guide)}</a>` : ''}</nav>
 <p class="ask-row ask-page"><button type="button" class="ask" id="ask-page">${escapeHtml(W.askPage)}</button>${review ? ` <button type="button" class="ask mark" id="edit-reviewer">${escapeHtml(review.reviewer ? `${W.reviewer}: ${review.reviewer}` : W.reviewerSet)}</button>` : ''}</p>`;
-  const words = Object.fromEntries(['ask', 'askAbout', 'sending', 'sent', 'failed', 'empty', 'noLink', 'gone',
+  const words = Object.fromEntries(['ask', 'askAbout', 'sending', 'sent', 'failed', 'empty', 'noLink', 'gone', ...(answers ? ['answer', 'helpful', 'qaSaved', 'qaFailed'] : []),
     ...(review ? ['tick', 'untick', 'decide', 'decideTick', 'decisionTitle', 'reviewerTitle', 'saving', 'saved', 'changed', 'saveFailed', 'emptyValue', 'needDecision', 'notUtf8', 'busy', 'noLine', 'placeholder', 'noFile', 'bad'] : [])].map((k) => [k, W[k]]));
-  const config = JSON.stringify({ page: pagePath, title, version, seq, words, review }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+  const config = JSON.stringify({ page: pagePath, title, version, seq, words, review, ...(answers ? { answers } : {}) }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const dialog = `<dialog class="ask-box" id="ask-box" aria-labelledby="ask-title" aria-describedby="ask-about"><form method="dialog"><h2 id="ask-title">${escapeHtml(W.askTitle)}</h2><p class="about" id="ask-about"></p>
 <textarea id="ask-text" maxlength="4000" aria-labelledby="ask-title" aria-describedby="ask-about ask-hint ask-msg"></textarea>
 <p class="hint" id="ask-hint">${escapeHtml(W.askHint)}</p><p class="msg" id="ask-msg" role="status"></p><div class="buttons"><button type="button" class="cancel">${escapeHtml(W.cancel)}</button><button type="submit" class="primary">${escapeHtml(W.send)}</button></div></form></dialog>
@@ -370,10 +402,12 @@ ${review ? `<dialog class="ask-box" id="edit-box" aria-labelledby="edit-title"><
 const oneLine = (value, max) => String(value ?? '').replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 
 // The text the chat receives. It says where it came from and that it is a question.
-export function askPrompt({ question, title, item, page: pagePath }, lang) {
+export function askPrompt({ question, title, item, page: pagePath, id }, lang) {
   const q = String(question ?? '').replace(/\r\n?/g, '\n').trim().slice(0, 4000);
   const where = [oneLine(title, 200), item ? oneLine(`${oneLine(item.label, 20)} ${oneLine(item.title, 300)}`, 330) : ''].filter(Boolean).join(' — ');
-  const prompt = `[canvas] ${q}\n\n(${lang === 'ja' ? '対象' : 'About'}: ${where}; page ${oneLine(pagePath, 300)}. The person typed this question in the spec-relay canvas. Answer it in the chat. It is a question, not an approval: do not tick review.md, record a decision or archive because of it.)`;
+  // A question from the code guide gets an id: the answer can be shown under the item, and the person may save it.
+  const back = id ? ` Then also send the answer to the canvas: invoke_canvas_action, actionName post_answer, input {"id": "${oneLine(id, 20)}", "answer": "<the answer, Markdown>"}; it shows under the item, and the person decides whether to save it.` : '';
+  const prompt = `[canvas] ${q}\n\n(${lang === 'ja' ? '対象' : 'About'}: ${where}; page ${oneLine(pagePath, 300)}. The person typed this question in the spec-relay canvas. Answer it in the chat.${back} It is a question, not an approval: do not tick review.md, record a decision or archive because of it.)`;
   return { prompt, displayPrompt: `[canvas] ${q}${where ? `\n(${where})` : ''}` };
 }
 
@@ -400,6 +434,7 @@ export function signature(root) {
   try { h.update(fs.readdirSync(archive).sort().join('\n')); } catch { /* none */ }
   walk(path.join(root, 'openspec/specs'), null);
   walk(path.join(root, 'openspec/spec-relay/screens'), null);
+  walk(path.join(root, GUIDE), null);
   add(path.join(root, 'openspec/config.yaml'));
   add(path.join(root, 'openspec/spec-relay/plan.md'));
   return h.digest('hex').slice(0, 16);
@@ -493,14 +528,28 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
     return version;
   };
 
-  // A page by name: progress, specs, spec-<capability key>, or a change. Null when there is none.
+  // Questions asked on the code guide's pages, and the answers the agent sent back
+  // (kept while the server runs; only the ones the person saves reach a file).
+  const questions = new Map();
+  let asked = 0;
+  // Ids differ from one server to the next, so a late answer to a question asked before a restart finds nothing.
+  const salt = crypto.randomBytes(2).toString('hex');
+  const guideModule = (name) => (name.startsWith('guide-') ? guideModules(root).find((m) => `guide-${m.key}` === name) ?? null : null);
+  const isGuidePage = (name) => name === 'guide' || Boolean(guideModule(name));
+  const hasGuide = () => guideModules(root).length > 0 && fs.existsSync(path.join(root, GUIDE));
+
+  // A page by name: progress, specs, spec-<capability key>, guide, guide-<module>, or a change. Null when there is none.
   const pageHtml = (name) => {
     const code = lang();
     const key = `${code}\0${currentVersion()}\0${name}`;
     if (cache.has(key)) return cache.get(key);
     let built = null;
     if (name === 'progress') built = { html: progressPage({ root, lang: code, now: now() }), title: WORDS[code].title };
-    else {
+    else if (isGuidePage(name)) {
+      const mod = guideModule(name);
+      const result = view({ root, guide: mod ? mod.key : true, lang: code, now: now(), at: path.join(root, VIEWS, `${name}.html`) });
+      built = result?.ok ? { html: result.html, title: result.title, guide: true, module: result.module, files: result.files } : null;
+    } else {
       const at = path.join(root, VIEWS, `${name}.html`);
       const capability = name.startsWith('spec-') ? capabilities(root).find((c) => `spec-${changeKey(c)}` === name) : null;
       let result = null;
@@ -542,8 +591,41 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         // The page is named by the server, not by what the page sent.
         const name = typeof body.page === 'string' && body.page.startsWith(`${VIEWS}/`) ? path.posix.basename(body.page, '.html') : '';
         const built = name && CHANGE_NAME.test(name) ? pageHtml(name) : null;
-        await ask(askPrompt({ ...body, page: built ? `${VIEWS}/${name}.html` : '', title: built?.title ?? '' }, lang()));
-        return send(res, 200, 'application/json; charset=utf-8', '{"ok":true}');
+        let id;
+        if (built?.guide) {
+          // A question on the code guide gets an id, so its answer can come back to this page.
+          asked += 1;
+          id = `q${asked}-${salt}`;
+          const item = body.item && typeof body.item === 'object' ? { label: oneLine(body.item.label, 20), title: oneLine(body.item.title, 300) } : null;
+          questions.set(id, { id, page: name, item, question: oneLine(body.question, 500), answer: null, rev: 0, saved: false });
+          if (questions.size > 200) questions.delete(questions.keys().next().value);
+        }
+        await ask(askPrompt({ ...body, id, page: built ? `${VIEWS}/${name}.html` : '', title: built?.title ?? '' }, lang()));
+        return send(res, 200, 'application/json; charset=utf-8', JSON.stringify(id ? { ok: true, id } : { ok: true }));
+      }
+      if (rest.length === 1 && rest[0] === 'qa') {
+        // "This helped": the person saves a question and its answer to the guide's Q&A file.
+        const origin = req.headers.origin;
+        if (req.method !== 'POST' || req.headers['x-spec-relay'] !== 'qa' || (origin && origin !== `http://127.0.0.1:${port}`)) return send(res, 403, 'text/plain; charset=utf-8', 'forbidden');
+        const reply = (code, body) => send(res, code, 'application/json; charset=utf-8', JSON.stringify(body));
+        let body;
+        try { body = JSON.parse(await readBody(req)); } catch { return reply(400, { ok: false, problem: 'bad request' }); }
+        const name = body && typeof body.page === 'string' && body.page.startsWith(`${VIEWS}/`) ? path.posix.basename(body.page, '.html') : '';
+        const entry = body && typeof body.id === 'string' ? questions.get(body.id) : null;
+        const mod = name ? guideModule(name) : null;
+        if (!entry || entry.page !== name || !mod || entry.answer === null || !entry.item) return reply(404, { ok: false, problem: 'no answer to save on this page' });
+        if (entry.saved) return reply(200, { ok: true, file: entry.file });
+        // Only the answer the person read: one the agent replaced since is shown first.
+        if (body.rev !== entry.rev) return reply(409, { ok: false, problem: 'the answer changed since the page was shown' });
+        const result = saveQa(root, { module: mod.key, file: entry.item.title, question: entry.question, answer: entry.answer, now: now() });
+        if (!result.ok) return reply(400, { ok: false, problem: result.problem });
+        entry.saved = true;
+        entry.file = result.file;
+        version += 1;
+        cache.clear();
+        seen = signature(root);
+        checked = Date.now();
+        return reply(200, { ok: true, file: result.file });
       }
       if (rest.length === 1 && rest[0] === 'review') {
         const origin = req.headers.origin;
@@ -581,7 +663,12 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         const code = lang();
         const nonce = crypto.randomBytes(16).toString('base64');
         const built = pageHtml(name);
-        const html = interactive(built ? built.html : notFoundPage({ lang: code, now: now() }), { lang: code, pagePath: rel, title: built ? built.title : WORDS[code].title, version: currentVersion(), seq: goto.seq, nonce, review: built?.review ?? null });
+        // A saved answer is shown from the Q&A file instead.
+        const answers = built?.guide ? [...questions.values()].filter((q) => q.page === name && q.answer !== null && !q.saved).map((q) => ({
+          id: q.id, rev: q.rev, label: q.item?.label ?? '', title: q.item?.title ?? '', question: q.question, html: markdown(q.answer), saved: q.saved,
+          savable: Boolean(built.module && q.item && built.files.includes(q.item.title)),
+        })) : null;
+        const html = interactive(built ? built.html : notFoundPage({ lang: code, now: now() }), { lang: code, pagePath: rel, title: built ? built.title : WORDS[code].title, version: currentVersion(), seq: goto.seq, nonce, review: built?.review ?? null, answers, guide: hasGuide() });
         return send(res, built ? 200 : 404, 'text/html; charset=utf-8', html, { 'Content-Security-Policy': csp(nonce) });
       }
       const type = IMAGES[path.extname(rel).toLowerCase()];
@@ -601,8 +688,24 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
   return {
     root, port, token,
     url: address,
-    // Sends every page of this server to this page.
-    go: (name) => { goto = { seq: goto.seq + 1, path: `${VIEWS}/${encodeURIComponent(name)}.html` }; return address(name); },
+    // Sends every page of this server to this page (and to `anchor` on it).
+    go: (name, anchor) => {
+      const hash = anchor && /^[A-Za-z0-9_-]{1,64}$/.test(anchor) ? `#${anchor}` : '';
+      goto = { seq: goto.seq + 1, path: `${VIEWS}/${encodeURIComponent(name)}.html${hash}` };
+      return address(name) + hash;
+    },
+    // The agent's answer to a question asked on the code guide: shown under its item.
+    answer: (id, text) => {
+      const entry = questions.get(String(id ?? ''));
+      if (!entry) return { ok: false, problem: `no question ${id} (asked on the code guide since the canvas started)` };
+      const answer = String(text ?? '').replace(/\r\n?/g, '\n').trim().slice(0, 20000);
+      if (!answer) return { ok: false, problem: 'the answer is empty' };
+      entry.answer = answer;
+      entry.rev += 1;
+      version += 1;
+      cache.clear();
+      return { ok: true, page: entry.page };
+    },
     refresh: () => { version += 1; },
     close: () => new Promise((resolve) => { server.closeAllConnections?.(); server.close(() => resolve()); }),
   };
@@ -618,6 +721,12 @@ export function pageName(root, { view: which = 'progress', name } = {}) {
     const capability = list.find((c) => c === wanted) ?? list.find((c) => c.toLowerCase() === wanted.toLowerCase());
     if (!capability) return { ok: false, problem: `spec not found: openspec/specs/${wanted}/spec.md` };
     return { ok: true, name: `spec-${changeKey(capability)}` };
+  }
+  if (which === 'guide') {
+    if (!fs.existsSync(path.join(root, GUIDE))) return { ok: false, problem: `no code guide yet: ${GUIDE} (node scripts/guide.mjs init)` };
+    const found = locate(root, name);
+    if (!found) return { ok: false, problem: `not in the code guide: ${name}` };
+    return { ok: true, name: found.page, anchor: found.anchor };
   }
   if (which === 'review') {
     if (!name) return { ok: false, problem: 'name the change to review, such as extract-billing-invoice' };

@@ -21,6 +21,7 @@ The kit's own files are two directories above this skill:
 [scripts/verify.mjs](../../scripts/verify.mjs),
 [scripts/compare.mjs](../../scripts/compare.mjs) ([docs/COMPARE.md](../../docs/COMPARE.md)),
 [scripts/finish.mjs](../../scripts/finish.mjs),
+[scripts/guide.mjs](../../scripts/guide.mjs) ([docs/GUIDE.md](../../docs/GUIDE.md)),
 [scripts/doctor.mjs](../../scripts/doctor.mjs), `openspec-schemas/` and
 `docs/WORKFLOW.md`. `<kit>` below stands for the absolute path of that
 directory; resolve it from this file's own location (installed as a plugin it is
@@ -738,6 +739,63 @@ changes no behavior.
    the switch from the old system to the new one are not part of the kit.
    If code changes after that, `status.mjs` shows the finish step as open
    again: run it again as `finish-v<n>`.
+
+## 7. Code guide (optional)
+
+Only when the person asks for it, usually after the finish step or after the
+first ports: a guide that helps someone understand the new code. It has three
+ways in (by feature, by page or URL, by file), diagrams of the modules and
+their data drawn from the target design, an explanation of every code file,
+and the questions and answers the person found helpful. It explains; no gate
+reads it and it approves nothing. See docs/GUIDE.md.
+
+1. Ask what to cover: every module, or the ones they name. The guide needs
+   the archived target design (its `## Modules` table) and the target root.
+2. Run `node "<kit>/scripts/guide.mjs" init`. It makes
+   `openspec/spec-relay/guide/` with `stack.md` (from conventions.md and the
+   build files), a `routes.md` to fill, and prints each module's code files
+   and the guide file to write (`code/<module>.md`). It never overwrites a
+   file that is there. Tell the person about `unassigned` code files (under
+   no module path of architecture.md): the guide does not cover them.
+3. Run a wave of writers (Working in parallel): give each module to the
+   `spec-relay-guide-writer` agent with its guide file, its module path and
+   its list of code files as init printed them, and give `routes.md` to one
+   more writer (the routes task). One writer per guide file: for a module
+   too large for one writer, give the rest of its files to a writer in the
+   next wave, to add to the same file. Save and compare the guard around the
+   wave as usual (it does not cover `guide/`; the hook, when on, refuses a
+   subagent's write to `guide/qa/`).
+4. Run `node "<kit>/scripts/guide.mjs" stamp` (it writes the file's hash under
+   each heading that has none), then `node "<kit>/scripts/guide.mjs" check`.
+   Give the `problems` back to the writer of that file (a name not in the
+   file, a line that does not exist, a handler that is gone), and a module
+   with `unexplained` files too (`noCode` marks a module not ported yet: no
+   writer for it), then stamp and
+   check again. A hash that is there changes only with `--file <path>` (one
+   per file written again) or `--file all`: never pass them for a file whose
+   explanation was not rewritten, or its out-of-date warning disappears.
+5. Show it: `node "<kit>/scripts/render.mjs" --guide all` writes
+   `openspec/spec-relay/views/guide.html` and a page per module; in the
+   canvas, `open_canvas` with input `{ "view": "guide" }` or the action
+   `open_guide` (name: a module, a file of the target code or a URL of
+   routes.md, which opens the page at that file).
+6. **Questions from the canvas.** A question the person types on a guide page
+   arrives as `[canvas] ...` with an id such as `q3-1a2b`. Answer it in the chat
+   from the code, then send the same answer to the canvas:
+   `invoke_canvas_action` (instanceId `spec-relay`, actionName `post_answer`,
+   input `{ "id": "q3-1a2b", "answer": "<Markdown>" }`). It shows under the
+   item, and on a module's page the person can press "Helpful (save to the
+   Q&A)" to save it to `qa/<module>.md` with the file's hash. The ids last
+   while the canvas is open; after it was closed, answer in the chat only. Never save an answer yourself unless
+   the person asks in the chat; then append an entry to `qa/<module>.md` in
+   the same form (`### Q: <question>`, `- File: <path>`, `- Hash:` left empty,
+   `- Saved: <date>`, a blank line, the answer) and run `guide.mjs stamp`,
+   which fills the empty hash. Subagents never write `qa/`.
+7. After later changes to the code, `guide.mjs check` and the guide's pages
+   show which explanations and saved answers are older than the code (the
+   canvas does not watch the code: run the action `refresh`): give those files
+   to a writer again, then `guide.mjs stamp --file <path>` for each. `status.mjs` shows one optional
+   TODO line for the guide once `guide/` exists; it is never where the work is.
 
 ## Progress in the TODO list
 

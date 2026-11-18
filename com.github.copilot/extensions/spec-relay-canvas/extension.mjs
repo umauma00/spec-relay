@@ -2,7 +2,10 @@
 // specs in a Copilot canvas, with an "ask about this" button on every item. On
 // the page of an active change the person can also tick items, write decisions
 // and the reviewer's name: the canvas writes them to review.md as their own edit.
-// The agent's actions only read and move the canvas; none of them writes.
+// The optional code guide (openspec/spec-relay/guide/) is shown too: an answer the
+// agent sends back with post_answer appears under the question's item, and only
+// the person's "Helpful (save to the Q&A)" button saves it to the guide's Q&A file.
+// The agent's actions only read, move the canvas and show answers; none of them writes a file.
 //
 // The only file that touches the Copilot SDK (the canvas API is experimental and
 // may change). Everything else is in the kit's scripts/canvas.mjs, which runs and
@@ -65,8 +68,8 @@ async function go(ctx, which) {
   const server = await serverOf(ctx);
   const page = pageName(server.root, { view: which, name: ctx.input?.name });
   if (!page.ok) throw new CanvasError('not_found', page.problem);
-  server.go(page.name);
-  return { ok: true, shown: page.name };
+  server.go(page.name, page.anchor);
+  return { ok: true, shown: page.name, ...(page.anchor ? { anchor: page.anchor } : {}) };
 }
 
 const nameInput = (description) => ({ type: 'object', additionalProperties: false, properties: { name: { type: 'string', description } } });
@@ -76,13 +79,13 @@ session = await joinSession({
     createCanvas({
       id: 'spec-relay',
       displayName: 'spec-relay',
-      description: 'Shows the spec-relay migration: progress, review pages and approved specs, with a button to ask about any item. On the page of an active change the person can tick items, write decisions and the reviewer in review.md (their own edit; never an approval to archive). The agent cannot write through it.',
+      description: 'Shows the spec-relay migration: progress, review pages, approved specs and the code guide, with a button to ask about any item. On the page of an active change the person can tick items, write decisions and the reviewer in review.md (their own edit; never an approval to archive). The agent cannot write through it.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
         properties: {
-          view: { type: 'string', enum: ['progress', 'review', 'spec', 'specs'], description: 'The page to show. Default: progress.' },
-          name: { type: 'string', description: 'For review: the change name (extract-billing-invoice). For spec: the capability (billing/invoice).' },
+          view: { type: 'string', enum: ['progress', 'review', 'spec', 'specs', 'guide'], description: 'The page to show. Default: progress.' },
+          name: { type: 'string', description: 'For review: the change name (extract-billing-invoice). For spec: the capability (billing/invoice). For guide: a module, a file of the target code or a URL of routes.md (none: the guide\'s first page).' },
         },
       },
       actions: [
@@ -111,6 +114,18 @@ session = await joinSession({
         { name: 'open_progress', description: 'Show the progress page in the open canvas.', handler: (ctx) => go(ctx, 'progress') },
         { name: 'open_review', description: 'Show the page of a change (its review) in the open canvas.', inputSchema: nameInput('The change, such as extract-billing-invoice.'), handler: (ctx) => go(ctx, 'review') },
         { name: 'open_spec', description: 'Show an approved spec, or the list of specs when no name is given, in the open canvas.', inputSchema: nameInput('The capability, such as billing/invoice.'), handler: (ctx) => go(ctx, 'spec') },
+        { name: 'open_guide', description: 'Show the code guide in the open canvas: its first page, or the page of a module, a file of the target code or a URL listed in routes.md.', inputSchema: nameInput('A module (billing), a file (src/main/java/.../InvoiceService.java) or a URL (/invoices/{id}). None: the first page.'), handler: (ctx) => go(ctx, 'guide') },
+        {
+          name: 'post_answer',
+          description: 'Show your answer to a question the person asked on a code guide page (its prompt gives the id) under the question\'s item. It writes no file: the person decides on the page whether to save it.',
+          inputSchema: { type: 'object', additionalProperties: false, required: ['id', 'answer'], properties: { id: { type: 'string', description: 'The question id from the prompt, such as q3-1a2b.' }, answer: { type: 'string', description: 'The answer, in Markdown (at most 20000 characters).' } } },
+          handler: async (ctx) => {
+            const server = await serverOf(ctx);
+            const result = server.answer(ctx.input?.id, ctx.input?.answer);
+            if (!result.ok) throw new CanvasError('not_found', result.problem);
+            return { ok: true, page: result.page };
+          },
+        },
         { name: 'refresh', description: 'Reload the canvas after changing files (it also reloads by itself within a few seconds).', handler: async (ctx) => { (await serverOf(ctx)).refresh(); return { ok: true }; } },
       ],
       open: async (ctx) => {
@@ -126,8 +141,8 @@ session = await joinSession({
         // The same canvas moved to another repository: stop the old server when nothing else shows it.
         if (before && before !== keyOf(root)) await release(before, ctx.instanceId);
         // Opening a canvas that is already open may only focus it: move it when a page was asked for.
-        if (before === keyOf(root) && ctx.input?.view) server.go(page.name);
-        return { url: server.url(page.name), title: 'spec-relay', status: path.basename(root) };
+        if (before === keyOf(root) && ctx.input?.view) server.go(page.name, page.anchor);
+        return { url: server.url(page.name) + (page.anchor ? `#${page.anchor}` : ''), title: 'spec-relay', status: path.basename(root) };
       },
       onClose: async (ctx) => {
         const key = instances.get(ctx.instanceId);

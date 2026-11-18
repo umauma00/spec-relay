@@ -2,7 +2,7 @@
 
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) を使って、コードベースを別のプログラミング言語へ移すための GitHub Copilot 用キットです。元のコードから仕様を起こし、人間がその仕様をレビューし、レビュー済みの仕様をもとに新しい言語で実装します。
 
-> **状態：0.18.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
+> **状態：0.19.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
 
 ## 流れ
 
@@ -182,6 +182,10 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 - フックはプラグインを入れたすべてのリポジトリで、シェルとファイル編集の前に1回ずつ起動します（node の起動1回分。spec-relay のリポジトリでなければすぐ終わります）。ホストがプラグインの場所（`PLUGIN_ROOT`）を渡さないときは何もしません。
 - チャットでの承認は AI が review.md に書くので、「AI が勝手にチェックを付ける」ことはフックでは区別できません。承認は今も、チャットでのあなたの言葉と gate の合格の両方です。
 
+## 0.18.0 から更新するとき
+
+0.19.0 で、任意の**コードガイド**を作れるようになりました。移行先のコードを、機能・画面と URL・ファイルの3つの入口から辿れる案内で、モジュールと依存の図、データの持ち主の図、ファイルごとの説明、canvas で聞いて役立った Q&A が入ります。チャットで「コードガイドを作って」と頼んでください（[詳しく](docs/GUIDE.md)）。新しいエージェント `spec-relay-guide-writer` が増えます。プラグインを更新すれば入ります。スキーマや今までの成果物に変更はありません。
+
 ## 0.17.0 から更新するとき
 
 0.18.0 で、canvas のレビュー画面から review.md に書き込めるようになりました（確認済みにする・判断を書く・レビュー担当の名前）。自分でファイルを直したのと同じ扱いで、変更の完了（アーカイブ）は今までどおりチャットで伝えます（[詳しく](docs/CANVAS.md)）。書き込みは `openspec/spec-relay/local/canvas-log.jsonl` に記録され、`gate.mjs guard --compare` はそれをサブエージェントの変更と区別します。プラグインを更新すれば入ります。スキーマや成果物に変更はありません。
@@ -300,9 +304,9 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 ```text
 plugin.json                    プラグイン定義（Agent Plugins 1.0）
 .github/plugin/marketplace.json マーケットプレイス定義
-com.github.copilot/agents/     オーケストレーター・解析担当・照合担当・実装担当
+com.github.copilot/agents/     オーケストレーター・解析担当・照合担当・実装担当・コードガイドの説明担当
 com.github.copilot/hooks/      実行前に archive と書き込みを確かめるフック（既定は無効）と、サブエージェントの時間の記録
-com.github.copilot/extensions/ canvas の拡張（進み具合・レビュー画面・仕様を Copilot の canvas に出し、レビューのチェックと判断を書き戻す。試験中）
+com.github.copilot/extensions/ canvas の拡張（進み具合・レビュー画面・仕様・コードガイドを Copilot の canvas に出し、レビューのチェックと判断、役立った Q&A を書き戻す。試験中）
 skills/spec-relay/SKILL.md     オーケストレーターの手順
 skills/spec-relay-view/        markdown を HTML にして見せるスキル
 openspec-schemas/              移行用の OpenSpec スキーマ
@@ -322,6 +326,7 @@ scripts/run.mjs                verify と compare がコマンドを実行する
 scripts/render.mjs             成果物の markdown をレビュー用の HTML に、承認済みの仕様を読みものの HTML にする（デザイン固定）
 scripts/canvas.mjs             canvas の画面を出すサーバー（拡張から使う。単独でブラウザーでも試せる）
 scripts/review-edit.mjs        canvas から review.md への書き込み（チェック・判断・レビュー担当）と、その記録
+scripts/guide.mjs              コードガイド（任意）の準備・ハッシュの記録・確認と、画面の部品（図は設計から描く）
 scripts/doctor.mjs             最初の環境チェックとサブエージェントの試運転
 scripts/openspec.mjs           リポジトリに固定した OpenSpec CLI の起動（`node <キット>/scripts/openspec.mjs <引数>`、シェルを通さない）
 templates/openspec-tools/      リポジトリに置く、OpenSpec の版を固定する package.json と package-lock.json
@@ -331,6 +336,7 @@ docs/WINDOWS.md                Windows での準備と注意点
 docs/DATABASE.md               データベースの扱いと、定義の書き出し方
 docs/COMPARE.md                比べ方 B1（元のプログラムから記録したケースとの比較）の書き方
 docs/CANVAS.md                 canvas で見る（試験中）
+docs/GUIDE.md                  コードガイド（任意）
 ```
 
 ## 開発

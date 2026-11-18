@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkboxes, questionIds, tableRows, changeSchema, archivedChange } from './gate.mjs';
+import { guideView, guidePage, guideWords, modules as guideModules, moduleKey, GUIDE_CSS } from './guide.mjs';
 import { ledgerSummary } from './sites.mjs';
 import { leftoverRows } from './finish.mjs';
 
@@ -892,7 +893,7 @@ function renames(text) {
   return out;
 }
 
-const readItem = (label, anchor, title, kind, body, notes, heading = inline(title)) => ({
+export const readItem = (label, anchor, title, kind, body, notes, heading = inline(title)) => ({
   id: label, letter: label[0], label, anchor, title, name: plainText(title), done: true,
   html: `<article class="item${body.html ? '' : ' small'} k-${kind}${body.removed ? ' is-removed' : ''}" id="${escapeHtml(anchor)}" tabindex="-1">
 <header class="item-head"><span class="id">${escapeHtml(label)}</span><h3>${body.tag}${heading}</h3></header>
@@ -1506,18 +1507,27 @@ const specHref = (capability) => encodeURIComponent(specFile(capability));
 // One page as HTML, without writing it: render() writes it, the canvas serves it.
 // `at` is where the page is taken to be; images are linked relative to it.
 // { change } is a change's page, { spec: 'all' } the list of specs, { spec } one
-// capability's page, { file } one Markdown file.
+// capability's page, { file } one Markdown file, { guide: true } the code guide's
+// first page and { guide: '<module>' } one module's page.
 export function view(options) {
   const before = readRoot;
   readRoot = options.root ?? process.cwd();
   try { return buildView(options); } finally { readRoot = before; }
 }
 
-function buildView({ root = process.cwd(), change, spec, file, lang, now = new Date(), at, nav = '' }) {
+function buildView({ root = process.cwd(), change, spec, file, guide, lang, now = new Date(), at, nav = '' }) {
   const code = pickLang(root, lang);
   const L = LABELS[code];
   const stamp = `${L.generated} ${timeStamp(now)}`;
   const resolved = path.resolve(root, at);
+  if (guide) {
+    const parts = guideView({ root, module: guide === true ? undefined : guide, L, lang: code });
+    if (!parts) return { ok: false, problems: [`no module ${guide} in the target design's architecture.md`] };
+    const W = guideWords(code);
+    const html = withImages(root, path.join(root, 'openspec/spec-relay/guide'), resolved, () => page({ title: parts.title, kind: parts.kind, meta: stamp, brief: parts.brief, groups: parts.groups, docs: parts.docs, L: { ...L, searchHint: W.searchHint }, lang: code, mode: 'read', nav, note: W.note, view: 'guide' }))
+      .replace('</style>', () => `${GUIDE_CSS}</style>`);
+    return { ok: true, title: parts.title, module: parts.module ?? null, files: parts.files ?? [], html };
+  }
   if (spec === 'all') {
     const list = capabilities(root);
     return { ok: true, title: L.specIndexTitle, html: withImages(root, path.join(root, SPECS), resolved, () => page({ title: L.specIndexTitle, kind: L.specIndexKind, meta: stamp, ...specIndex({ root, L, list, href: specHref }), L, lang: code, mode: 'read', nav, note: L.specNote })) };
@@ -1588,7 +1598,29 @@ function renderSpecs({ root, spec, out, lang, now }) {
   return built.ok ? { ok: true, out: path.relative(root, resolved).replace(/\\/g, '/') } : built;
 }
 
-export function render({ root = process.cwd(), change, file, spec, out, lang, now = new Date() }) {
+// --guide all writes guide.html and a page for every module; --guide <module> one module's page.
+function renderGuide({ root, guide, lang, now }) {
+  const views = path.resolve(root, VIEWS);
+  const W = guideWords(pickLang(root, lang));
+  const back = `<a href="guide.html">${escapeHtml(W.toIndex)}</a>`;
+  const write = (options, name) => {
+    const resolved = path.join(views, `${name}.html`);
+    const built = view({ root, lang, now, at: resolved, ...options });
+    if (built.ok) writeView(root, resolved, built.html);
+    return built.ok ? { ok: true, out: path.relative(root, resolved).replace(/\\/g, '/') } : built;
+  };
+  if (guide === 'all' || guide === 'index') {
+    const index = write({ guide: true }, 'guide');
+    if (!index.ok || guide === 'index') return index;
+    const pages = guideModules(root).map((m) => write({ guide: m.key, nav: back }, guidePage(m.key))).filter((r) => r.ok).map((r) => r.out);
+    return { ...index, pages };
+  }
+  // The file is named by the module's key ("Sales Orders" -> guide-sales-orders.html), as every link names it.
+  return write({ guide, nav: back }, guidePage(moduleKey(String(guide))));
+}
+
+export function render({ root = process.cwd(), change, file, spec, guide, out, lang, now = new Date() }) {
+  if (guide) return renderGuide({ root, guide, lang, now });
   if (spec) return renderSpecs({ root, spec, out, lang, now });
   if (!change && !file) return { ok: false, problems: ['pass --change NAME, --file PATH or --spec CAPABILITY|all'] };
   const name = change ?? path.basename(file).replace(/\.md$/i, '');
@@ -1602,18 +1634,18 @@ export function render({ root = process.cwd(), change, file, spec, out, lang, no
 export function main(argv) {
   const opts = {};
   for (let i = 0; i < argv.length; i += 2) {
-    const key = { '--change': 'change', '--file': 'file', '--spec': 'spec', '--root': 'root', '--out': 'out', '--lang': 'lang' }[argv[i]];
+    const key = { '--change': 'change', '--file': 'file', '--spec': 'spec', '--guide': 'guide', '--root': 'root', '--out': 'out', '--lang': 'lang' }[argv[i]];
     if (!key || argv[i + 1] === undefined) return usage();
     opts[key] = argv[i + 1];
   }
-  if ([opts.change, opts.file, opts.spec].filter(Boolean).length !== 1) return usage();
+  if ([opts.change, opts.file, opts.spec, opts.guide].filter(Boolean).length !== 1 || (opts.guide && opts.out)) return usage();
   const result = render(opts);
   console.log(JSON.stringify(result, null, 2));
   return result.ok ? 0 : 1;
 }
 
 function usage() {
-  console.error('Usage: node render.mjs --change NAME | --file PATH.md | --spec CAPABILITY|all [--root DIR] [--out FILE] [--lang ja|en]');
+  console.error('Usage: node render.mjs --change NAME | --file PATH.md | --spec CAPABILITY|all | --guide all|index|MODULE [--root DIR] [--out FILE] [--lang ja|en]');
   return 2;
 }
 
