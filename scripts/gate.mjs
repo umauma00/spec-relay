@@ -1115,7 +1115,7 @@ export function verifyPlan(root, change, capability = portCapability(root, chang
     if (isE2eCommand(command)) {
       const opts = e2eCommandOptions(command);
       if (opts.problem) problems.push(`${levelName(level)}: ${opts.problem}`);
-    }
+    } else if (level === 'B2') problems.push(`level B2 is the kit's screen tests: give it \`spec-relay-e2e --base http://localhost:<port> --start '<command>'\` (docs/E2E.md), not \`${command}\``);
     runs.push({ level, command, from });
   };
   add('A', design.A ?? commands.test, design.A ? 'design.md' : 'conventions.md', 'conventions.md of the archived target design names no Test command (## Commands)');
@@ -1292,7 +1292,10 @@ export function scanTarget(root, files = targetFiles(root)) {
     const read = readTarget(path.join(root, f));
     if (read.utf16) { utf16.push(f); continue; }
     if (read.text === undefined || (!/spec-relay:/i.test(read.text) && !read.text.includes('TODO(port'))) continue;
-    read.text.split('\n').forEach((line, i) => {
+    read.text.split('\n').forEach((raw, i) => {
+      // A JSON line may escape what the tag holds (\u53d7 for 受): read it as JSON.
+      let line = raw;
+      if (/\.jsonl$/i.test(f) && raw.includes('\\u')) { try { line = JSON.stringify(JSON.parse(raw)); } catch { /* not JSON: as written */ } }
       const at = line.search(/spec-relay:/i);
       const tag = at >= 0 && !NOT_TESTS.test(f) ? readTag(line, at) : null;
       if (tag) tags.push({ file: f, line: i + 1, ...tag });
@@ -1499,9 +1502,10 @@ function checkPortEvidence(root, change, dir, capability, problems) {
     const old = oldReceipt(root, capability, change);
     if (old.problem) problems.push(`${levelName(level)}: ${old.problem}`);
     else if (old.receipt.sha256 !== now.sha256) problems.push(`the screen tests or their screenshots (${E2E_DIR}/) changed after they passed on the old system: run e2e.mjs old again with the old system running, then ${again}`);
+    else if (!old.receipt.origin || old.receipt.origin === e2eCommandOptions(command).url?.origin) problems.push(`${levelName(level)}: the old run did not test the old system (${old.receipt.origin || 'no address'}, the new system's address is the same): run e2e.mjs old against the test copy of the old system`);
     else if (!ran.e2e || ran.e2e.sha256 !== now.sha256) problems.push(`the screen tests or their screenshots (${E2E_DIR}/) changed after the last verify run: ${again}`);
     else if (level === 'C' && !(ran.e2e.screenshots > 0)) problems.push(`level C runs the screen tests, but they took no screenshot from the old system: add expect(page).toHaveScreenshot() to the tests of the screens, run e2e.mjs old again, then ${again}`);
-    else screenTests.push({ level, tests: ran.e2e.tests, screenshots: ran.e2e.screenshots });
+    else screenTests.push({ level, tests: ran.e2e.tests, screenshots: ran.e2e.screenshots, origin: old.receipt.origin, ranAt: old.receipt.ranAt ?? '', loosened: Array.isArray(ran.e2e.loosened) ? ran.e2e.loosened : [] });
   }
   return { levels: ['A', ...plan.levels], equivalence: plan.levels.length ? 'compared' : 'inferred', commands: plan.runs, followUp, cases, screens: screenTests, scenarioChecks };
 }
@@ -1527,6 +1531,19 @@ function checkScenarios(root, change, dir, capability, { plan, receipt, tags, sc
     const argv = commandWords(r.command.trim().slice(COMPARE_COMMAND.length));
     return relPath(argv ? parseOptions(argv).cases ?? '' : '').replace(/\/+$/, '');
   }).filter(Boolean);
+  // The `scenario` keys of the recorded cases (read as JSON, also where git ignores the folder).
+  const caseTags = [];
+  const targetAbs = path.resolve(root, target || '.');
+  for (const folder of caseFolders) {
+    for (const file of walk(path.resolve(targetAbs, folder)).filter((f) => /\.jsonl$/i.test(f))) {
+      for (const line of (readIf(file, []) ?? '').split(/\r?\n/)) {
+        let value;
+        try { value = JSON.parse(line); } catch { continue; }
+        const keys = value && typeof value === 'object' ? [value.scenario].flat() : [];
+        for (const key of keys) { const tag = typeof key === 'string' ? titleTag(key) : null; if (tag) caseTags.push(tag); }
+      }
+    }
+  }
   // The titles of the screen tests that passed on the old system and in the last verify run.
   const old = e2eLevels.length ? oldReceipt(root, capability, change) : null;
   const oldTitles = old?.receipt ? old.receipt.tests.map((t) => t.title) : [];
@@ -1550,7 +1567,7 @@ function checkScenarios(root, change, dir, capability, { plan, receipt, tags, sc
       if (tagged.length && !tagged.some((t) => !within(t.file, E2E_DIR) && !/\.jsonl?$/i.test(t.file))) problems.push(`${name} is checked by unit, but its only tags are in screen tests or data files; tag a test in the target language`);
     } else if (kind === 'compare') {
       if (!caseFolders.length) problems.push(`${name} is checked by compare, but design.md's Verification has no spec-relay-compare command`);
-      else if (!tagged.some((t) => caseFolders.some((f) => within(t.file, f)))) problems.push(`no recorded case in ${caseFolders.join(', ')} carries the tag of ${name} (a "scenario" key holding spec-relay: ${capability} | ${s.requirement} | ${s.scenario})`);
+      else if (!caseTags.some((t) => tagMatches(t, capability, s))) problems.push(`no recorded case in ${caseFolders.join(', ')} carries the tag of ${name} (a "scenario" key holding spec-relay: ${capability} | ${s.requirement} | ${s.scenario})`);
     } else if (!e2eLevels.length) problems.push(`${name} is checked by e2e, but design.md's Verification has no spec-relay-e2e command`);
     else if (!proven(oldTitles, s)) problems.push(`no screen test titled with the tag of ${name} passed on the old system (spec-relay: ${capability} | ${s.requirement} | ${s.scenario})`);
     else if (receipt && !proven(newTitles, s)) problems.push(`the screen test of ${name} did not pass on the new system in the last verify run`);
@@ -1635,7 +1652,7 @@ const NEXT = {
     inferred: 'Only level A ran: tests from the spec, which an AI wrote from reading the source code. The source program was not run, so that the new code behaves the same is inferred from the code, not compared.',
     compared: (levels) => `The source program was compared as well (${levels}).`,
     cases: (level, n, rules) => `${level}: all ${n} recorded case${n === 1 ? '' : 's'} match${rules.length ? `, with the rules ${rules.join('; ')} (design.md's Decisions should say why)` : ''}`,
-    screens: (level, n, shots) => (level === 'C' ? `C: the new screens match the ${shots} screenshot${shots === 1 ? '' : 's'} taken from the source program` : `${level}: all ${n} screen test${n === 1 ? '' : 's'} passed on the source program first, then on the new system`),
+    screens: (e) => (e.level === 'C' ? `C: the new screens match the ${e.screenshots} screenshot${e.screenshots === 1 ? '' : 's'} taken from the source program${e.loosened.length ? `, with the comparison loosened at ${e.loosened.join(', ')} (design.md's Decisions should say why)` : ''}` : `${e.level}: all ${e.tests} screen test${e.tests === 1 ? '' : 's'} passed on the source program first (${e.origin}, ${e.ranAt.slice(0, 10)}), then on the new system`),
     scenarioChecks: (c) => `How the ${c.e2e + c.compare + c.unit} scenarios are checked: ${c.e2e} by screen tests run on both systems, ${c.compare} by cases recorded from the source program, ${c.unit} by unit tests.`,
     commands: (list) => `The verify run ran: ${list}.`,
     overridden: (levels) => `For ${levels}, this port's design.md replaced the command of the reviewed conventions.md; check that it is the right one.`,
@@ -1657,7 +1674,7 @@ const NEXT = {
     inferred: '比べ方は A（仕様のシナリオから作ったテスト）だけです。仕様は AI が元コードを読んで書いたもので、元のプログラムは動かしていません。同じ動きであることは、比べた結果ではなくコードを読んだうえでの推定です。',
     compared: (levels) => `元のプログラムとの比較（${levels}）も通りました。`,
     cases: (level, n, rules) => `${level}: 記録された ${n} 件がすべて一致${rules.length ? `。比べ方をゆるめる規則 ${rules.join('; ')} を使用（理由は design.md の Decisions に）` : ''}`,
-    screens: (level, n, shots) => (level === 'C' ? `C: 元のシステムで撮った ${shots} 枚のスクリーンショットと新しい画面が一致` : `${level}: 画面のテスト ${n} 件が、元のシステムで通ったあと、新しいシステムでも通過`),
+    screens: (e) => (e.level === 'C' ? `C: 元のシステムで撮った ${e.screenshots} 枚のスクリーンショットと新しい画面が一致${e.loosened.length ? `。比べ方をゆるめる設定 ${e.loosened.join(', ')} を使用（理由は design.md の Decisions に）` : ''}` : `${e.level}: 画面のテスト ${e.tests} 件が、元のシステム（${e.origin}、${e.ranAt.slice(0, 10)} の実行）で通ったあと、新しいシステムでも通過`),
     scenarioChecks: (c) => `シナリオ ${c.e2e + c.compare + c.unit} 件の確認方法: 画面のテスト（新旧の両方で実行）${c.e2e} 件、元のプログラムの記録との比較 ${c.compare} 件、単体テスト ${c.unit} 件。`,
     commands: (list) => `実行したコマンド: ${list}。`,
     overridden: (levels) => `${levels} は、レビュー済みの conventions.md ではなく、この port の design.md のコマンドで実行しました。正しいコマンドかを確かめてください。`,
@@ -1708,7 +1725,7 @@ export function nextSteps(command, result, lang = 'en') {
     const counted = (level) => {
       const c = (result.cases ?? []).find((x) => x.level === level);
       const e = (result.screens ?? []).find((x) => x.level === level);
-      return c ? words.cases(level, c.count, c.rules) : e ? words.screens(level, e.tests, e.screenshots) : level;
+      return c ? words.cases(level, c.count, c.rules) : e ? words.screens(e) : level;
     };
     person.push(result.equivalence === 'compared' ? words.compared(levels.map(counted).join(', ')) : words.inferred);
     const checks = result.scenarioChecks;

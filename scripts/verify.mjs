@@ -88,7 +88,7 @@ export async function verify(root, change, { timeoutMs = 60 * 60 * 1000, run = r
   for (const { level, command, from } of plan.runs) {
     // B2 and C of web screens are one run of the screen tests: a level whose
     // command an earlier level already ran takes that run's result.
-    const earlier = done.get(command);
+    const earlier = isE2eCommand(command) ? done.get(command) : null;
     if (earlier) progress(`${level} (${from}): the same command as ${earlier.level}, not run again`);
     else progress(`${level} (${from}): ${command}`);
     const result = earlier ? { ...earlier.result, seconds: 0 } : await run(command, cwd, { timeoutMs, root, change, capability });

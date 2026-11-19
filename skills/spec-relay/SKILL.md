@@ -247,7 +247,7 @@ not wash out these instructions.
    Before every wave, run `node "<kit>/scripts/gate.mjs" guard --save
    wave-<n>`: it saves the hashes of the files no subagent may write (every
    active change's `review.md`, `questions.md`, `crosscheck.md` and
-   `verify.json`, every active port's `proposal.md` and `design.md`,
+   `verify.json` and `e2e-old.json`, every active port's `proposal.md` and `design.md`,
    `plan.md`, `lessons.md`,
    `openspec/specs/`, `openspec/config.yaml` and the source files). After the
    wave, run `gate.mjs guard --compare wave-<n>`, which lists only the paths
@@ -689,12 +689,15 @@ Words); the finish step (step 6) lists it in the hand-over.
    runs the screen tests in `tests/e2e/<capability with - for />/` against
    the new system it starts, and only when exactly those tests passed on the
    old system first, unchanged since (`e2e-old.json`). The old run is a task
-   before verify (docs/E2E.md): before it, ask the person to confirm that the
-   test copy of the old system runs at the address in verification.md and
-   that its database is at the starting state, then run `node
-   "<kit>/scripts/e2e.mjs" old --change port-<capability> --base <address>`
-   (with `--reset '<command>'` when verification.md names one); never write
-   `e2e-old.json` yourself. A test that fails on the old system is wrong:
+   before verify that you run yourself, never a subagent (docs/E2E.md):
+   before it, ask the person to confirm that the test copy of the old system
+   runs at the address in verification.md and that its database is at the
+   starting state, then run `node "<kit>/scripts/e2e.mjs" old --change
+   port-<capability> --base <address>` (with `--reset '<command>'` when
+   verification.md names one; the address must be the one verification.md
+   names); never write `e2e-old.json` yourself. Then ask the person to stop
+   the old system before verify: the new run refuses while the old one still
+   answers, so a test cannot reach it. A test that fails on the old system is wrong:
    the implementer fixes the test. A test that fails on the new system is a
    difference: the implementer fixes the new code, never the test or its
    screenshots. Changing a test or a screenshot after the old run means

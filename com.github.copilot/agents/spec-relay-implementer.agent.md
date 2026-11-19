@@ -117,19 +117,22 @@ unspecified behavior you found (below).
   id, a class, a test id or XPath (the run refuses those; the old system's
   ids, such as `ctl00_Main_txtQty`, change). Open pages with
   `page.goto(at('/old/path.php'))`, written with the old system's path
-  (`paths.json` maps it to the new one where design.md says the path
-  changed). Do what the scenario's WHEN says through the screen, and check
+  (`paths.json` in the capability's folder maps it to the new one where
+  design.md says the path changed). Never write a full address
+  (`http://...`) or `baseURL`, and never import a file outside the
+  capability's folder and the files right in `tests/e2e/`. Do what the scenario's WHEN says through the screen, and check
   every value its THEN names; never branch on `side`. Sign in with
   `secret('NAME')` from the environment variables verification.md names.
   With C chosen, end each screen the scenario shows with `await
   expect(page).toHaveScreenshot('<screen>.png')`, masking only values that
   change on every run (`mask: [page.getByText(/\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}/)]`)
-  and saying why under Decisions. Run them against the old system only when
-  the task says the person confirmed it runs: `node "<kit>/scripts/e2e.mjs"
-  old --change <change> --base <its address>`. Every test must pass there:
-  a test that fails on the old system is wrong, so fix the test. After that,
-  never touch the tests or the screenshots in `screenshots/` without running
-  the old run again; when a test fails on the new system, fix the new code.
+  and saying why under Decisions. Never run `e2e.mjs old` yourself and
+  never write `e2e-old.json` or the screenshots: the orchestrator runs the
+  tests on the old system after the person confirms it runs. When it gives
+  you a test that failed there, the test is wrong, so fix the test. After
+  the old run, a change to a test means the old run has to happen again, so
+  report it instead of making it quietly; when a test fails on the new
+  system, fix the new code, never the test or its screenshots.
 - When a task gives you crosscheck rows to fix, fix the code or the test so it
   does what the source code does, and report what you changed per row.
 - Never write a password, token or connection string into a file; sign-in

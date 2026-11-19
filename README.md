@@ -191,7 +191,7 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 |---|---|
 | port の design.md に `## Scenario checks`（要件・シナリオ・確認方法 `e2e`・`compare`・`unit`）が加わった | B1 か B2 のコマンドがある port は、表がないと `gate.mjs port-done` が止まる。すべてのシナリオの行を足す。A だけの port は変わらない |
 | `compare` にしたシナリオは、記録したケースに `"scenario"` キーで印が要る | 印がないと止まる。入力の一覧に `"scenario"` を足して記録し直す（`http.mjs record` はそのまま写す） |
-| B2 は「操作を記録して再生する」から「シナリオごとの Playwright のテストを、元のシステムで通してから新しいシステムに流す」に変わった | B2 を選んだコンテキストの port は、design.md の B2 のコマンドを `spec-relay-e2e --base <新しいシステム> --start '<起動コマンド>'` にし、`e2e.mjs init` で `tests/e2e/` を作り、`e2e.mjs old` で元のシステムに通してから verify する。以前の B2 のテストは `tests/e2e/<capability>/` の `*.e2e.mjs` に移し、題名をシナリオの印にする |
+| B2 は「操作を記録して再生する」から「シナリオごとの Playwright のテストを、元のシステムで通してから新しいシステムに流す」に変わった | B2 を選んだコンテキストの port は、design.md の B2 のコマンドを `spec-relay-e2e --base <新しいシステム> --start '<起動コマンド>'` にし、`e2e.mjs init` で `tests/e2e/` を作り、verification.md に書いた元のシステムのアドレスで `e2e.mjs old` を実行して通し（オーケストレーターが行う）、元のシステムを止めてから verify する。以前の B2 のテストは `tests/e2e/<capability>/` の `*.e2e.mjs` に移し、題名をシナリオの印にし、パスの読み替えは `tests/e2e/<capability>/paths.json` に置く |
 | verification.md の列名が「B2 screen tests」になった | なし（列は `B2` で始まれば読みます） |
 
 Playwright（`@playwright/test`、Apache-2.0）はキットに同梱していません。`tests/e2e/` で `npm ci` を実行すると、版を固定した 1.64.1 が入ります。Windows 11 では入っている Edge を使うので、ブラウザのダウンロードは要りません。

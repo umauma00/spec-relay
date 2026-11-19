@@ -240,6 +240,14 @@ test('verify runs a B1 compare command, and port-done reports the cases it match
   assert.match(nextSteps('port-done', done, 'ja').person.join(' '), /B1: 記録された 3 件がすべて一致。比べ方をゆるめる規則 ignore \$\.at を使用/);
   assert.deepEqual(done.scenarioChecks, { e2e: 0, compare: 1, unit: 2 });
   assert.match(nextSteps('port-done', done, 'ja').person.join(' '), /シナリオ 3 件の確認方法: 画面のテスト（新旧の両方で実行）0 件、元のプログラムの記録との比較 1 件、単体テスト 2 件。/);
+  // A recorder may write the tag with escapes: it is read as the JSON it is.
+  write(dir, 'ts/tests/golden/calc/add.jsonl', CASES.replace('"id":"text",', '"id":"text","scenario":"spec-relay: calc/add | Reject text | Text\\u0020input",'));
+  fs.writeFileSync(path.join(dir, PORT, 'design.md'), fs.readFileSync(path.join(dir, PORT, 'design.md'), 'utf8').replace('| Text input | unit |', '| Text input | compare |'));
+  crosscheck(dir);
+  assert.equal((await verify(dir, 'port-calc-add', { progress: () => {} })).ok, true);
+  const escaped = checkPortDone(dir, 'port-calc-add');
+  assert.equal(escaped.ok, true, escaped.problems.join('\n'));
+  assert.deepEqual(escaped.scenarioChecks, { e2e: 0, compare: 2, unit: 1 });
   // A recorded case changed after the run voids it, like a change to the code.
   write(dir, 'ts/tests/golden/calc/add.jsonl', CASES.replace('"sum":3', '"sum":30'));
   assert.match(checkPortDone(dir, 'port-calc-add').problems.join(), /the target code changed after the last verify run \(ts\/tests\/golden\/calc\/add\.jsonl\)/);

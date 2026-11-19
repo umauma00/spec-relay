@@ -47,7 +47,7 @@ import { fileURLToPath } from 'node:url';
 import { runCommand, MAX_TIMEOUT_MS, stopAllOnSignal } from './run.mjs';
 import { answers, baseUrl, startSystem } from './http.mjs';
 import { words } from './compare.mjs';
-import { chainProblem, changeSchema, cleanValue, configValue, portCapability, readIf, scenarioList, tagMatches, titleTag } from './gate.mjs';
+import { archivedChange, chainProblem, changeSchema, cleanValue, configValue, portCapability, readIf, scenarioList, tagMatches, titleTag } from './gate.mjs';
 import { ignoreLocal } from './metrics.mjs';
 
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -108,25 +108,39 @@ export function e2eCommandOptions(command) {
 
 // --- files -----------------------------------------------------------------------
 
-function listFiles(dir, rel = '') {
+function listFiles(dir, rel = '', skip = SKIP_DIRS) {
   let entries = [];
   try { entries = fs.readdirSync(path.join(dir, rel), { withFileTypes: true }); } catch { return []; }
   const out = [];
   for (const e of entries) {
     const child = rel ? `${rel}/${e.name}` : e.name;
-    if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) out.push(...listFiles(dir, child)); } else if (e.isFile()) out.push(child);
+    if (e.isDirectory()) { if (!skip.has(e.name)) out.push(...listFiles(dir, child, skip)); } else if (e.isFile()) out.push(child);
   }
   return out.sort();
 }
 
-// The hash of everything under tests/e2e/ but installed packages: the tests,
-// their helpers and settings, and the screenshots taken from the old system.
-// Text is read with CRLF as LF, so a Windows checkout hashes the same.
-// { sha256, files: { path: sha256 }, screenshots } (screenshots of one capability).
+// The files of one capability's screen tests, as paths under tests/e2e/: the
+// files right in tests/e2e/ (settings, support.mjs, package files) and every
+// file of the capability's own folder (tests, paths.json, screenshots). Other
+// capabilities' folders are not part of it, so porting one capability never
+// voids another one's old run; the installed packages (tests/e2e/node_modules)
+// are pinned by package-lock.json, which is.
+export function e2eFiles(target, capability) {
+  const dir = path.join(target, E2E_DIR);
+  let top = [];
+  try { top = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name); } catch { /* none */ }
+  const own = capabilityFolder(capability);
+  return [...top, ...listFiles(path.join(dir, own), '', new Set()).map((f) => `${own}/${f}`)].sort();
+}
+
+// The hash of a capability's screen test files (e2eFiles): the tests, their
+// helpers and settings, and the screenshots taken from the old system. Text is
+// read with CRLF as LF, so a Windows checkout hashes the same.
+// { sha256, files: { path: sha256 }, screenshots }.
 export function e2eDigest(target, capability) {
   const dir = path.join(target, E2E_DIR);
   const files = {};
-  for (const f of listFiles(dir)) {
+  for (const f of e2eFiles(target, capability)) {
     let bytes;
     try { bytes = fs.readFileSync(path.join(dir, f)); } catch { continue; }
     const text = !bytes.includes(0) && !/\.(png|jpe?g|gif|webp)$/i.test(f);
@@ -138,30 +152,80 @@ export function e2eDigest(target, capability) {
   return { sha256: hash.digest('hex'), files, screenshots: Object.keys(files).filter((f) => f.startsWith(own) && /\.png$/i.test(f)).length };
 }
 
-// Selectors that name what only one system's markup has. The old and the new
-// system keep what a user sees (texts, labels, roles), not their ids and classes.
-const SELECTORS = [
-  [/\bgetByTestId\s*\(/, 'getByTestId (the old system has no test ids)'],
-  [/\blocator\s*\(\s*(['"`])\s*(?:css\s*=\s*)?[#.]/, 'an id or class selector'],
-  [/\blocator\s*\(\s*(['"`])[^'"`]*\[\s*(?:id|class|data-test(?:-?id)?)\s*[~|^$*]?=/, 'an id, class or test-id attribute selector'],
-  [/\blocator\s*\(\s*(['"`])\s*(?:xpath\s*=|\/\/|\(\s*\/\/)/, 'an XPath selector'],
-  [/\.\$\$?\s*\(|\$\$?eval\s*\(/, 'page.$ / $$ / $eval (CSS selectors)'],
-];
+// Playwright calls that take a selector string (the old API): any of them can
+// name an id or a class, so tests use locators instead.
+const SELECTOR_CALLS = /\b(?:page|frame|this\.page)\s*\.\s*(?:click|dblclick|fill|type|press|check|uncheck|selectOption|hover|tap|focus|textContent|innerText|innerHTML|inputValue|isVisible|isHidden|isChecked|isEnabled|isDisabled|isEditable|getAttribute|setInputFiles|dispatchEvent|waitForSelector|dragAndDrop)\s*\(/;
+// An id or a class inside a selector string: `#qty`, `input#qty`, `.price`,
+// `td.price` (not `..`, the parent of an element found by its text).
+const CSS_ID_OR_CLASS = /#[A-Za-z_-]|(?<!\.)\.(?=[A-Za-z_-])/;
+const STRING_ARG = /\b(locator|frameLocator)\s*\(\s*(['"`])((?:\\.|(?!\2).)*)\2/g;
 
-// The selector problems of a capability's test files, as "file:line: what".
-export function selectorProblems(dir) {
+// What a line of a screen test does that only one system can answer, or null.
+function selectorProblem(line) {
+  if (/\bgetByTestId\s*\(/.test(line)) return 'getByTestId (the old system has no test ids)';
+  if (/\$\$?eval\s*\(|\.\s*\$\$?\s*\(|\bquerySelector(?:All)?\s*\(/.test(line)) return 'a CSS query ($, $$, $eval, querySelector)';
+  if (SELECTOR_CALLS.test(line)) return 'a selector string in page.click / fill / ... (use a locator)';
+  for (const m of line.matchAll(STRING_ARG)) {
+    const selector = m[3].trim().replace(/^css\s*=\s*/, '');
+    if (/^(?:xpath\s*=|\/\/|\(\s*\/\/)/.test(selector)) return 'an XPath selector';
+    if (/\[\s*(?:id|class|data-test(?:-?id)?)\s*[~|^$*]?=/.test(selector)) return 'an id, class or test-id attribute selector';
+    if (!/^(?:text|role|label|placeholder|alt|title|internal:[a-z-]+)\s*=/.test(selector) && CSS_ID_OR_CLASS.test(selector)) return 'an id or class selector';
+  }
+  return null;
+}
+
+// What a line of any file under tests/e2e does that would let a run test
+// another system than the one under test, or tell the two apart, or null.
+function sideProblem(line, file) {
+  if (/\bhttps?:\/\//i.test(line)) return 'a fixed address (http://...): open pages with at(\'/path\'), so each run tests its own system';
+  if (/\bbaseURL\b/.test(line)) return 'baseURL: the run sets the address of the system under test';
+  if (/SPEC_RELAY_BASE_URL/.test(line) && file !== 'support.mjs') return 'SPEC_RELAY_BASE_URL: open pages with at(\'/path\')';
+  if (/SPEC_RELAY_SIDE|\bside\b\s*(?:===?|!==?)/.test(line) && file !== 'support.mjs') return 'which system runs (side): the same test must check the same thing on both';
+  return null;
+}
+
+// A relative import of a screen test that leaves what the hash covers.
+function importProblem(line, file, own) {
+  for (const m of line.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s+)(['"`])(\.{1,2}\/[^'"`]*)\1/g)) {
+    const to = path.posix.normalize(path.posix.join(path.posix.dirname(file), m[2]));
+    if (to.startsWith('../') || (to.includes('/') && !to.startsWith(`${own}/`))) return `an import of ${m[2]}, outside this capability's folder and the files right in ${E2E_DIR}/`;
+  }
+  return null;
+}
+
+// The problems of a capability's screen test files, as "file:line uses what".
+export function selectorProblems(target, capability) {
+  const dir = path.join(target, E2E_DIR);
+  const own = capabilityFolder(capability);
   const out = [];
-  for (const f of listFiles(dir).filter((file) => TEST_FILE.test(file))) {
+  for (const f of e2eFiles(target, capability).filter((file) => /\.(m?js|cjs|ts|json)$/i.test(file) && file !== 'package-lock.json' && file !== 'package.json')) {
+    let text = '';
+    try { text = fs.readFileSync(path.join(dir, f), 'utf8'); } catch { continue; }
+    const code = !/\.json$/i.test(f);
+    text.split(/\r?\n/).forEach((line, i) => {
+      if (/^\s*(\/\/|\*)/.test(line)) return;
+      const side = code ? sideProblem(line, f) : null;
+      const found = side ?? (code ? selectorProblem(line) ?? importProblem(line, f, own) : null);
+      if (found) out.push(`${f}:${i + 1} uses ${found}${side ? '' : '; find elements as a user does (getByRole, getByLabel, getByText): the old and the new system share what a user sees, not their markup'}`);
+    });
+  }
+  return out;
+}
+
+// Settings and calls that loosen the screenshot comparison, for the person:
+// ["playwright.config.mjs:24 maxDiffPixels", ...].
+export function loosenings(target, capability) {
+  const dir = path.join(target, E2E_DIR);
+  const out = [];
+  for (const f of e2eFiles(target, capability).filter((file) => /\.(m?js|cjs|ts)$/i.test(file))) {
     let text = '';
     try { text = fs.readFileSync(path.join(dir, f), 'utf8'); } catch { continue; }
     text.split(/\r?\n/).forEach((line, i) => {
       if (/^\s*(\/\/|\*)/.test(line)) return;
-      for (const [pattern, what] of SELECTORS) {
-        if (pattern.test(line)) { out.push(`${f}:${i + 1} uses ${what}; find the element as a user does (getByRole, getByLabel, getByText), since the new system's markup differs`); break; }
-      }
+      for (const word of line.match(/\b(maxDiffPixels|maxDiffPixelRatio|threshold|mask|stylePath)\b/g) ?? []) out.push(`${f}:${i + 1} ${word}`);
     });
   }
-  return out;
+  return [...new Set(out)];
 }
 
 // What keeps the tests of a capability from running: { problems, cli, testDir }.
@@ -174,7 +238,7 @@ export function setupProblems(target, capability) {
   else if (!fs.existsSync(cli)) problems.push(`@playwright/test is not installed in ${E2E_DIR}/: run npm ci there`);
   const tests = listFiles(testDir).filter((f) => TEST_FILE.test(f));
   if (!tests.length) problems.push(`no screen tests in ${E2E_DIR}/${capabilityFolder(capability)}/ (files named *.e2e.mjs)`);
-  problems.push(...selectorProblems(testDir));
+  problems.push(...selectorProblems(target, capability));
   return { problems, cli, testDir };
 }
 
@@ -213,8 +277,13 @@ export async function runSuite({ root, target, capability, base, side, update, t
   if (problems.length) return { exitCode: 1, timedOut: false, seconds: 0, output: '', tests: [], problems };
   ignoreLocal(root);
   const results = path.join(root, 'openspec/spec-relay/local/e2e', capabilityFolder(capability), side);
-  fs.rmSync(results, { recursive: true, force: true });
-  fs.mkdirSync(results, { recursive: true });
+  // Retries cover files a virus scanner or a closing browser still holds on Windows.
+  try {
+    fs.rmSync(results, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    fs.mkdirSync(results, { recursive: true });
+  } catch (error) {
+    return { exitCode: 1, timedOut: false, seconds: 0, output: '', tests: [], problems: [`could not clear ${path.relative(root, results)} (${error.code ?? error.message}); close what holds it open and run again`] };
+  }
   const reportFile = path.join(results, 'report.json');
   const env = {
     SPEC_RELAY_SIDE: side,
@@ -234,9 +303,11 @@ export async function runSuite({ root, target, capability, base, side, update, t
   }
   const tests = reportTests(report);
   const out = [];
+  // What draws the screenshots: both runs must use the same.
+  const browser = { playwright: String(report.config?.version ?? ''), channel: process.env.SPEC_RELAY_E2E_CHANNEL ?? '', platform: process.platform };
   for (const e of report.errors ?? []) out.push(`Playwright: ${String(e.message ?? e).replace(ANSI, '').split('\n')[0]}`);
   if ((report.config?.projects ?? []).length > 1) out.push('more than one Playwright project ran; keep one browser in tests/e2e/playwright.config.mjs');
-  return { exitCode: ran.exitCode, timedOut: ran.timedOut, seconds: ran.seconds, output: ran.output, tests, problems: out, results: path.relative(root, results).split(path.sep).join('/') };
+  return { exitCode: ran.exitCode, timedOut: ran.timedOut, seconds: ran.seconds, output: ran.output, tests, problems: out, browser, results: path.relative(root, results).split(path.sep).join('/') };
 }
 
 // What is wrong with the tests of a run, for the scenarios of the baseline spec.
@@ -275,8 +346,15 @@ export async function recordOld(root, opts, { run = runCommand, send = fetch } =
   if (!scenarios.length) return fail([`the baseline spec of ${capability} has no scenarios`]);
   const setup = setupProblems(target, capability);
   if (setup.problems.length) return fail(setup.problems);
+  // The old system is the test copy the person named in the reviewed target
+  // design, so the "old" run cannot be pointed at the new system.
+  const verification = archivedChange(root, 'target-design');
+  const named = verification ? (readIf(path.join(verification, 'verification.md'), []) ?? '').toLowerCase() : '';
+  if (!named.includes(opts.url.host.toLowerCase())) return fail([`${opts.url.host} is not the test copy of the old system that the archived target design's verification.md names (Running the source program); use that address, or ask the person to correct verification.md in a new target design`]);
   if (!await answers(opts.url, send)) return fail([`nothing answers at ${opts.url.origin}: ask the person to start the test copy of the old system there (verification.md says how)`]);
   const timeoutMs = Number(opts.timeout ?? 60) * 60000;
+  // Every screenshot comes from this run: one a test no longer takes must not stay behind.
+  try { fs.rmSync(path.join(setup.testDir, 'screenshots'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (error) { return fail([`could not clear the old screenshots (${error.code ?? error.message})`]); }
   if (opts.reset) {
     const reset = await run(opts.reset, target, { timeoutMs });
     if (reset.exitCode !== 0) return fail([`the --reset command failed (${reset.timedOut ? 'timed out' : `exit code ${reset.exitCode}`}): ${opts.reset}`], [reset.output.trim().split('\n').slice(-20).join('\n')]);
@@ -296,7 +374,7 @@ export async function recordOld(root, opts, { run = runCommand, send = fetch } =
   const digest = e2eDigest(target, capability);
   const receipt = {
     kit: 'spec-relay', version: kitVersion(), change: opts.change, capability, ranAt: new Date().toISOString(), side: 'old', origin: opts.url.origin,
-    sha256: digest.sha256, files: digest.files, screenshots: digest.screenshots,
+    sha256: digest.sha256, files: digest.files, screenshots: digest.screenshots, browser: ran.browser, loosened: loosenings(target, capability),
     tests: ran.tests.map((t) => ({ title: t.title, file: t.file, project: t.project })),
   };
   fs.writeFileSync(receiptFile, `${JSON.stringify(receipt, null, 2)}\n`);
@@ -352,6 +430,11 @@ export async function runNew(root, opts, { change = null, capability, timeoutMs,
   }
   const setup = setupProblems(target, capability);
   if (setup.problems.length) return done(1, setup.problems.map((p) => `e2e: ${p}`));
+  // The old run tested another system than this one, and that system is not
+  // there now, so no test can reach it instead of the new one.
+  const oldOrigin = typeof old.receipt.origin === 'string' ? old.receipt.origin : '';
+  if (!oldOrigin || oldOrigin === opts.url.origin) return done(1, [`e2e: the old run ${oldOrigin ? `tested ${oldOrigin}, the address of the new system` : 'names no address'}: run e2e.mjs old again against the test copy of the old system`]);
+  if (await answers(new URL(oldOrigin), send)) return done(1, [`e2e: the old system still answers at ${oldOrigin}: stop it for this run, so the tests can only reach the new system`]);
   const limit = timeoutMs ?? Number(opts.timeout ?? 60) * 60000;
   if (opts.reset) {
     const reset = await run(opts.reset, target, { timeoutMs: limit });
@@ -373,6 +456,10 @@ export async function runNew(root, opts, { change = null, capability, timeoutMs,
   const extra = ran.tests.filter((t) => !oldKeys.has(testKey(t)));
   for (const t of missing.slice(0, SHOW)) problems.push(`"${t.title}" (${t.file}) passed on the old system but did not run on the new one`);
   for (const t of extra.slice(0, SHOW)) problems.push(`"${t.title}" (${t.file}) ran on the new system but not in the old run`);
+  const was = old.receipt.browser;
+  if (ran.browser && was && ['playwright', 'channel', 'platform'].some((k) => String(was[k] ?? '') !== String(ran.browser[k] ?? ''))) {
+    problems.push(`the browser differs from the old run's (${JSON.stringify(was)} then, ${JSON.stringify(ran.browser)} now), so the screenshots are not comparable: run e2e.mjs old again`);
+  }
   const failed = failures(ran.tests);
   const passed = ran.tests.filter((t) => t.passed).length;
   lines.push(`e2e: ${ran.tests.length} tests, ${passed} passed on the new system at ${opts.url.origin} (the same tests passed on the old system on ${old.receipt.ranAt ?? 'an earlier run'}; ${digest.screenshots} screenshots from it)`);
@@ -383,7 +470,7 @@ export async function runNew(root, opts, { change = null, capability, timeoutMs,
   const ok = !problems.length && !failed.length && ran.tests.length > 0 && ran.exitCode === 0;
   return {
     exitCode: ok ? 0 : ran.timedOut ? -1 : 1, timedOut: ran.timedOut, seconds: Math.round((Date.now() - started) / 100) / 10, output: lines.join('\n'),
-    e2e: { sha256: digest.sha256, tests: ran.tests.length, passed, titles: [...new Set(ran.tests.filter((t) => t.passed).map((t) => t.title))], screenshots: digest.screenshots, oldRanAt: old.receipt.ranAt ?? null },
+    e2e: { sha256: digest.sha256, tests: ran.tests.length, passed, titles: [...new Set(ran.tests.filter((t) => t.passed).map((t) => t.title))], screenshots: digest.screenshots, oldRanAt: old.receipt.ranAt ?? null, oldOrigin, loosened: loosenings(target, capability) },
   };
 }
 

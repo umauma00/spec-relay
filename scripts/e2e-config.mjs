@@ -52,5 +52,7 @@ export default {
   updateSnapshots: env.SPEC_RELAY_E2E_UPDATE === 'all' ? 'all' : 'none',
   reporter: [['json', { outputFile: env.SPEC_RELAY_E2E_REPORT }]],
   use: { ...user.use, ...fixedUse },
-  ...(projects.length ? { projects: [{ ...without(projects[0], LOOSE), use: { ...projects[0].use, ...fixedUse } }] } : {}),
+  // A project keeps only its name and browser settings: anything else there
+  // (ignoreSnapshots, a grep, retries) could make one run check less.
+  ...(projects.length ? { projects: [{ ...(projects[0].name !== undefined ? { name: projects[0].name } : {}), use: { ...projects[0].use, ...fixedUse } }] } : {}),
 };
