@@ -47,6 +47,7 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "C#"
 - **改行**：Git for Windows の既定（`core.autocrlf=true`）でスキーマや設定が CRLF になっても、キットの版と同じものとして扱います。レビューの確認（`gate.mjs`）も CRLF と UTF-8 の BOM を読めます。キット自体は `.gitattributes` で LF に固定しています。
 - **パス**：`--source-root` と `--target-root` は `\` と `/` のどちらでも書けて、設定には `/` で記録します。大文字と小文字の違いだけの名前は同じフォルダーとして扱います。`con`・`nul` などの予約名、末尾が `.` や空白の名前、`: * ? " < > |` を含む名前は受け付けません。
 - **空白を含むフォルダー**：`C:\Users\Taro Yamada\...` のような場所でも動きます。
+- **画面のテスト（比べ方 B2・C）**：Playwright は Windows 11 に入っている Edge（`channel: 'msedge'`）を使うので、ブラウザのダウンロードは要りません。Playwright 本体は `tests\e2e\node_modules\` の `cli.js` を `node` で直接起動し、`npx` やシェルは通しません（[E2E.md](E2E.md)）。
 
 ## 気をつけること
 

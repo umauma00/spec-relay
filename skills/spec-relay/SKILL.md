@@ -21,6 +21,7 @@ The kit's own files are two directories above this skill:
 [scripts/verify.mjs](../../scripts/verify.mjs),
 [scripts/compare.mjs](../../scripts/compare.mjs) and
 [scripts/http.mjs](../../scripts/http.mjs) ([docs/COMPARE.md](../../docs/COMPARE.md)),
+[scripts/e2e.mjs](../../scripts/e2e.mjs) ([docs/E2E.md](../../docs/E2E.md)),
 [scripts/finish.mjs](../../scripts/finish.mjs),
 [scripts/guide.mjs](../../scripts/guide.mjs) ([docs/GUIDE.md](../../docs/GUIDE.md)),
 [scripts/doctor.mjs](../../scripts/doctor.mjs), `openspec-schemas/` and
@@ -470,8 +471,14 @@ the domain, not the folders.
    table, an automated boundary check. Ask the person about anything the code
    cannot tell you: frameworks they prefer, whether the source program can
    still be run, and which verification levels each context needs (A scenario
-   tests always; B1 logic comparison, B2 screen replay, C screenshots by
-   choice). Suggest B1 for contexts with calculations or business rules
+   tests always; B1 logic comparison, B2 screen tests, C screenshots by
+   choice). Suggest B2 for every context with web screens whose old system
+   can run here as a test copy: each screen scenario becomes a Playwright
+   test that passes on the old system first and then judges the new one
+   (docs/E2E.md); C adds screenshots to the same tests. Desktop screens
+   (WinForms, WPF) cannot have B2: their scenarios get unit tests. Ask how
+   both test databases are put back to the starting state, best as one
+   command. Suggest B1 for contexts with calculations or business rules
    whenever the source code can be built and run here or records of its real
    runs exist (batch input and output, report data): it is the level that
    compares with what the old system did (docs/COMPARE.md). When the logic
@@ -617,12 +624,16 @@ Words); the finish step (step 6) lists it in the hand-over.
    archived extract change's `trace.md` (and any later amendment's) into
    design.md. In design.md's Screens section, give each screen its policy from
    ui.md, and list under Carried files the carry files this port copies;
-   `gate.mjs port-done` compares each copy with its source. If the archived
+   `gate.mjs port-done` compares each copy with its source. With a B1 or B2
+   command, fill design.md's Scenario checks: one row per baseline scenario,
+   `e2e` for what a user does on a web screen (B2), `compare` for what a
+   recorded case covers (B1), `unit` for the rest. If the archived
    target design has no ui.md (it was made before kit 0.8.0), ask the person
    for each screen's policy and record the answers under Decisions; never
    choose one yourself.
 3. Show the person the design's structure, any additions to the conventions,
-   the verification plan (each level and its command) and open risks, and
+   the verification plan (each level and its command, and how many
+   scenarios each check covers) and open risks, and
    start implementing after they agree. Propose lessons from their corrections
    (see Lessons).
 4. Run `node "<kit>/scripts/openspec.mjs" instructions apply --change port-<capability> --json` and work
@@ -674,6 +685,22 @@ Words); the finish step (step 6) lists it in the hand-over.
    are written `{{env:NAME}}` in the requests; the recording puts the
    placeholder back where an answer repeats a value, and leaves out values
    under names like token or session id.
+   A B2 (or C) command `spec-relay-e2e --base <address> --start '<command>'`
+   runs the screen tests in `tests/e2e/<capability with - for />/` against
+   the new system it starts, and only when exactly those tests passed on the
+   old system first, unchanged since (`e2e-old.json`). The old run is a task
+   before verify (docs/E2E.md): before it, ask the person to confirm that the
+   test copy of the old system runs at the address in verification.md and
+   that its database is at the starting state, then run `node
+   "<kit>/scripts/e2e.mjs" old --change port-<capability> --base <address>`
+   (with `--reset '<command>'` when verification.md names one); never write
+   `e2e-old.json` yourself. A test that fails on the old system is wrong:
+   the implementer fixes the test. A test that fails on the new system is a
+   difference: the implementer fixes the new code, never the test or its
+   screenshots. Changing a test or a screenshot after the old run means
+   running the old run again. Failure details and screenshot differences are
+   under `openspec/spec-relay/local/e2e/` (git ignores it); give the path to
+   the person when a screenshot differs.
 7. **Port crosscheck.** Number the baseline spec's requirements (`R1 <name>`)
    and the archived extract change's screens (`S1 <name>`) by search, as in
    step 3, and give them to `spec-relay-checker` subagents as a **port
@@ -698,7 +725,10 @@ Words); the finish step (step 6) lists it in the hand-over.
    port-<capability>`. Besides the tasks and the baseline hash, it fails when
    the last verify run failed or the target code changed after it, when a
    baseline scenario has no test tagged `spec-relay: <capability> |
-   <requirement> | <scenario>`, when a `TODO(port)` is left in the target
+   <requirement> | <scenario>`, when a scenario's row in design.md's Scenario
+   checks lacks its evidence (a unit test, a recorded case, or a screen test
+   that passed on the old system and then on the new one), when the screen
+   tests changed after the old run, when a `TODO(port)` is left in the target
    root, and when a crosscheck row is missing or not `confirmed`. Give a
    `TODO(port)` to the implementer to finish. Only when it cannot be finished
    in this port, ask the person whether to leave it for later; on a yes, list
@@ -706,7 +736,8 @@ Words); the finish step (step 6) lists it in the hand-over.
    left (agreed by <name>) ``. Never weaken a test, a tag or a crosscheck row
    to pass.
 9. When it passes, report the results with every `next.person` sentence: whether
-   the source program was compared (B1, B2, C) or the equivalence is only
+   the source program was compared (B1, B2, C, and how the scenarios are
+   checked) or the equivalence is only
    inferred from the code, the commands that ran and where they came from
    (a design.md command that replaced the conventions' one is named apart),
    and the `TODO(port)` left for later; the finish step collects them from

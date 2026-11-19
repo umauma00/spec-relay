@@ -12,10 +12,11 @@
 //     openspec/ and the target root), under openspec/specs/, openspec/changes/archive/,
 //     openspec/schemas/, openspec/spec-relay/tools/ (the pinned OpenSpec), openspec/spec-relay/db/ (the
 //     exported database definitions), of openspec/config.yaml, and inside the kit itself;
-//   - any agent edit of a change's verify.json (verify.mjs writes it) or of
+//   - any agent edit of a change's verify.json (verify.mjs writes it), of its
+//     e2e-old.json (e2e.mjs writes it after the screen tests passed on the old system), or of
 //     openspec/spec-relay/local/canvas-log.jsonl (the canvas writes it);
 //   - subagent edits of review.md, questions.md, crosscheck.md, a port's proposal.md and design.md, the plan and the lessons;
-//   - shell commands that write a verify.json or the canvas log;
+//   - shell commands that write a verify.json, an e2e-old.json or the canvas log;
 //   - shell commands that mention the "Hook enforcement" setting.
 // Shell commands that write files some other way are not parsed; the wave guard
 // (gate.mjs guard) still finds those changes afterwards.
@@ -52,6 +53,9 @@ const writesTo = (target) => [
 ];
 const RECEIPT_WRITES = writesTo(String.raw`[^\s;|&]*verify(?:\.json|\*)`);
 export const writesReceipt = (command) => /verify(?:\.json|\*)/i.test(command) && RECEIPT_WRITES.some((pattern) => pattern.test(command));
+// The same for the record of the screen tests' run on the old system, which only e2e.mjs writes.
+const OLD_RUN_WRITES = writesTo(String.raw`[^\s;|&]*e2e-old(?:\.json|\*)`);
+export const writesOldRun = (command) => /e2e-old(?:\.json|\*)/i.test(command) && OLD_RUN_WRITES.some((pattern) => pattern.test(command));
 // The same for the record of the person's canvas edits, which only the canvas writes.
 const CANVAS_LOG_WRITES = writesTo(String.raw`[^\s;|&]*canvas-log(?:\.jsonl|\*)`);
 export const writesCanvasLog = (command) => /canvas-log(?:\.jsonl|\*)/i.test(command) && CANVAS_LOG_WRITES.some((pattern) => pattern.test(command));
@@ -126,6 +130,7 @@ export function protectedPath(root, file, { subagent = false, pluginRoot = KIT_R
   ]) if (under(rel, dir)) return why;
   if (fold(rel) === fold(CANVAS_LOG)) return 'only the canvas writes canvas-log.jsonl, the record of the person\'s own edits in the canvas';
   if (/^openspec\/changes\/[^/]+\/verify\.json$/i.test(rel)) return 'only verify.mjs writes verify.json, the record of the last verify run; run it again instead';
+  if (/^openspec\/changes\/[^/]+\/e2e-old\.json$/i.test(rel)) return 'only e2e.mjs writes e2e-old.json, the record of the screen tests passing on the old system; run e2e.mjs old again instead';
   if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions|crosscheck)\.md$/i.test(rel) || /^openspec\/changes\/port-[^/]+\/(proposal|design)\.md$/i.test(rel) || [PLAN, LESSONS].some((p) => fold(p) === fold(rel)))) {
     return 'only the orchestrator writes review.md, questions.md, crosscheck.md, a port\'s proposal.md and design.md, the plan and the lessons';
   }
@@ -235,6 +240,9 @@ export function decide(payload, { pluginRoot = process.env.PLUGIN_ROOT || proces
       }
       if (writesReceipt(command)) {
         return 'only verify.mjs writes verify.json, the record of the last verify run; run node "<kit>/scripts/verify.mjs" --change <port change> instead';
+      }
+      if (writesOldRun(command)) {
+        return 'only e2e.mjs writes e2e-old.json, the record of the screen tests passing on the old system; run node "<kit>/scripts/e2e.mjs" old --change <port change> --base <old system> instead';
       }
       if (writesCanvasLog(command)) {
         return 'only the canvas writes canvas-log.jsonl, the record of the person\'s own edits in the canvas';

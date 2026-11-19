@@ -37,6 +37,7 @@ flowchart LR
 ```
 
 - `id` は空でない文字列で、フォルダー全体で重複できません。`input` と `expected` は任意の JSON です。ほかのキー（`note` など）は人のためのもので、比較では読みません。
+- port の design.md の Scenario checks で `compare` にしたシナリオは、そのシナリオを確かめるケースに `"scenario": "spec-relay: <capability> | <要件> | <シナリオ>"` を書きます（`gate.mjs port-done` がこの印を探します。[E2E.md](E2E.md#シナリオごとの確認方法)）。記録係は入力の一覧のこのキーをケースにそのまま写します。`http.mjs record` は自動で写します。
 - エラーも結果です。元のプログラムが例外やメッセージを返すなら、それを `expected` に書き、実行係も同じ形で返します。
 - 文字コードは UTF-8 です（先頭の BOM は無視し、CRLF の改行も読めます）。UTF-16 や Shift_JIS のファイルは失敗として報告します。Windows PowerShell 5.1 の `>` は UTF-16 で書くので、ケースは記録係が UTF-8 で直接書きます。
 - 桁の多い整数（16桁を超える ID など）や、桁を正確に保ちたい小数（金額など）は、JSON の数値にすると桁が落ちることがあるので、文字列で書きます。記録係と実行係の両方で同じ形にします。
@@ -158,7 +159,7 @@ class Program {
         object expected;
         try { expected = calc.Issue((string)c["input"]["customer"], DateTime.Parse((string)c["input"]["date"], CultureInfo.InvariantCulture)); }
         catch (Exception e) { expected = new { error = e.Message }; }
-        output.WriteLine(JsonConvert.SerializeObject(new { id = (string)c["id"], input = c["input"], expected }));
+        output.WriteLine(JsonConvert.SerializeObject(new { id = (string)c["id"], scenario = (string)c["scenario"], input = c["input"], expected }));
       }
     }
   }
@@ -181,7 +182,7 @@ foreach (file($argv[1], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line)
     } catch (Throwable $e) {
         $expected = ['error' => $e->getMessage()];
     }
-    fwrite($out, json_encode(['id' => $case['id'], 'input' => $case['input'], 'expected' => $expected], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . "\n");
+    fwrite($out, json_encode(['id' => $case['id'], 'scenario' => $case['scenario'] ?? null, 'input' => $case['input'], 'expected' => $expected], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . "\n");
 }
 ```
 
@@ -240,7 +241,7 @@ flowchart LR
 - **パスワードはファイルに書きません。** `{{env:名前}}` は送るときに環境変数の値に置き換わり、記録されたケースには `{{env:名前}}` のまま残ります。応答がその値を繰り返したとき（入力したユーザー名をフォームに戻す、など）も、`{{env:名前}}` に戻してから記録します。PowerShell の `${env:名前}` や `$env:名前` の書き方は受け付けません（ファイルを書くときにシェルが本物の値に置き換えてしまうため）。この一覧は、シェルのコマンドではなくエディターや編集ツールで書きます。環境変数が設定されていないなど、組み立てられないリクエストが1つでもあると、1件も送らずに失敗にします（サインインが抜けたまま、あとのリクエストを送らないため）。
 - ケースのファイルごとに、サインインしていない状態から始まります。サインインも1つのリクエストとして書きます。
 - リクエストは上から順に送ります。応答のないリクエストがあれば、そこで止めます。リダイレクトは追いかけません（リダイレクト先を記録するだけです）。移動先のページを見るには、そのページへのリクエストを続けて書きます。
-- ファイルのアップロード（`multipart/form-data`）は送れません。その操作は B2 で確かめます。
+- ファイルのアップロード（`multipart/form-data`）は送れません。その操作は B2（[画面のテスト](E2E.md)）で確かめます。
 
 ### 記録する
 
@@ -308,7 +309,7 @@ port の design.md には、実行係の代わりにキットの `spec-relay-htt
 
 ### この方法の限界
 
-- 画面の見た目は比べません（C）。JavaScript が動いたあとの表示も比べません（B2）。
+- 画面の見た目は比べません（C）。JavaScript が動いたあとの表示も比べません（B2）。どちらも[画面のテスト](E2E.md)で確かめます。
 - Cookie はセッションごとに名前と値だけを覚えます。パスやドメインで送り分けることはしません。
 - `path` に直接書いた日本語などの文字は UTF-8 で送ります。`--charset` の文字コードで送りたい値は `query` に書きます。
 - 見える文字を並べて比べるので、文言を1つ足すと、それ以降の `text` の番号がずれて差として出ます。元と同じ表示にするのがこのキットの既定なので、差は直すものとして扱います。

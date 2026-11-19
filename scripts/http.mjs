@@ -603,7 +603,7 @@ export async function exchange(cases, { base, charset = 'utf-8', map = NO_MAP, e
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
 // Whether anything answers at the URL (any status counts: it is listening).
-async function answers(url, send = fetch) {
+export async function answers(url, send = fetch) {
   try { const r = await send(url, { redirect: 'manual', signal: AbortSignal.timeout(2000) }); await r.arrayBuffer().catch(() => {}); return true; } catch { return false; }
 }
 
@@ -705,7 +705,9 @@ export function readInputs(text, label, problems) {
     if (!('input' in value)) { problems.push(`${label}:${i + 1} (case ${value.id}) has no "input"`); return; }
     if (seen.has(value.id)) { problems.push(`${label}:${i + 1}: case ${value.id} is there twice`); return; }
     seen.add(value.id);
-    out.push({ id: value.id, input: value.input, ...('note' in value ? { note: value.note } : {}) });
+    // `scenario` (the tag of the spec scenario the request belongs to) and
+    // `note` go into the recorded case unchanged; compare.mjs ignores them.
+    out.push({ id: value.id, input: value.input, ...('scenario' in value ? { scenario: value.scenario } : {}), ...('note' in value ? { note: value.note } : {}) });
   });
   return out;
 }
@@ -729,7 +731,7 @@ export async function record(opts, { cwd = process.cwd(), send = fetch, env = pr
   if (problems.length) return { ok: false, count: 0, problems };
   const ran = await exchange(inputs.map((c) => ({ ...c, file: opts.out })), { base: opts.url, charset: opts.charset ?? 'utf-8', env, requestMs: Number(opts.seconds ?? 30) * 1000, send });
   if (ran.problems.length) return { ok: false, count: ran.outputs.size, problems: ran.problems };
-  const lines = inputs.map((c) => JSON.stringify({ id: c.id, ...('note' in c ? { note: c.note } : {}), input: c.input, expected: ran.outputs.get(c.id) }));
+  const lines = inputs.map((c) => JSON.stringify({ id: c.id, ...('scenario' in c ? { scenario: c.scenario } : {}), ...('note' in c ? { note: c.note } : {}), input: c.input, expected: ran.outputs.get(c.id) }));
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, `${lines.join('\n')}\n`);
   const statuses = new Map();

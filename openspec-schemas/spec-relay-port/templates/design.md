@@ -24,6 +24,11 @@
 |---|---|---|
 | A scenario tests | <!-- every scenario --> | <!-- empty: conventions.md's Test command --> |
 
+## Scenario checks
+| Requirement | Scenario | Check |
+|---|---|---|
+| <!-- requirement --> | <!-- scenario --> | <!-- e2e / compare / unit --> |
+
 ## Source references
 | Requirement | Source (from trace.md) |
 |---|---|

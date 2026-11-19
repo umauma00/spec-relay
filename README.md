@@ -2,7 +2,7 @@
 
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) を使って、コードベースを別のプログラミング言語へ移すための GitHub Copilot 用キットです。元のコードから仕様を起こし、人間がその仕様をレビューし、レビュー済みの仕様をもとに新しい言語で実装します。
 
-> **状態：0.20.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
+> **状態：0.21.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
 
 ## 流れ
 
@@ -17,7 +17,7 @@ flowchart LR
 | 2. 移行先の設計 | モジュール構成（既定は Spring Modulith 型）、共通の規約、画面の作り方と見た目の方針、コンテキストごとの比べ方を決める。人がレビュー | `target-design` change（スキーマ `spec-relay-target`） |
 | 3. 解析 | 元のコードを読み、今の動作を言語に依存しない仕様と画面の記録にする。別の AI が元コードと照合 | `extract-<capability>` change（スキーマ `spec-relay-extract`） |
 | 4. レビュー | 人が HTML で見て、要件・画面・疑問点を確認し、承認したら archive | extract change の apply と archive |
-| 5. 実装 | 確定した仕様をモジュールごとに実装し、選んだ方式で元と比べる。細かいロジックは元コードを参照。テストはキットが実行して記録し、別の AI が新旧のコードを突き合わせる | `port-<capability>` change（スキーマ `spec-relay-port`） |
+| 5. 実装 | 確定した仕様をモジュールごとに実装し、選んだ方式で元と比べる。細かいロジックは元コードを参照。すべてのシナリオに自動の確認（画面のテスト・記録との比較・単体テスト）を付け、画面のテストは元のシステムで通してから新しいシステムに流す。テストはキットが実行して記録し、別の AI が新旧のコードを突き合わせる | `port-<capability>` change（スキーマ `spec-relay-port`） |
 | 6. 仕上げ | 全部の実装が終わったら、全体のビルド・テスト・比較をやり直し、`TODO(port)`・後回しの作業・リスクを一覧にして、引き渡しの報告を人がレビュー。archive で移行完了 | `finish` change（スキーマ `spec-relay-finish`） |
 | 修正 | 仕様が元コードを読み違えていたときに、差分だけ直して再レビュー | `amend-<capability>` change（スキーマ `spec-relay-amend`） |
 
@@ -127,6 +127,7 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 - **元のコードは書き換えない。** すべてのエージェントにとって読み取り専用です。
 - **仕様の確定は人が決める。** AI は人が認めた項目だけをチェックし、明示的な承認なしに archive しません。レビューはチャットで1項目ずつでも、ファイルや PR でまとめてでもかまいません。archive の前に `scripts/gate.mjs review` で、すべての要件・画面・質問・コンテキストがチェックリストにあり、チェック済みで、質問への判断とレビュー担当の名前が書かれ、AI の照合が解決し、元ファイルがすべて調査に含まれ、除外していないファイルがどれかの capability の解析に含まれ、すべての要件に元コードの位置があり、元コードのすべての箇所（メソッドや関数など）が要件・画面に覆われているか判定済みであることを確かめます（`openspec archive --yes` 自体はこれを確かめません）。
 - **実装の前後も確かめる。** port は、調査・移行先の設計・ベースライン仕様がそろい、修正中でないことを `gate.mjs port-ready` で確かめてから始めます。archive の前に `gate.mjs port-done` が、すべてのタスクの完了、着手時から仕様が変わっていないこと（ハッシュ）、今のコードでテストと境界チェックと選んだ比べ方が通った記録（`verify.mjs` が実行して書く）、仕様のシナリオごとのテスト、`TODO(port)` が残っていないこと、照合担当が新しいコードを元コードと突き合わせた結果を確かめます。比べ方が A だけのときは、同じ動きであることは元を動かして比べたのではなく推定だ、と完了時に知らせます（[詳しく](docs/WORKFLOW.md#実装が終わったときの確かめ方)）。元のプログラムを動かせるか本番の記録があれば、比べ方 B1 で、元が返した結果と新しいコードの結果を `compare.mjs` が1件ずつ比べます（[詳しく](docs/COMPARE.md)）。
+- **すべてのシナリオに自動の確認を付ける。** シナリオごとに、画面のテスト（`e2e`）・元のプログラムの記録との比較（`compare`）・単体テスト（`unit`）のどれで確かめるかを port の design.md に書き、確認のないシナリオがあると `gate.mjs port-done` が止まります。web の画面のシナリオは Playwright のテストにし、**同じテストをまず元のシステムで通してから**新しいシステムに流します（`e2e.mjs`、比べ方 B2）。元のシステムで通ることがテストの正しさの証拠になり、そのあとにテストを変えると元のシステムでやり直しです。同じテストが元のシステムで撮ったスクリーンショットと、新しい画面も比べます（比べ方 C）。要素は id や class ではなく、役割・ラベル・文字で指します（[詳しく](docs/E2E.md)）。
 - **最後に全体を確かめて引き渡す。** 全 capability の port が終わったら、`scripts/finish.mjs` が `TODO(port)`・計画の `## Follow-up`・各 port のリスクを機械的に集めます。全体のビルドとテスト、選んだ比較をやり直した結果を記録し、そのあとにコードが変わると `gate.mjs review` が止めます。残りものは1件ずつ「切替の前に直す」「切替の後の課題」「直さない」に分類して人が決め、報告には確かめられたことだけを書きます（元のプログラムと比べていないコンテキストはそう明記します）。本番への切替やデータの移し替えはキットの範囲外で、報告に「切替の前にやること」として残します。
 - **画面の見た目は方針で決める。** 見た目まで同じ（`same`）、配置と文言は同じ（`layout`）、作り直す（`new`）のどれにするかを、移行先の設計でコンテキストごとに1回だけ人が決めます。CSS・画像・フォントなど変換しないファイルは調査で `carry` にでき、`gate.mjs port-done` がコピーの中身が元と同じかを確かめます（[詳しく](docs/WORKFLOW.md#画面の見た目)）。
 - **データベースもコードと同じに扱う。** ストアドプロシージャ・トリガー・ビュー・制約・ジョブにあるロジックも移行の対象です。調査で、使っているデータベースと定義の場所を `database.md` に記録し、リポジトリにない定義は人が書き出して `openspec/spec-relay/db/` に置きます（元コードと同じく読み取り専用で、inventory に入ります）。移行先の設計の `data.md` で、スキーマの方針（既定はそのまま使う）、DB の中のロジックを種類ごとに残すか移すか、SQL 方言と ORM の違いの規則、テスト用のデータベースを一度だけ決めます。調査のあとで定義が変わると gate が止めます。AI はデータベースに接続しません（[詳しく](docs/DATABASE.md)）。
@@ -181,6 +182,19 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 - シェルコマンドでの書き込み（`Set-Content` など）は、config.yaml・verify.json・canvas-log.jsonl へのもの以外は読み取りません。これはオーケストレーターの `gate.mjs guard` が後から見つけます。
 - フックはプラグインを入れたすべてのリポジトリで、シェルとファイル編集の前に1回ずつ起動します（node の起動1回分。spec-relay のリポジトリでなければすぐ終わります）。ホストがプラグインの場所（`PLUGIN_ROOT`）を渡さないときは何もしません。
 - チャットでの承認は AI が review.md に書くので、「AI が勝手にチェックを付ける」ことはフックでは区別できません。承認は今も、チャットでのあなたの言葉と gate の合格の両方です。
+
+## 0.20.0 から更新するとき
+
+0.21.0 で、**すべてのシナリオに自動の確認**を付けるようになり、比べ方 B2（画面）と C（web の画面の見た目）をキットの `e2e.mjs` が Playwright で行うようになりました（[詳しく](docs/E2E.md)）。移行先の設計・port・仕上げのスキーマの説明文が変わったので、`openspec/schemas/spec-relay-*` を削除してから導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。archive 済みの change はそのままです。
+
+| 変わったこと | 進行中の change で起きること |
+|---|---|
+| port の design.md に `## Scenario checks`（要件・シナリオ・確認方法 `e2e`・`compare`・`unit`）が加わった | B1 か B2 のコマンドがある port は、表がないと `gate.mjs port-done` が止まる。すべてのシナリオの行を足す。A だけの port は変わらない |
+| `compare` にしたシナリオは、記録したケースに `"scenario"` キーで印が要る | 印がないと止まる。入力の一覧に `"scenario"` を足して記録し直す（`http.mjs record` はそのまま写す） |
+| B2 は「操作を記録して再生する」から「シナリオごとの Playwright のテストを、元のシステムで通してから新しいシステムに流す」に変わった | B2 を選んだコンテキストの port は、design.md の B2 のコマンドを `spec-relay-e2e --base <新しいシステム> --start '<起動コマンド>'` にし、`e2e.mjs init` で `tests/e2e/` を作り、`e2e.mjs old` で元のシステムに通してから verify する。以前の B2 のテストは `tests/e2e/<capability>/` の `*.e2e.mjs` に移し、題名をシナリオの印にする |
+| verification.md の列名が「B2 screen tests」になった | なし（列は `B2` で始まれば読みます） |
+
+Playwright（`@playwright/test`、Apache-2.0）はキットに同梱していません。`tests/e2e/` で `npm ci` を実行すると、版を固定した 1.64.1 が入ります。Windows 11 では入っている Edge を使うので、ブラウザのダウンロードは要りません。
 
 ## 0.19.0 から更新するとき
 
@@ -336,6 +350,8 @@ scripts/merge.mjs              サブエージェントが分担して書いた�
 scripts/verify.mjs             実装のテスト・境界チェック・比べ方を実行し、結果を記録する（port-done が読む）
 scripts/compare.mjs            比べ方 B1：元のプログラムから記録したケースと新しいコードの結果を1件ずつ比べる
 scripts/http.mjs               比べ方 B1 の HTTP 版：動いている元のシステムにリクエストを送って記録し、新しいシステムに同じリクエストを送る
+scripts/e2e.mjs                比べ方 B2・C：画面のテスト（Playwright）を元のシステムで通して記録し、同じテストを新しいシステムに流す
+scripts/e2e-config.mjs         画面のテストを新旧で同じ条件にする Playwright の設定（e2e.mjs が使う）
 scripts/run.mjs                verify と compare がコマンドを実行する部分（Windows では PowerShell）
 scripts/render.mjs             成果物の markdown をレビュー用の HTML に、承認済みの仕様を読みものの HTML にする（デザイン固定）
 scripts/canvas.mjs             canvas の画面を出すサーバー（拡張から使う。単独でブラウザーでも試せる）
@@ -344,11 +360,13 @@ scripts/guide.mjs              コードガイド（任意）の準備・ハッ�
 scripts/doctor.mjs             最初の環境チェックとサブエージェントの試運転
 scripts/openspec.mjs           リポジトリに固定した OpenSpec CLI の起動（`node <キット>/scripts/openspec.mjs <引数>`、シェルを通さない）
 templates/openspec-tools/      リポジトリに置く、OpenSpec の版を固定する package.json と package-lock.json
+templates/e2e/                 移行先の tests/e2e/ に置く、Playwright の版を固定した package.json・設定・補助関数
 tests/                         node:test のテスト（npm があれば、OpenSpec を実際に入れて動かす通しの確認も）
 docs/WORKFLOW.md               流れと設計の説明、今後の課題
 docs/WINDOWS.md                Windows での準備と注意点
 docs/DATABASE.md               データベースの扱いと、定義の書き出し方
 docs/COMPARE.md                比べ方 B1（元のプログラムから記録したケースとの比較）の書き方
+docs/E2E.md                    シナリオごとの確認方法と、比べ方 B2・C（画面のテスト）の書き方
 docs/CANVAS.md                 canvas で見る（試験中）
 docs/GUIDE.md                  コードガイド（任意）
 ```
@@ -361,11 +379,14 @@ npm test
 
 通しのテストは、一時フォルダーに `npm ci` で OpenSpec を入れて動かします（npm のレジストリへの接続が必要です）。npm がない端末では、その部分だけ skip と表示されます（CI では skip せず失敗にします）。OpenSpec の版を上げるときは、`templates/openspec-tools/package.json` の版を変えて、そのフォルダーで `npm install --package-lock-only --ignore-scripts` を実行し、lock ファイルを作り直します。`scripts/openspec.mjs` の `OPENSPEC_VERSION` と `scripts/doctor.mjs` の `OPENSPEC_TESTED` も合わせます（テストが3つの一致を確かめます）。移行中のリポジトリでは、新しいキットの導入スクリプトが古い package.json と package-lock.json を衝突として止めるので、その2つを消してから導入スクリプトを実行し直すよう、更新の手順に書いてください。テストは一時フォルダーの設定を使うので、手元の OpenSpec の設定は変わりません。CI は Windows と Ubuntu の Node.js 22・24 で実行しています。
 
+画面のテストの通しの確認（Playwright を実際に入れてブラウザを動かす）は、`SPEC_RELAY_E2E_REAL=1` を付けたときだけ実行します（Windows は Edge、ほかは `SPEC_RELAY_E2E_CHANNEL=chrome` か `SPEC_RELAY_E2E_EXECUTABLE=<ブラウザのパス>`）。CI では Windows（Edge）と Ubuntu（Chrome）で実行しています。Playwright の版を上げるときは、`templates/e2e/package.json` の版を変えて、そのフォルダーで `npm install --package-lock-only --ignore-scripts` を実行します。
+
 ## ライセンス
 
 [MIT License](LICENSE) です。
 
 - キットのスクリプトは外部のパッケージを使わず、ほかのプロジェクトのコードも同梱していません。
+- Playwright（`@playwright/test`・`playwright`・`playwright-core` 1.64.1、いずれも Apache-2.0）も同梱していません。画面のテストを使う移行先で、利用者が `tests/e2e/` に `npm ci` で入れます（`templates/e2e/package-lock.json` で 2026-11-19 に確認）。
 - OpenSpec（`@fission-ai/openspec`、MIT License）は同梱していません。導入スクリプトが npm から移行対象のリポジトリに入れます。固定している 2.0.0 と、それが使うパッケージを合わせた 57 個のライセンスは、MIT 50、ISC 6、BSD-3-Clause 1 です（`templates/openspec-tools/package-lock.json` で 2026-11-18 に確認）。OpenSpec の版を上げるときは、この内訳も確かめ直します。
 - 参考にした code-migration-kit-with-github-copilot は Apache-2.0 です。参考にしたのは構成と考え方で、ファイルは写していません。
 

@@ -149,11 +149,12 @@ export function checkKit(ctx) {
   const needed = [
     ...ctx.schemas.map((s) => `openspec-schemas/${s}/schema.yaml`),
     'templates/openspec-config.yaml',
-    ...['setup', 'gate', 'status', 'merge', 'render', 'openspec', 'hook', 'finish', 'metrics', 'verify', 'compare', 'run', 'guide'].map((s) => `scripts/${s}.mjs`),
+    ...['setup', 'gate', 'status', 'merge', 'render', 'openspec', 'hook', 'finish', 'metrics', 'verify', 'compare', 'run', 'guide', 'http', 'e2e', 'e2e-config'].map((s) => `scripts/${s}.mjs`),
     'com.github.copilot/hooks/hooks.json',
     ...['orchestrator', 'analyst', 'checker', 'implementer', 'guide-writer'].map((a) => `com.github.copilot/agents/spec-relay-${a}.agent.md`),
     'skills/spec-relay/SKILL.md', 'skills/spec-relay-view/SKILL.md',
     ...['package.json', 'package-lock.json', '.gitignore'].map((f) => `templates/openspec-tools/${f}`),
+    ...['package.json', 'package-lock.json', '.gitignore', 'playwright.config.mjs', 'support.mjs'].map((f) => `templates/e2e/${f}`),
   ];
   const missing = needed.filter((rel) => !ctx.exists(path.join(ctx.kitRoot, rel)));
   if (!missing.length) return { id: 'kit', level: 'ok', message: `spec-relay ${ctx.kitVersion} (${ctx.kitRoot})` };
