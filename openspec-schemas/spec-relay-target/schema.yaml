@@ -155,13 +155,29 @@ artifacts:
         Suggest B1 whenever one is possible: it is the level that compares
         with the source program instead of with what an AI read. Write the
         way (direct, HTTP, records) in the context's Notes cell.
-      - **B2 - screen operation replay**: record browser operations with
-        Playwright and replay them against the old and the new system. Only for
-        important flows; needs both systems running.
-      - **C - screenshot comparison**: capture the screens of screens.md in the
-        old and the new system and compare them. For screens whose design must
-        stay the same: suggest it for contexts with the policy `same` in
-        ui.md, and consider it for `layout`.
+      - **B2 - screen tests**: every scenario a user performs on a web
+        screen becomes a Playwright test (kit's `e2e.mjs`,
+        docs/E2E.md). The same test runs first against the running old
+        system, which proves the test, and then, unchanged, against the new
+        one. Tests find elements by what a user sees (role, label, text),
+        never by ids or classes, which differ between the two systems. Needs a
+        test copy of the old system the person runs, with a test database
+        both systems can be reset to. Suggest it for every context with web
+        screens whose old system can run here. Playwright drives browsers
+        only: desktop screens (WinForms, WPF, VB6) cannot have B2; their
+        scenarios are checked by unit tests (and B1 where the logic can be
+        called).
+      - **C - screenshot comparison**: for web screens, the B2 tests also take
+        screenshots on the old system (`toHaveScreenshot`), and the new
+        system must match them; C needs B2 for those screens. For screens
+        whose design must stay the same: suggest it for contexts with the
+        policy `same` in ui.md, and consider it for `layout`. For desktop
+        screens the kit has no tool: a port task captures and compares them.
+
+      Each scenario of a port is then checked one way, decided in the port's
+      design.md: `e2e` (B2, screens), `compare` (B1, logic and outputs such
+      as APIs, batches and reports) or `unit` (a test in the target language,
+      for the fine branches of calculations and rules).
 
       Each port gives the command of every chosen level in its design.md, and
       `gate.mjs port-done` fails until that command passed on the current
@@ -179,7 +195,9 @@ artifacts:
         applies). For B1 over HTTP, B2 and C: the address of the test copy
         the person runs (for example `http://localhost:8080`), its encoding
         when it is not UTF-8 (Shift_JIS, EUC-JP), and how its test database
-        is put back to the starting state before a recording. Requests can
+        is put back to the starting state before a recording, best as one
+        command that also resets the new system's test database (screen tests
+        run it before each run with `--reset`). Requests can
         change data: a system on another machine is written here only when
         the person names it as a test system, and nothing here may ever
         point at production.
@@ -189,7 +207,9 @@ artifacts:
         password, token or connection string into any file.
       - **Recorded data**: where recorded inputs, outputs and screenshots live
         (under the target root's tests; B1 cases in
-        `tests/golden/<capability with - for />/`), how to re-record them, and
+        `tests/golden/<capability with - for />/`, screen tests and their
+        screenshots in `tests/e2e/<capability with - for />/`), how to
+        re-record them, and
         how personal data in records is masked before they are committed.
     requires:
       - architecture

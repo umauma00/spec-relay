@@ -14,12 +14,17 @@
 //   the capability's context: the command design.md's Verification table gives it.
 //   A command `spec-relay-compare --cases <dir> --driver "<command>"` runs the
 //   kit's compare.mjs (B1 against cases recorded from the source program), and
-//   its run records { cases: { count, passed, sha256 } }.
+//   its run records { cases: { count, passed, sha256 } }. A command
+//   `spec-relay-e2e --base <url> --start '<command>'` runs the kit's e2e.mjs:
+//   the screen tests (B2, and the screenshots of C), which must have passed on
+//   the old system first (e2e-old.json), against the new system it starts; its
+//   run records { e2e: { sha256, tests, titles, screenshots } }. When C has the
+//   same command as B2, the one run counts for both.
 // They stop at the first failure. Progress goes to stderr. Then writes
 // openspec/changes/<change>/verify.json:
 //   { kit, version, change, capability, ranAt, ok,
 //     target: { count, sha256, sameCode: [<sha256>], files: { <path>: <sha256> } },
-//     runs: [{ level, command, exitCode, seconds, timedOut, cases? }] }
+//     runs: [{ level, command, exitCode, seconds, timedOut, cases?, e2e?, sameAs? }] }
 // `target.sha256` is one hash over the target root's files after the run
 // (gate.mjs targetHash); port-done fails, naming the files, when the code
 // changed since. A timeout stops the command and every process it started. The
@@ -43,6 +48,7 @@ import { fileURLToPath } from 'node:url';
 import { changeSchema, cleanValue, configValue, portCapability, targetFiles, targetHash, targetHashes, verifyPlan, VERIFY_RECEIPT } from './gate.mjs';
 import { runCommand, MAX_TIMEOUT_MS, stopAllOnSignal } from './run.mjs';
 import { isCompareCommand, runCompareCommand } from './compare.mjs';
+import { isE2eCommand, runE2eCommand } from './e2e.mjs';
 
 export { runCommand, windowsScript, MAX_TIMEOUT_MS } from './run.mjs';
 
@@ -52,8 +58,11 @@ const TAIL_LINES = 40;
 const tail = (text) => (text ?? '').replace(/\s+$/, '').split(/\r?\n/).slice(-TAIL_LINES).join('\n');
 
 // Runs one level: a `spec-relay-compare ...` command with compare.mjs (level
-// B1 against recorded cases), anything else as a command line.
-export const runLevel = (command, cwd, options) => (isCompareCommand(command) ? runCompareCommand(command, cwd, options) : runCommand(command, cwd, options));
+// B1 against recorded cases), a `spec-relay-e2e ...` command with e2e.mjs (the
+// screen tests of B2 and C, which passed on the old system first), anything
+// else as a command line.
+export const runLevel = (command, cwd, options) => (isCompareCommand(command) ? runCompareCommand(command, cwd, options)
+  : isE2eCommand(command) ? runE2eCommand(command, cwd, options) : runCommand(command, cwd, { timeoutMs: options?.timeoutMs }));
 
 const say = (line) => process.stderr.write(`verify: ${line}\n`);
 
@@ -75,13 +84,20 @@ export async function verify(root, change, { timeoutMs = 60 * 60 * 1000, run = r
   const shown = [];
   // The levels run in order and stop at the first failure: a comparison of code
   // whose own tests fail tells nothing, and B2 or C can take long.
+  const done = new Map();
   for (const { level, command, from } of plan.runs) {
-    progress(`${level} (${from}): ${command}`);
-    const result = await run(command, cwd, { timeoutMs });
-    progress(`${level}: ${result.exitCode === 0 ? 'passed' : result.timedOut ? 'timed out' : `failed, exit code ${result.exitCode}`} in ${result.seconds}s`);
+    // B2 and C of web screens are one run of the screen tests: a level whose
+    // command an earlier level already ran takes that run's result.
+    const earlier = isE2eCommand(command) ? done.get(command) : null;
+    if (earlier) progress(`${level} (${from}): the same command as ${earlier.level}, not run again`);
+    else progress(`${level} (${from}): ${command}`);
+    const result = earlier ? { ...earlier.result, seconds: 0 } : await run(command, cwd, { timeoutMs, root, change, capability });
+    if (!earlier) done.set(command, { level, result });
+    if (!earlier) progress(`${level}: ${result.exitCode === 0 ? 'passed' : result.timedOut ? 'timed out' : `failed, exit code ${result.exitCode}`} in ${result.seconds}s`);
     const cases = result.cases ? { cases: result.cases } : {};
-    runs.push({ level, command, exitCode: result.exitCode, seconds: result.seconds, timedOut: result.timedOut, ...cases });
-    shown.push({ level, command, from, exitCode: result.exitCode, seconds: result.seconds, ...cases, ...(result.timedOut ? { timedOut: true } : {}), ...(result.exitCode !== 0 ? { tail: tail(result.output) } : {}) });
+    const e2e = result.e2e ? { e2e: result.e2e } : {};
+    runs.push({ level, command, exitCode: result.exitCode, seconds: result.seconds, timedOut: result.timedOut, ...cases, ...e2e, ...(earlier ? { sameAs: earlier.level } : {}) });
+    shown.push({ level, command, from, exitCode: result.exitCode, seconds: result.seconds, ...cases, ...e2e, ...(result.timedOut ? { timedOut: true } : {}), ...(result.exitCode !== 0 ? { tail: tail(result.output) } : {}) });
     if (result.exitCode !== 0) break;
   }
   const ok = runs.length === plan.runs.length && runs.every((r) => r.exitCode === 0);

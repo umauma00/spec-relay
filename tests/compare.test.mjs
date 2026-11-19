@@ -7,7 +7,7 @@ import { runCommand } from '../scripts/run.mjs';
 import { verify } from '../scripts/verify.mjs';
 import { checkPortDone, nextSteps } from '../scripts/gate.mjs';
 import { tempDir, write } from './helpers.mjs';
-import { PORT, crosscheck, portRepo } from './port-fixture.mjs';
+import { PORT, checksTable, crosscheck, portRepo } from './port-fixture.mjs';
 
 const rules = (raw = {}) => { const problems = []; const r = readRules(JSON.stringify(raw), problems); assert.deepEqual(problems, []); return r; };
 const node = (script) => `node ${JSON.stringify(script)}`;
@@ -23,7 +23,7 @@ rl.on('line', (line) => {
 `;
 const CASES = [
   '{"id":"pos","input":{"a":1,"b":2},"expected":{"sum":3,"at":0},"note":"recorded 2026-11-01"}',
-  '{"id":"neg","input":{"a":-1,"b":-2},"expected":{"sum":-3,"at":0}}',
+  '{"id":"neg","scenario":"spec-relay: calc/add | Add two numbers | Negative numbers","input":{"a":-1,"b":-2},"expected":{"sum":-3,"at":0}}',
   '{"id":"text","input":{"a":"x","b":1},"expected":{"error":"not a number"}}',
 ].join('\n') + '\n';
 
@@ -222,6 +222,11 @@ test('verify runs a B1 compare command, and port-done reports the cases it match
   const dir = portRepo({ levels: 'yes', designCommand: B1 });
   golden(path.join(dir, 'ts'));
   crosscheck(dir);
+  // With a comparison level, design.md says how each scenario is checked.
+  assert.match(checkPortDone(dir, 'port-calc-add').problems.join(), /design\.md has no filled "## Scenario checks" table/);
+  fs.appendFileSync(path.join(dir, PORT, 'design.md'), checksTable(['unit', 'compare', 'compare']));
+  assert.match(checkPortDone(dir, 'port-calc-add').problems.join(), /no recorded case in tests\/golden\/calc carries the tag of scenario "Text input"/);
+  fs.writeFileSync(path.join(dir, PORT, 'design.md'), fs.readFileSync(path.join(dir, PORT, 'design.md'), 'utf8').replace('| Text input | compare |', '| Text input | unit |'));
   const result = await verify(dir, 'port-calc-add', { progress: () => {} });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.deepEqual(result.runs.map((r) => r.level), ['A', 'boundary', 'B1']);
@@ -233,6 +238,16 @@ test('verify runs a B1 compare command, and port-done reports the cases it match
   assert.equal(done.cases[0].count, 3);
   assert.match(nextSteps('port-done', done, 'en').person.join(' '), /compared as well \(B1: all 3 recorded cases match, with the rules ignore \$\.at \(design\.md's Decisions should say why\)\)/);
   assert.match(nextSteps('port-done', done, 'ja').person.join(' '), /B1: 記録された 3 件がすべて一致。比べ方をゆるめる規則 ignore \$\.at を使用/);
+  assert.deepEqual(done.scenarioChecks, { e2e: 0, compare: 1, unit: 2 });
+  assert.match(nextSteps('port-done', done, 'ja').person.join(' '), /シナリオ 3 件の確認方法: 画面のテスト（新旧の両方で実行）0 件、元のプログラムの記録との比較 1 件、単体テスト 2 件。/);
+  // A recorder may write the tag with escapes: it is read as the JSON it is.
+  write(dir, 'ts/tests/golden/calc/add.jsonl', CASES.replace('"id":"text",', '"id":"text","scenario":"spec-relay: calc/add | Reject text | Text\\u0020input",'));
+  fs.writeFileSync(path.join(dir, PORT, 'design.md'), fs.readFileSync(path.join(dir, PORT, 'design.md'), 'utf8').replace('| Text input | unit |', '| Text input | compare |'));
+  crosscheck(dir);
+  assert.equal((await verify(dir, 'port-calc-add', { progress: () => {} })).ok, true);
+  const escaped = checkPortDone(dir, 'port-calc-add');
+  assert.equal(escaped.ok, true, escaped.problems.join('\n'));
+  assert.deepEqual(escaped.scenarioChecks, { e2e: 0, compare: 2, unit: 1 });
   // A recorded case changed after the run voids it, like a change to the code.
   write(dir, 'ts/tests/golden/calc/add.jsonl', CASES.replace('"sum":3', '"sum":30'));
   assert.match(checkPortDone(dir, 'port-calc-add').problems.join(), /the target code changed after the last verify run \(ts\/tests\/golden\/calc\/add\.jsonl\)/);
@@ -254,7 +269,7 @@ test('recorded cases must be inside the target root', () => {
 test('cases git ignores, or a build folder holds, still void the run when they change', async () => {
   // Without git, a build folder right under the target root is not in the target hash.
   const B1 = `| B1 logic comparison | add | \`spec-relay-compare --cases out/golden --driver '${node('tests/golden/driver.cjs')}'\` |\n`;
-  const dir = portRepo({ levels: 'yes', designCommand: B1 });
+  const dir = portRepo({ levels: 'yes', designCommand: B1 + checksTable() });
   golden(path.join(dir, 'ts'));
   fs.cpSync(path.join(dir, 'ts/tests/golden/calc'), path.join(dir, 'ts/out/golden'), { recursive: true });
   crosscheck(dir);

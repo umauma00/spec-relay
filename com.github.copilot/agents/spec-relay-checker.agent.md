@@ -165,6 +165,22 @@ with the new code but not with the source code, a driver that reads the
 expected values or skips the new code, or a rule nothing explains, makes the
 items it touches `mismatch`.
 
+Check design.md's Scenario checks with every item: each scenario a user
+performs on a web screen is `e2e` when B2 was chosen (a screen scenario
+left to a unit test was never run against the old system), and each
+`compare` scenario has recorded cases that really exercise it. When
+design.md's Verification gives B2 as `spec-relay-e2e ...`, the screen tests
+in `tests/e2e/<capability with - for />/` passed on the old system first, so
+check that they prove what the scenario says: each test's title is its tag;
+it does what the scenario's WHEN says through the screen, as a user would
+(no request sent around the screen, no value set by script that a user
+types); it checks the THEN values with assertions as strict as the
+scenario (`toHaveText`, `toBeVisible`, not a mere page load); it never
+branches on which system it runs against (support.mjs `side`); and, with C,
+it takes a screenshot of every screen of screens.md the scenario shows. A
+screen test that checks less than its scenario says makes the items it
+touches `mismatch`.
+
 Write the verdict file and report as above, with `src-path:line vs
 target-path:line - evidence` in the Evidence cell. Never write any other file,
 and never change code or tests: the implementer fixes what you find.

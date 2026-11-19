@@ -15,6 +15,9 @@ export const TESTS = [
   '# spec-relay: calc/add | Reject text | Text input',
 ].join('\n');
 
+// design.md's Scenario checks for the three scenarios of PORT_SPEC.
+export const checksTable = (kinds = ['unit', 'unit', 'unit']) => `\n## Scenario checks\n| Requirement | Scenario | Check |\n|---|---|---|\n| Add two numbers | Positive numbers | ${kinds[0]} |\n| Add two numbers | Negative numbers | ${kinds[1]} |\n| Reject text | Text input | ${kinds[2]} |\n`;
+
 export function config(dir, target = 'ts') {
   write(dir, 'openspec/config.yaml', `# spec-relay: managed\nschema: spec-relay-extract\ncontext: |\n  Source root (existing code): src\n  Target root (new implementation): ${target}\n`);
 }

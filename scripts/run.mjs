@@ -34,16 +34,20 @@ export const windowsScript = (command) => `[Console]::OutputEncoding = [Text.Enc
 // { exitCode, timedOut, seconds, output, stdout? }: output is the last part of
 // stdout and stderr together; with { captureStdout: true } stdout is also kept
 // whole, as bytes (up to MAX_STDOUT_BYTES, then the command is stopped and fails). With
-// { input } that text is written to the command's stdin.
-export function runCommand(command, cwd, { timeoutMs, platform = process.platform, exec = spawn, input, captureStdout = false } = {}) {
+// { input } that text is written to the command's stdin. A command given as an
+// array ([program, ...arguments]) runs that program directly, without a shell;
+// { env } adds variables to the environment.
+export function runCommand(command, cwd, { timeoutMs, platform = process.platform, exec = spawn, input, captureStdout = false, env } = {}) {
   // UTF-8 output, so the printed tail of a failure is readable on a Japanese
   // (CP932) console too, and a .NET program reads its redirected input as
   // UTF-8.
   // `-Command` alone exits 1 for any failure, so the exit code of a program is
   // passed on, and a failed cmdlet exits 1.
-  const [file, args, extra] = platform === 'win32'
-    ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', windowsScript(command)], {}]
-    : ['/bin/sh', ['-c', command], { detached: true }];
+  const [file, args, extra] = Array.isArray(command)
+    ? [command[0], command.slice(1), platform === 'win32' ? {} : { detached: true }]
+    : platform === 'win32'
+      ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', windowsScript(command)], {}]
+      : ['/bin/sh', ['-c', command], { detached: true }];
   const started = Date.now();
   return new Promise((resolve) => {
     const chunks = [];
@@ -84,7 +88,7 @@ export function runCommand(command, cwd, { timeoutMs, platform = process.platfor
       });
     };
     try {
-      child = exec(file, args, { cwd, env: process.env, windowsHide: true, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], ...extra });
+      child = exec(file, args, { cwd, env: env ? { ...process.env, ...env } : process.env, windowsHide: true, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], ...extra });
     } catch (error) { resolve({ exitCode: -1, timedOut: false, seconds: 0, output: error.message, ...(captureStdout ? { stdout: Buffer.alloc(0) } : {}) }); return; }
     running.add(child);
     if (timeoutMs) {

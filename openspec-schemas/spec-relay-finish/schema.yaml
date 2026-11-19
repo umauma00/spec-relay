@@ -25,7 +25,11 @@ artifacts:
         archived target design's verification.md chose for it (A always), run
         it again for every capability of that context together (a B1 command
         `spec-relay-compare <options>` from a port design.md runs as
-        `node "<kit>/scripts/compare.mjs" <options> --cwd <target root>`) and write
+        `node "<kit>/scripts/compare.mjs" <options> --cwd <target root>`, and
+        a B2 or C command `spec-relay-e2e <options>` as `node
+        "<kit>/scripts/e2e.mjs" new --capability <capability> <options>`, which
+        runs the screen tests that passed on the old system in that
+        capability's port) and write
         `pass`, `fail` or `not-run: <reason>` (the source program could not be
         run, for example). A level not chosen stays `-`. Every `not-run`
         needs a `verification` row in leftovers.md.

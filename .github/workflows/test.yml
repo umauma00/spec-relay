@@ -42,3 +42,21 @@ jobs:
           code=$?
           cat out.json
           test "$code" = 1 && grep -q '"id": "node"' out.json
+  e2e:
+    # The screen tests for real: the template's pinned Playwright installed with
+    # npm ci, driving the browser the runner has (Edge on Windows, as on the
+    # users' Windows 11; Chrome on Ubuntu), against two small systems.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      SPEC_RELAY_E2E_REAL: '1'
+      SPEC_RELAY_E2E_CHANNEL: ${{ matrix.os == 'ubuntu-latest' && 'chrome' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test --test-name-pattern "Playwright runs" tests/e2e.test.mjs

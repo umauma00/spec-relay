@@ -103,10 +103,31 @@ artifacts:
         new system, sends it the recorded requests and stops it. Every rule
         in the cases folder's `rules.json` loosens the comparison, and so
         does every line of the map: list each under Decisions with the
-        reason. The kit's
+        reason. For B2 (web screens), the command is the kit's screen tests
+        (docs/E2E.md): `spec-relay-e2e --base http://localhost:<port>
+        --start '<command that starts the new system>'`, with `--reset
+        '<command>'` when verification.md resets the test database with a
+        command. When C is chosen for web screens, its row has the same
+        command: the one run compares the screenshots the tests took on the
+        old system. The kit's
         `verify.mjs` runs these commands and the boundary check and records the
         result; `gate.mjs port-done` fails without a passing run on the
         current code.
+      - **Scenario checks**: a table `| Requirement | Scenario | Check |`
+        with one row for every scenario of the baseline spec (names exactly
+        as there), saying how it is checked: `e2e` when a user performs it on
+        a web screen (a Playwright test, B2), `compare` when a recorded case
+        of B1 covers it (logic and outputs: APIs, batches, reports; the case
+        carries the scenario's tag in a `"scenario"` key), `unit` otherwise
+        (fine branches of calculations and rules, desktop screens, anything
+        the source program cannot show). Choose `e2e` for every screen
+        scenario when verification.md chose B2, and `compare` where B1
+        records the scenario. Required when design.md has a B1 or B2
+        command; without one every scenario is `unit` and the section may
+        say "None". `gate.mjs port-done` fails for a scenario without a row,
+        and for a row whose evidence is missing: a tagged unit test outside
+        `tests/e2e/`, a tagged recorded case, or a screen test titled with
+        the tag that passed on the old system and then on the new one.
       - **Source references**: For each requirement, the source locations from
         the archived extract change's trace.md
         (`openspec/changes/archive/*-extract-<capability>/trace.md`), and from
@@ -139,8 +160,10 @@ artifacts:
         `spec-relay:`), with the names exactly as in the baseline spec; `gate.mjs port-done` fails for a scenario without a tagged test. A
         scenario with a database effect checks the rows afterwards, on the test
         database of data.md.
+        A scenario that design.md's Scenario checks gives `e2e` or `compare`
+        gets its test from that level instead (below), with the same tag.
         Add tasks for the other levels design.md names: B1 record source
-        outputs and compare, B2 replay, C screenshot comparison. For B1 with
+        outputs and compare, B2 screen tests, C screenshot comparison. For B1 with
         `spec-relay-compare`: one task writes the recorder for the source code
         (or the conversion of its records) and records the cases, with inputs
         for every scenario and for the edge cases of the Language mapping; one
@@ -150,7 +173,24 @@ artifacts:
         and records them from the running source program with the kit's
         `http.mjs record`, after the person confirmed that the test copy runs
         and its database is at the starting state; no driver is written, and
-        a second task writes the map when design.md names one.
+        a second task writes the map when design.md names one. Give each
+        request or input of a `compare` scenario its tag in a `"scenario"`
+        key (`http.mjs record` keeps it in the case). For B2: one task writes
+        the screen tests in `tests/e2e/<capability with - for />/`
+        (`node "<kit>/scripts/e2e.mjs" init` creates `tests/e2e/` the first
+        time, then `npm ci` there), one Playwright test per `e2e` scenario,
+        titled exactly with its tag, finding elements by role, label and text
+        only, signing in with values from environment variables (support.mjs
+        `secret`), and, when C is chosen, taking `toHaveScreenshot` of each
+        screen of screens.md the scenario shows. A second task, done by the
+        orchestrator and never by a subagent, runs them against the old
+        system with `node "<kit>/scripts/e2e.mjs" old --change <change>
+        --base <old system's address>`, after the person confirmed that the
+        test copy runs at the address verification.md names and that its
+        database is at the starting state; every test must pass there before
+        the new code is judged by it. A test that fails on the old system is
+        fixed, never the old system. The old system is stopped before verify
+        runs the tests on the new one.
       - When design.md lists carried files, one task copies them unchanged.
       - The last group runs the boundary check from conventions.md.
       - Order by dependency. A final group may only run integration checks and
@@ -176,7 +216,9 @@ artifacts:
 
       For each requirement and each screen, the checker reads the source code
       the trace cites and the new code side by side, and the tests tagged for
-      its scenarios, and decides:
+      its scenarios (screen tests in `tests/e2e/` too), and the row of each
+      scenario in design.md's Scenario checks (a scenario a user performs on
+      a web screen is `e2e` when B2 was chosen), and decides:
       - `confirmed`: the new code does what the source code does, for every
         scenario and for the inputs the scenarios do not show (rounding, null
         and empty values, encodings, dates, ordering, errors, as listed in
@@ -211,7 +253,12 @@ apply:
     - Mark a task done only after its verification passes; report the command
       and its result.
     - Write tests from the spec scenarios before or with the code they check,
-      each tagged `spec-relay: <capability> | <requirement> | <scenario>`.
+      each tagged `spec-relay: <capability> | <requirement> | <scenario>`, of
+      the kind design.md's Scenario checks gives the scenario.
+    - A screen test (`tests/e2e/`) is proven on the old system before it
+      judges the new one: never change it, or the screenshots it took, after
+      `e2e.mjs old` passed without running `e2e.mjs old` again; when it fails
+      on the new system, fix the new code.
     - Write only inside this context's module and its tests, and the carried
       files design.md lists; keep the module boundaries of architecture.md,
       and run the boundary check.
