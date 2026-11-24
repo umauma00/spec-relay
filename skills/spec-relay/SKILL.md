@@ -192,7 +192,7 @@ stop halfway on something the machine or the host lacks.
    done.
 8. The kit's hook (see When something stops) is off unless `openspec/config.yaml`
    says `Hook enforcement ...: on`. Tell the person once that they can turn it
-   on there themselves (README, "止まったとき"); never change that line yourself.
+   on there themselves (docs/TROUBLESHOOTING.md, "フック"); never change that line yourself.
 
 ## Working in parallel
 

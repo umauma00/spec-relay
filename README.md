@@ -1,6 +1,6 @@
 # spec-relay
 
-[OpenSpec](https://github.com/Fission-AI/OpenSpec) を使って、コードベースを別のプログラミング言語へ移すための GitHub Copilot 用キットです。元のコードから仕様を起こし、人間がその仕様をレビューし、レビュー済みの仕様をもとに新しい言語で実装します。
+[OpenSpec](https://github.com/Fission-AI/OpenSpec) を使って、コードベースを別のプログラミング言語へ移すための GitHub Copilot 用キットです。元のコードから仕様を起こし、人間がその仕様をレビューし、レビュー済みの仕様をもとに新しい言語で実装します。仕様・振る舞い・画面の見た目を変えずに移すことを目指します。
 
 > **状態：0.21.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
 
@@ -8,378 +8,86 @@
 
 ```mermaid
 flowchart LR
-  S[1. 調査<br/>コンテキストに分ける] --> D[2. 移行先の設計<br/>モジュール・規約・画面・比べ方] --> A[3. 解析<br/>元コード → 仕様<br/>AI が照合] --> B[4. 人間がレビュー<br/>承認で仕様を確定] --> C[5. 実装<br/>仕様 → 新しい言語] --> F[6. 仕上げ<br/>全体の確認・残りもの<br/>引き渡し]
+  S[1. 調査] --> D[2. 移行先の設計] --> A[3. 解析<br/>元コード → 仕様] --> B[4. 人間がレビュー] --> C[5. 実装<br/>仕様 → 新しい言語] --> F[6. 仕上げ]
 ```
 
-| 工程 | やること | OpenSpec 上の形 |
-|---|---|---|
-| 1. 調査 | コード全体を読み、DDD の境界付けられたコンテキストと capability に分ける。人がレビュー | `survey` change（スキーマ `spec-relay-survey`） |
-| 2. 移行先の設計 | モジュール構成（既定は Spring Modulith 型）、共通の規約、画面の作り方と見た目の方針、コンテキストごとの比べ方を決める。人がレビュー | `target-design` change（スキーマ `spec-relay-target`） |
-| 3. 解析 | 元のコードを読み、今の動作を言語に依存しない仕様と画面の記録にする。別の AI が元コードと照合 | `extract-<capability>` change（スキーマ `spec-relay-extract`） |
-| 4. レビュー | 人が HTML で見て、要件・画面・疑問点を確認し、承認したら archive | extract change の apply と archive |
-| 5. 実装 | 確定した仕様をモジュールごとに実装し、選んだ方式で元と比べる。細かいロジックは元コードを参照。すべてのシナリオに自動の確認（画面のテスト・記録との比較・単体テスト）を付け、画面のテストは元のシステムで通してから新しいシステムに流す。テストはキットが実行して記録し、別の AI が新旧のコードを突き合わせる | `port-<capability>` change（スキーマ `spec-relay-port`） |
-| 6. 仕上げ | 全部の実装が終わったら、全体のビルド・テスト・比較をやり直し、`TODO(port)`・後回しの作業・リスクを一覧にして、引き渡しの報告を人がレビュー。archive で移行完了 | `finish` change（スキーマ `spec-relay-finish`） |
-| 修正 | 仕様が元コードを読み違えていたときに、差分だけ直して再レビュー | `amend-<capability>` change（スキーマ `spec-relay-amend`） |
+| 工程 | やること |
+|---|---|
+| 1. 調査 | コード全体を読み、DDD の境界付けられたコンテキストと capability に分ける |
+| 2. 移行先の設計 | モジュール構成（既定は Spring Modulith 型）、規約、画面の方針、新旧の比べ方を決める |
+| 3. 解析 | 元のコードから、言語に依存しない仕様と画面の記録を作る。別の AI が元コードと照合する |
+| 4. レビュー | 人が HTML で仕様を確かめ、承認したら確定する |
+| 5. 実装 | 確定した仕様をモジュールごとに実装し、すべてのシナリオを自動で確かめ、元と比べる |
+| 6. 仕上げ | 全体をもう一度確かめ、残りものを一覧にして引き渡す |
 
-工程 1・2・6 はプロジェクトで1回、工程 3〜5 は機能のまとまり（capability）ごとに回すので、レビュー済みのものから順に実装を始められます。詳しくは [docs/WORKFLOW.md](docs/WORKFLOW.md) を参照してください。
-
-## 対応アプリ
-
-GitHub Copilot CLI・VS Code・GitHub Copilot app を想定しています。入口はどれも **`spec-relay-orchestrator`** エージェント1つで、チャットで頼むと AI がコマンドを実行して報告します。
-
-- **VS Code** は Copilot ハーネス（1.143 から既定）で使ってください。Local ハーネスは 1.146（2026-11-11）で非推奨になり、2027年2月に削除される予定のため、対象にしていません。
-- **Copilot CLI** は 1.0.109 以降を勧めます。並列に動くサブエージェントの許可確認の修正が 1.0.106 から 1.0.109 に入っています（確認が重複して残る、長いセッションでサブエージェントの操作が効かなくなる、など）。`copilot --version` で確かめられます。
-- **ファイル編集の許可**：解析担当・照合担当・実装担当は自分のファイルを書きます。最初の並列作業の前にファイル編集をセッション中は許可しておくと、サブエージェントが許可待ちで止まりません。許可はできるだけ `openspec/` と移行先のフォルダーに絞ってください。
-
-  | アプリ | 許可の選び方（2026-11-11 時点の公式情報） |
-  |---|---|
-  | VS Code | 権限は Manual・Assisted・Allow all。Manual では編集の許可をファイル単位かフォルダー単位で出せますが、フォルダー単位は Git リポジトリ全体が対象で、元コードも含みます。`chat.tools.edits.autoApprove` 設定で、ファイルパターンごとに承認の要否を決められます（例：`{"**/*": false, "openspec/**": true, "<移行先のフォルダー>/**": true}`） |
-  | Copilot app | Ask every time・Assisted・Approve all |
-  | Copilot CLI | `/permissions` で、毎回確認・assisted・allow-all を切り替えます。「このリポジトリでは今後確認しない」は Git リポジトリ全体が対象です。並列のファイル操作でこれを選ぶと、同時に出ていた確認もまとめて承認されます（1.0.109 から）。並列に起動した呼び出しのどれか1つを拒否すると、一緒に起動したものも取り消されます |
-
-  リポジトリ全体を許可した場合でも、オーケストレーターが波の前後に `gate.mjs guard` で元コード・review.md・ベースライン仕様などのハッシュを比べ、割り当て外の変更があれば止まって知らせます。
+工程 1・2・6 はプロジェクトで1回、3〜5 は capability ごとに回すので、レビュー済みのものから実装を始められます。仕様の読み違いは `amend` で差分だけ直します。工程ごとの成果物と設計は [docs/WORKFLOW.md](docs/WORKFLOW.md) にあります。
 
 ## 必要なもの
 
-Windows を主な実行環境として扱います（macOS・Linux でも動きます）。Windows での入れ方と注意点は [docs/WINDOWS.md](docs/WINDOWS.md) にまとめています。
+主な実行環境は Windows 11 です（macOS・Linux でも動きます）。
 
 | 必要なもの | Windows での入れ方の例 |
 |---|---|
-| Node.js 22.12 以上と npm（OpenSpec の要件。npm は Node.js に含まれます） | `winget install OpenJS.NodeJS.LTS` |
-| [OpenSpec CLI](https://github.com/Fission-AI/OpenSpec) 2.0.0（テストはこの版で実行） | 別に入れる必要はありません。導入スクリプトが移行対象のリポジトリの中（`openspec/spec-relay/tools/`）に、この版を `npm ci` で入れます（npm のレジストリにつながる必要があります）。グローバルに入っている `openspec` は、どの版でも使いません |
-| GitHub Copilot（CLI・VS Code・Copilot app のいずれか）。CLI は 1.0.109 以降、VS Code は 1.143 以降 | CLI は `npm install -g @github/copilot` |
+| Node.js 22.12 以上（npm を含む） | `winget install OpenJS.NodeJS.LTS` |
+| GitHub Copilot：CLI 1.0.109 以降、VS Code 1.143 以降（Copilot ハーネス）、または Copilot app | CLI は `npm install -g @github/copilot` |
+| OpenSpec CLI 2.0.0 | 入れる必要はありません。導入スクリプトが移行対象のリポジトリの中に、この版を固定して入れます（npm のレジストリにつながる必要があります） |
 
-## 導入
+Windows での準備と注意点は [docs/WINDOWS.md](docs/WINDOWS.md) にあります。
 
-### プラグインとして入れる
+## はじめかた
 
-Copilot CLI の場合（PowerShell でもそのまま実行できます）：
+1. **プラグインを入れる。** Copilot CLI では次の2行です（PowerShell でもそのまま動きます）。VS Code と Copilot app でも、同じ `umauma00/spec-relay` をマーケットプレイスとして追加して `spec-relay` を入れます。
 
-```powershell
-copilot plugin marketplace add umauma00/spec-relay
-copilot plugin install spec-relay@spec-relay-marketplace
-```
+   ```powershell
+   copilot plugin marketplace add umauma00/spec-relay
+   copilot plugin install spec-relay@spec-relay-marketplace
+   ```
 
-VS Code と Copilot app でも、同じ登録元（`umauma00/spec-relay`）をマーケットプレイスとして追加して `spec-relay` を入れます。
+2. **移行したいリポジトリで頼む。** `spec-relay-orchestrator` エージェントを選び、「C# から TypeScript への移行を始めて」のように頼みます。AI が環境を確かめ（`scripts/doctor.mjs`）、言語とフォルダーを聞いてから導入スクリプト（`scripts/setup.mjs`）を実行します。導入スクリプトは、まず変更内容を見せるだけで、`--apply` を付けたときに反映します。
+3. **ファイル編集を許可しておく。** 解析・照合・実装はサブエージェントが並列で進めます。最初の並列作業の前に、`openspec/` と移行先のフォルダーへの編集をセッション中は許可しておくと、許可待ちで止まりません。
 
-### 最初に環境を確かめる
+アプリごとの許可の設定、環境チェックの項目、並列数やモデルのオプション、導入で置かれるファイルは [docs/SETUP.md](docs/SETUP.md) にあります。
 
-移行の途中で環境が原因で止まらないよう、オーケストレーターは毎回のセッションの最初に `scripts/doctor.mjs` で環境を確かめ、足りないものと、それぞれ何をすればよいかを知らせます。`FAIL` があるうちは調査を始めません。手で実行することもできます（何も書き換えません）。
+## OpenSpec の利用統計を止める
 
-```powershell
-node "C:\path\to\spec-relay\scripts\doctor.mjs" --target . --client cli
-```
+OpenSpec は初期設定で、匿名の利用統計（コマンド名と版。コードや仕様の中身は含まない）を送ります。キットはこの設定を変えません。止めるときは、移行対象のリポジトリで次のどちらかを行います。
 
-`--client` は使うアプリに合わせて `cli`・`vscode`・`app` のどれかにします。確かめること：
+- `node "<キットのフォルダー>/scripts/openspec.mjs" config set telemetry.enabled false`（この PC のすべてのプロジェクトに効きます）
+- 環境変数 `OPENSPEC_TELEMETRY=0` を設定する（PowerShell なら `[Environment]::SetEnvironmentVariable('OPENSPEC_TELEMETRY', '0', 'User')` のあと、Copilot を開き直します）
 
-| 対象 | 確かめること | 足りないとき |
-|---|---|---|
-| Node.js | 22.12 以上（古い Node.js でも、このメッセージは出ます） | FAIL |
-| キット | スキーマ・スクリプト・エージェントがそろっているか | FAIL |
-| OpenSpec CLI | 導入前は npm があるか。導入後は、リポジトリの中の OpenSpec が入っていて動くか、版が 2.0.0 か（違えば FAIL。clone した直後で未導入のときは、導入スクリプトの再実行を案内） | FAIL |
-| OpenSpec の利用統計 | 送信が止まっているか（止め方を案内。キットは設定を変えません） | INFO |
-| PowerShell | 実行ポリシーで `npm` が止まるか（`npm.cmd` を案内） | INFO |
-| Copilot のアプリ | Copilot CLI 1.0.109 以上、VS Code 1.143 以上 | WARN |
-| git | git があるか、リポジトリの一番上か、「所有者が違う」で拒否されていないか、長いパス | WARN |
-| フォルダー | 書き込めるか（「コントロールされたフォルダー アクセス」など）、OneDrive などの同期フォルダーやネットワーク上のフォルダーでないか | FAIL・WARN |
-| 導入済みのリポジトリ | スキーマがキットの版と同じか、`openspec update` で apply・archive・sync が戻っていないか、元コードのフォルダーがあるか、移行先の言語のビルド道具（JDK・Python・.NET SDK など） | FAIL・WARN |
-| サブエージェント | 導入のあとに1回、解析・照合・実装担当を同時に起動して、それぞれファイルを1つ書かせる試運転（`--trial`・`--trial-check`。実装担当は移行先のフォルダーに書き、`node --version` も実行）。エージェントが見つかるか、モデルが使えるか、書き込みとコマンド実行の許可が出るかを最初に確かめます | FAIL |
-
-終了コードは、0 なら始められる（WARN が残ることはある）、1 なら FAIL を直してからです。試運転の結果は PC とアプリごとに `openspec/spec-relay/local/trial.json`（git では無視）に残り、モデルの設定を変えたときや、別の PC・アプリで使い始めたときは、もう一度試運転を求めます。
-
-### 移行対象のリポジトリを準備する
-
-移行したいリポジトリを開いて `spec-relay-orchestrator` を選び、「Java から TypeScript への移行を始めて」のように頼みます。AI が言語とフォルダーを聞いたうえで、次の導入スクリプトを実行します（手で実行してもかまいません）。
-
-```powershell
-node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Java" --target-language "TypeScript" --source-root "src" --target-root "ts" --language ja
-```
-
-- これは確認だけで、何も書き換えません。内容を見てから、同じコマンドの最後に `--apply` を付けて反映します。
-- PowerShell・コマンドプロンプト・bash のどれでも同じ1行で動きます。キットのパスは `"` で囲んでください（プラグインとして入れた場合は、ホームフォルダーの `.copilot\installed-plugins\` の下にあります）。
-- 並列化の設定（あとから変えるときは `openspec/config.yaml` の値を書き換えます）：
-
-  | オプション | 中身 | 既定 |
-  |---|---|---|
-  | `--parallel 16` | 同時に動かすサブエージェントの数（1〜32） | 4 |
-  | `--ahead 2` | レビューより先に解析しておく機能の数（1〜10） | 2 |
-  | `--subagent-model "<モデル>"` | サブエージェント（解析・照合・実装担当）のモデル | `session`（オーケストレーターと同じ） |
-  | `--checker-model "<モデル>"` など | 役割ごとのモデル（`--analyst-model`・`--implementer-model` も） | `--subagent-model` と同じ |
-
-  同時実行数の上限は Copilot の契約で違います。Copilot CLI のリファレンス（2026-11-10 時点）では Free 2、Pro 4、Max 8、Business 16、Enterprise と従量課金 32 で、孫のサブエージェントも含めたセッション全体の数です。従量課金でない契約ではこの数を上げられません。VS Code と Copilot app の上限は公式に書かれていません。モデルは、オーケストレーターがサブエージェントに頼むときに指定します。セッションのモデルが Auto のときや、ホストが指定を受け付けないときは、オーケストレーターと同じモデルで動きます。
-
-導入で置かれるもの：
-
-| 場所 | 中身 |
-|---|---|
-| `openspec/schemas/spec-relay-*/` | 各工程のスキーマとテンプレート（survey・target・extract・amend・port） |
-| `openspec/config.yaml` | 移行元・移行先の言語とフォルダー（全成果物の生成に使われる） |
-| `openspec/spec-relay/tools/` | キットが確認した版の OpenSpec を固定する package.json と package-lock.json（コミットします）。`npm ci` で入る `node_modules/` は Git の対象外です。OpenSpec は `node "<キットのフォルダー>/scripts/openspec.mjs" <引数>` で呼びます（キットのスクリプトもオーケストレーターもこれを使います） |
-| `.agents/skills/openspec-*` | `openspec init --tools github-copilot` が置く OpenSpec 標準のスキル。導入スクリプトがすべて「`spec-relay-orchestrator` を使ってください」という案内に置き換えます（下の説明）。Copilot はこのフォルダーを直接読むので、リンクは作られません |
-
-- 内容の違う既存ファイルがあると、上書きせずに衝突を表示して止まります。`openspec init` が置き換え・削除・編集するファイル（`.agents/skills/` の既存の `openspec-*` と `.openspec-target`、OpenSpec 1.x が `.github/`・`.claude/`・`.cursor/` などのツールのフォルダーに置いた `openspec-*`・`opsx*`、`openspec/AGENTS.md` など）が既にある場合も、同じく止まります。
-- OpenSpec 標準のスキルは、導入スクリプトが中身を「`spec-relay-orchestrator` を使ってください」という案内に置き換えて無効にします。apply・archive（bulk-archive を含む）・sync はレビューの確認を通らずにチェックや archive ができてしまい、propose・explore などのほかのスキルも、固定した版ではなく PATH にある `openspec`（どの版か分からないか、入っていない）を呼ぶためです。ファイル自体を消さないのは、消すと後の `openspec update` が利用者の OpenSpec 全体の設定（Windows では `%APPDATA%\openspec`）から、ほかのプロジェクトも含めてこれらのワークフローを外してしまうためです。OpenSpec 2.0.0 の `openspec update`（`node "<キットのフォルダー>/scripts/openspec.mjs" update`）は毎回これらを元の中身に戻すので、update のあとは毎回、導入スクリプトをもう一度実行してください（doctor が `workflows` で知らせます）。
-- 導入済みのリポジトリでは、導入スクリプトは `node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply` だけで再実行できます（言語やフォルダーは openspec/config.yaml から読みます）。リポジトリを新しく clone した人は、最初にこれを実行してください。`openspec/spec-relay/tools/` の lock ファイルどおりに `npm ci` で OpenSpec を入れます（doctor が知らせます）。
-- `openspec/spec-relay/tools/` の package.json と package-lock.json は、Dependabot や Renovate などの依存関係の自動更新の対象から外してください。版を上げるのはキットの更新のときだけです（違う版は導入スクリプトが衝突として止め、doctor が FAIL にします）。
+止まっているかは、環境チェック（`scripts/doctor.mjs`）が毎回知らせます。
 
 ## 守っていること
 
 - **元のコードは書き換えない。** すべてのエージェントにとって読み取り専用です。
-- **仕様の確定は人が決める。** AI は人が認めた項目だけをチェックし、明示的な承認なしに archive しません。レビューはチャットで1項目ずつでも、ファイルや PR でまとめてでもかまいません。archive の前に `scripts/gate.mjs review` で、すべての要件・画面・質問・コンテキストがチェックリストにあり、チェック済みで、質問への判断とレビュー担当の名前が書かれ、AI の照合が解決し、元ファイルがすべて調査に含まれ、除外していないファイルがどれかの capability の解析に含まれ、すべての要件に元コードの位置があり、元コードのすべての箇所（メソッドや関数など）が要件・画面に覆われているか判定済みであることを確かめます（`openspec archive --yes` 自体はこれを確かめません）。
-- **実装の前後も確かめる。** port は、調査・移行先の設計・ベースライン仕様がそろい、修正中でないことを `gate.mjs port-ready` で確かめてから始めます。archive の前に `gate.mjs port-done` が、すべてのタスクの完了、着手時から仕様が変わっていないこと（ハッシュ）、今のコードでテストと境界チェックと選んだ比べ方が通った記録（`verify.mjs` が実行して書く）、仕様のシナリオごとのテスト、`TODO(port)` が残っていないこと、照合担当が新しいコードを元コードと突き合わせた結果を確かめます。比べ方が A だけのときは、同じ動きであることは元を動かして比べたのではなく推定だ、と完了時に知らせます（[詳しく](docs/WORKFLOW.md#実装が終わったときの確かめ方)）。元のプログラムを動かせるか本番の記録があれば、比べ方 B1 で、元が返した結果と新しいコードの結果を `compare.mjs` が1件ずつ比べます（[詳しく](docs/COMPARE.md)）。
-- **すべてのシナリオに自動の確認を付ける。** シナリオごとに、画面のテスト（`e2e`）・元のプログラムの記録との比較（`compare`）・単体テスト（`unit`）のどれで確かめるかを port の design.md に書き、確認のないシナリオがあると `gate.mjs port-done` が止まります。web の画面のシナリオは Playwright のテストにし、**同じテストをまず元のシステムで通してから**新しいシステムに流します（`e2e.mjs`、比べ方 B2）。元のシステムで通ることがテストの正しさの証拠になり、そのあとにテストを変えると元のシステムでやり直しです。同じテストが元のシステムで撮ったスクリーンショットと、新しい画面も比べます（比べ方 C）。要素は id や class ではなく、役割・ラベル・文字で指します（[詳しく](docs/E2E.md)）。
-- **最後に全体を確かめて引き渡す。** 全 capability の port が終わったら、`scripts/finish.mjs` が `TODO(port)`・計画の `## Follow-up`・各 port のリスクを機械的に集めます。全体のビルドとテスト、選んだ比較をやり直した結果を記録し、そのあとにコードが変わると `gate.mjs review` が止めます。残りものは1件ずつ「切替の前に直す」「切替の後の課題」「直さない」に分類して人が決め、報告には確かめられたことだけを書きます（元のプログラムと比べていないコンテキストはそう明記します）。本番への切替やデータの移し替えはキットの範囲外で、報告に「切替の前にやること」として残します。
-- **画面の見た目は方針で決める。** 見た目まで同じ（`same`）、配置と文言は同じ（`layout`）、作り直す（`new`）のどれにするかを、移行先の設計でコンテキストごとに1回だけ人が決めます。CSS・画像・フォントなど変換しないファイルは調査で `carry` にでき、`gate.mjs port-done` がコピーの中身が元と同じかを確かめます（[詳しく](docs/WORKFLOW.md#画面の見た目)）。
-- **データベースもコードと同じに扱う。** ストアドプロシージャ・トリガー・ビュー・制約・ジョブにあるロジックも移行の対象です。調査で、使っているデータベースと定義の場所を `database.md` に記録し、リポジトリにない定義は人が書き出して `openspec/spec-relay/db/` に置きます（元コードと同じく読み取り専用で、inventory に入ります）。移行先の設計の `data.md` で、スキーマの方針（既定はそのまま使う）、DB の中のロジックを種類ごとに残すか移すか、SQL 方言と ORM の違いの規則、テスト用のデータベースを一度だけ決めます。調査のあとで定義が変わると gate が止めます。AI はデータベースに接続しません（[詳しく](docs/DATABASE.md)）。
-- **仕様の修正は読み違いと書き漏れだけ。** 動きそのものを変えたいときは、移行後の別作業にします。実装担当は、元コードにあって仕様にない動作を見つけたら、作らずに報告します。黙って落とすことはありません。
-- **正は markdown、見るのは HTML。** レビューでは `scripts/render.mjs` が成果物を1枚の HTML にします（要件ごとのカード、シナリオ、元コードの該当行、質問と判断、進み具合）。デザインはスクリプトに固定しているので、どのモデルでも同じ見た目になります。判断は markdown（review.md）に記録します。承認済みの仕様（`openspec/specs/`）も `--spec` で同じデザインの読みもの（一覧と capability ごとのページ、検索つき）にできます。
-- **仕様が契約。** 実装中に元コードと仕様が食い違ったら、AI はどちらかを選ばず人に聞きます。実装担当は「良かれと思って」の手直し（仕様にない機能、画面の今風の作り直し、入力チェックやエラー処理の追加、元のバグの修正、決めていないライブラリの追加）をしません。
-- **同じ指摘を2回させない。** レビューなどで人が直したことのうち、ほかの capability でも起きそうなことは、オーケストレーターが `openspec/spec-relay/lessons.md` に書き残し、次の解析担当と実装担当が読みます。書くのは人の言葉からだけで、書く前にその1行を見せて了解をもらいます。照合担当には渡しません（[詳しく](docs/WORKFLOW.md#レビューの学びを次へ渡すlessonsmd)）。
-- **並列で進めても、レビューは1本。** 解析・照合・実装はサブエージェントが同時に進め、人のレビューは1つずつです。先に解析しておくのは `--ahead` 件までにして、レビュー待ちを溜めません。サブエージェントは割り当てられたファイルだけを書き、オーケストレーターには短い報告だけを返すので、長い移行でもオーケストレーターの文脈が埋まりにくくなっています（[詳しく](docs/WORKFLOW.md#並列での進め方)）。
-- **工程を飛ばさない。** 次の工程に進む前の確認は `gate.mjs` がします（解析の承認には調査の archive と、調査の一覧にある capability が必要。実装の開始には調査・移行先の設計・確定した仕様が必要）。「飛ばして」と頼まれても、AI は確認を外さず、その工程が守っているものと最短の進め方を説明します。gate を実行するのはオーケストレーターなので、フックが無効の間は AI が指示を守ることが前提です。フックを有効にすると、gate を通らない archive と、元コード・確定仕様・設定への書き込みを Copilot が実行前に拒否します（[下の「止まったとき」](#止まったとき)）。
-- **進捗は Copilot の TODO に出す。** `scripts/status.mjs` が `openspec/` のファイルから進捗を計算し、オーケストレーターが「全体1行 + いまの機能の工程 + 並行して動いている機能」を TODO リストに出します。報告の先頭にも同じ一覧を出します。TODO のチェックは承認になりません（[詳しく](docs/WORKFLOW.md#進捗の表示copilot-の-todo)）。
-- **かかった時間を残す。** 工程ごとに、進行中の時間とレビューなどで人を待っていた時間を分け、サブエージェントの作業時間も記録します。トークン数は Copilot がフックに渡さないので記録せず、`/usage` を貼ったときだけメモに残します（[下の「かかった時間の記録」](#かかった時間の記録)）。
+- **仕様の確定は人が決める。** AI は人が認めた項目だけをチェックし、承認なしに確定しません。確定の前に `gate.mjs` が、抜けや未判断がないことを機械的に確かめます。
+- **仕様が契約。** 実装中に元コードと仕様が食い違ったら、AI は人に聞きます。仕様にない機能や「良かれと思って」の手直しはしません。
+- **動きを確かめてから終える。** すべてのシナリオに自動の確認を付け、テストと、選んだ方法での新旧の比較が通った記録がそろうまで、実装を完了にしません。
+- **工程を飛ばさない。** 「飛ばして」と頼まれても、AI は確認を外しません。
 
-## 止まったとき
+確かめる仕組みの詳細（画面の見た目、データベース、並列での進め方、進捗の表示、時間の記録など）は [docs/SAFEGUARDS.md](docs/SAFEGUARDS.md) にあります。
 
-AI が止まったときは、報告の最初に「止まった理由」「あなたにお願いすること」「AI がやること」の3つを書きます。`gate.mjs` は、人にしかできないこと（`next.person`、利用者の言語の文）と、AI が直すこと（`next.agent`）を分けて出します。
+## 困ったとき
 
-| 表示・報告 | 意味 | あなたがすること |
-|---|---|---|
-| TODO の【レビュー待ち 3/8】 | レビューの途中 | 残りの項目を見て、チャットで承認するか review.md でチェックする |
-| 「未承認の項目が N 件」 | gate review が未チェックの項目を見つけた | 同上 |
-| 「承認者の名前がありません」 | review.md の `Reviewer:` が空 | 記録する名前を伝える |
-| 「判断がまだの質問」 | questions.md の質問に判断がない | 新しいシステムでどうするかを決める |
-| 「〜のレビューがまだ終わっていません」 | 実装の前に、その仕様のレビューが必要 | そのレビューを終える |
-| 【全項目チェック済み・gate 未通過】 | 成果物の不備（照合の残り、項目の漏れなど）か、調査がまだ archive されていない | 不備なら何もしなくてよい（AI が直して確かめ直す）。調査が未完了なら、AI が用意する調査のレビューをする |
-| 「archive してよいか」 | gate を通った | 確定してよければ「はい」と答える |
-| 「同じ動きであることは…推定です」 | 実装の完了時。比べ方が A（仕様から作ったテスト）だけで、元のプログラムは動かしていない | 推定で足りるかを決めてから archive に答える |
-| 「TODO(port) を残してよいか」 | 実装で終わらなかった箇所がある | 後の作業に回してよいかを決める（了承すると proposal.md の Follow-up に名前付きで残る） |
-| 「割り当て外のファイルが変わりました」 | サブエージェントが担当外を書いた | 元に戻すか、受け入れるかを決める |
-| `spec-relay:` で始まる拒否 | フックが実行前に止めた | 理由のとおり。設定や元コードを変えたいときは自分で変える |
-| 導入スクリプトの「衝突」 | 既存ファイルと中身が違う | どちらを残すかを決める（何も変更されていない） |
-| コマンドがない・アクセス拒否など | 環境の問題 | AI が環境チェック（`scripts/doctor.mjs`）の直し方を伝えるので、そのとおりにする（[docs/WINDOWS.md](docs/WINDOWS.md) も参照） |
+- **AI が止まった**：報告の最初に、止まった理由と、あなたにお願いすることが書かれます。表示ごとの意味と対処は [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) にあります。
+- **キットを新しい版にした**：[docs/UPGRADING.md](docs/UPGRADING.md) の、今の版より後の節を読んでください。
 
-同じ確認で2回直しても通らないときは、AI は止まって残りの問題を見せ、進め方を聞きます。
+## ドキュメント
 
-### フック（試験中・既定は無効）
-
-プラグインには Copilot の preToolUse フック（`com.github.copilot/hooks/hooks.json`）が入っています。形式とツール名は Copilot CLI の公式資料に合わせています。VS Code（Copilot ハーネス）と Copilot app は同じ実行環境なので同じように動くはずですが、実機ではまだ確かめていません。有効にした移行対象のリポジトリでだけ、次を実行前に拒否します。
-
-- gate を通らない `openspec archive`（`node <キット>/scripts/openspec.mjs`・`openspec`・`openspec.cmd`・`npx @fission-ai/openspec` などの書き方と、`cd` してからの実行を含む）、change 名のない archive、変数で名前を渡す archive、サブエージェントからの archive
-- 元コード（元のフォルダーが `.` のときは `openspec/` と移行先のフォルダー以外のすべて）、`openspec/specs/`、`openspec/changes/archive/`、`openspec/schemas/`、`openspec/spec-relay/tools/`（固定した OpenSpec）、`openspec/config.yaml`、キット自体への書き込み
-- サブエージェントによる review.md・questions.md・crosscheck.md・port の proposal.md と design.md・計画（plan.md）・学びの記録（lessons.md）の書き込み
-- port のテスト実行の記録（`verify.json`）への書き込み（編集ツールでも、`Set-Content`・リダイレクト・`node -e` などのシェルコマンドでも。書くのは `verify.mjs` だけ）
-- canvas での書き込みの記録（`openspec/spec-relay/local/canvas-log.jsonl`）への書き込み（編集ツールでも、シェルコマンドでも。書くのは canvas だけ）
-
-有効にするには、`openspec/config.yaml` の context に次の1行を足すか、`on` に変えます（導入時なら `--hooks on`。導入済みのリポジトリでは `--hooks` は反映されないので、この行を自分で直します）。フックが有効な間、AI の編集ツールは config.yaml を書けず、この行や config.yaml を書き換えるシェルコマンドも拒否されます（無効の間も、AI には変えないように指示しています）。
-
-```yaml
-  Hook enforcement (on or off; on denies archives that fail the gate and agent writes to protected files): on
-```
-
-- 実機（特に Windows）での確認がまだなので、既定は無効です。node が見つからないなどでフックが動かないときは、拒否せずに通常の許可確認へ進みます（Copilot は終了コードが 0 以外だとそのツールの実行を拒否するので、壊れたフックですべての操作が止まらないよう、必ず 0 を返します）。
-- シェルコマンドでの書き込み（`Set-Content` など）は、config.yaml・verify.json・canvas-log.jsonl へのもの以外は読み取りません。これはオーケストレーターの `gate.mjs guard` が後から見つけます。
-- フックはプラグインを入れたすべてのリポジトリで、シェルとファイル編集の前に1回ずつ起動します（node の起動1回分。spec-relay のリポジトリでなければすぐ終わります）。ホストがプラグインの場所（`PLUGIN_ROOT`）を渡さないときは何もしません。
-- チャットでの承認は AI が review.md に書くので、「AI が勝手にチェックを付ける」ことはフックでは区別できません。承認は今も、チャットでのあなたの言葉と gate の合格の両方です。
-
-## 0.20.0 から更新するとき
-
-0.21.0 で、**すべてのシナリオに自動の確認**を付けるようになり、比べ方 B2（画面）と C（web の画面の見た目）をキットの `e2e.mjs` が Playwright で行うようになりました（[詳しく](docs/E2E.md)）。移行先の設計・port・仕上げのスキーマの説明文が変わったので、`openspec/schemas/spec-relay-*` を削除してから導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。archive 済みの change はそのままです。
-
-| 変わったこと | 進行中の change で起きること |
+| ファイル | 中身 |
 |---|---|
-| port の design.md に `## Scenario checks`（要件・シナリオ・確認方法 `e2e`・`compare`・`unit`）が加わった | B1 か B2 のコマンドがある port は、表がないと `gate.mjs port-done` が止まる。すべてのシナリオの行を足す。A だけの port は変わらない |
-| `compare` にしたシナリオは、記録したケースに `"scenario"` キーで印が要る | 印がないと止まる。入力の一覧に `"scenario"` を足して記録し直す（`http.mjs record` はそのまま写す） |
-| B2 は「操作を記録して再生する」から「シナリオごとの Playwright のテストを、元のシステムで通してから新しいシステムに流す」に変わった | B2 を選んだコンテキストの port は、design.md の B2 のコマンドを `spec-relay-e2e --base <新しいシステム> --start '<起動コマンド>'` にし、`e2e.mjs init` で `tests/e2e/` を作り、verification.md に書いた元のシステムのアドレスで `e2e.mjs old` を実行して通し（オーケストレーターが行う）、元のシステムを止めてから verify する。以前の B2 のテストは `tests/e2e/<capability>/` の `*.e2e.mjs` に移し、題名をシナリオの印にし、パスの読み替えは `tests/e2e/<capability>/paths.json` に置く |
-| verification.md の列名が「B2 screen tests」になった | なし（列は `B2` で始まれば読みます） |
-
-Playwright（`@playwright/test`、Apache-2.0）はキットに同梱していません。`tests/e2e/` で `npm ci` を実行すると、版を固定した 1.64.1 が入ります。Windows 11 では入っている Edge を使うので、ブラウザのダウンロードは要りません。
-
-## 0.19.0 から更新するとき
-
-0.20.0 で、点検で見つかった3つの穴をふさぎました。調査・移行先の設計・解析・port のスキーマの説明文が変わったので、`openspec/schemas/spec-relay-*` を削除してから導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。archive 済みの change はそのままです。影響があるのは進行中の change だけです。
-
-| 変わったこと | 進行中の change で起きること |
-|---|---|
-| 調査の review.md は M1〜M5 と C1 の項目が必須。除外したファイルは inventory.md の Notes に理由が必須 | 項目を消していたり、理由が空だったりすると `gate.mjs review` が止まる。項目を戻し、理由を書く |
-| 移行先の設計の review.md は A0・A90・A91・V1〜V4・E90・U90 の項目が必須 | 項目を消していると止まる。テンプレートの項目を戻す |
-| trace の行番号は、そのファイルにある行でなければならない | ファイルより先の行を書いていると止まる |
-| 箇所台帳の `covered` は、その箇所の効果のある行（DB への書き込み・エラー・リダイレクト・メールなど）すべてに、名前を挙げた要件の trace が届いている必要がある | 届いていない行を gate が挙げる。その行を定めている要件の名前を足すか、要件がなければ `gap` として解析担当に戻す。効果のない行（ページの文章など）に目印が付いただけなら、判定に `; no effect <行>` を足す（[詳しく](docs/WORKFLOW.md#箇所台帳ファイルの中の抜けの検出)） |
-| 目印のある箇所を「動作なし」としたとき、または行を `no effect` で外したときは、review.md の `## 4. Coverage` に C1 が必要 | gate が示す文（一覧を表す符号つき）でオーケストレーターが項目を足し、人が一覧を見てチェックする。以前の版の「4. Coverage」の C1 が残っている場合も、この文に書き直す |
-| 比べ方 B1 を HTTP 越しに使える（`scripts/http.mjs`） | なし。ロジックを直接呼べない PHP のページや WebForms でも、元のシステムを手元で動かせれば B1 を選べる（[詳しく](docs/COMPARE.md#直接呼べないロジックhttp-越しの記録)）。A だけにしていたコンテキストを B1 にするときは、移行先の設計をやり直す（`target-design-v2`） |
-
-## 0.18.0 から更新するとき
-
-0.19.0 で、任意の**コードガイド**を作れるようになりました。移行先のコードを、機能・画面と URL・ファイルの3つの入口から辿れる案内で、モジュールと依存の図、データの持ち主の図、ファイルごとの説明、canvas で聞いて役立った Q&A が入ります。チャットで「コードガイドを作って」と頼んでください（[詳しく](docs/GUIDE.md)）。新しいエージェント `spec-relay-guide-writer` が増えます。プラグインを更新すれば入ります。スキーマや今までの成果物に変更はありません。
-
-## 0.17.0 から更新するとき
-
-0.18.0 で、canvas のレビュー画面から review.md に書き込めるようになりました（確認済みにする・判断を書く・レビュー担当の名前）。自分でファイルを直したのと同じ扱いで、変更の完了（アーカイブ）は今までどおりチャットで伝えます（[詳しく](docs/CANVAS.md)）。書き込みは `openspec/spec-relay/local/canvas-log.jsonl` に記録され、`gate.mjs guard --compare` はそれをサブエージェントの変更と区別します。プラグインを更新すれば入ります。スキーマや成果物に変更はありません。
-
-## 0.16.0 から更新するとき
-
-0.17.0 で、Copilot の canvas（試験中）に進み具合・レビュー画面・仕様を出せるようになりました。各項目の「これを聞く」で、質問をそのままチャットに送れます（[詳しく](docs/CANVAS.md)）。プラグインを更新すれば入ります。スキーマや成果物に変更はありません。
-
-## 0.15.0 から更新するとき
-
-0.16.0 で、承認済みの仕様を HTML で読めるようになりました。`node "<kit>/scripts/render.mjs" --spec all` で `openspec/spec-relay/views/specs.html`（仕様の一覧）と capability ごとのページができます。要件ごとにシナリオと元コードの該当行が並び、修正中の amend があればその要件に注意書きが出ます。スキーマや成果物に変更はないので、導入のやり直しは要りません。
-
-## 0.14.0 から更新するとき
-
-0.15.0 で、比べ方 B1 の道具が加わりました。元のプログラムから記録したケース（入力と結果）と新しいコードの結果を、`compare.mjs` が1件ずつ比べます（[詳しく](docs/COMPARE.md)）。移行先の設計と port のスキーマの説明文が変わったので、`openspec/schemas/spec-relay-port/` と `openspec/schemas/spec-relay-target/` を削除してから導入スクリプトをもう一度実行してください。
-
-- archive 済みの移行先の設計はそのまま使えます。B1 を選んでいたコンテキストの port では、design.md の B1 のコマンドを `spec-relay-compare --cases tests/golden/<capability> --driver "<実行係のコマンド>"` にできます。今までどおり、自分で書いた比較のコマンドでもかまいません。
-- A だけにしていたコンテキストでも、本番の記録（バッチの入出力など）があれば B1 にできます。そのときは移行先の設計をやり直します（`target-design-v2`）。
-
-## 0.13.0 から更新するとき
-
-0.13.0 より前の版から上げるときは、その版より後の節もすべて読んでください。スキーマの削除と導入スクリプトの再実行は1回で済みます。
-
-0.14.0 で、実装の完了の確かめ方が強くなりました（`verify.mjs` によるテストの実行記録、シナリオごとのテストの印、`TODO(port)`、照合担当による実装の照合）。port と移行先の設計のスキーマが変わったので、`openspec/schemas/spec-relay-port/` と `openspec/schemas/spec-relay-target/` を削除してから導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。
-
-- archive 済みの移行先の設計はそのままです。conventions.md の Test と Boundary check のコマンドは、0.14.0 から移行先のフォルダーで実行します。リポジトリの一番上で動く書き方になっていたら、port の design.md の Verification 表で、A と `Boundary check` の行にコマンドを書けば、そちらを使います。
-- archive 済みの verification.md の比べ方の欄は `yes` か `no` で読みます（`はい`・`✓`・`なし`・`-` なども可）。それ以外の言葉があると port-done が止まるので、移行先の設計をやり直す（`target-design-v2`）か、オーケストレーターに相談してください。
-- archive 済みの conventions.md の Test や Boundary check が `npm run build; npm test` のように複数のコマンドをつないでいると、前の失敗が隠れるので port-done が止まります。port の design.md の Verification 表に1つのコマンド（スクリプトやビルドツールのタスク）を書けば、そちらを使います。
-- 進行中の port は、タスクがすべて完了していても `gate.mjs port-done` を通らなくなります。オーケストレーターがテストに印を付け、`verify.mjs` と照合を行ってから、改めて archive してよいかを聞きます。
-
-## 0.11.0 から更新するとき
-
-0.12.0 で、解析に「抜けの確認」（箇所台帳 `coverage.md`）が加わりました（[詳しく](docs/WORKFLOW.md#箇所台帳ファイルの中の抜けの検出)）。スキーマが変わったので、`openspec/schemas/spec-relay-*` を削除してから、導入スクリプトをもう一度実行してください。進行中の extract の change では、`coverage.md` がないと `gate.mjs review` が止まります。オーケストレーターに「抜けの確認をして」と頼むと、`sites.mjs` と照合担当で作ります。
-
-## 0.10.0 から更新するとき
-
-0.11.0 で、全部の実装のあとに「6. 仕上げ」の工程（スキーマ `spec-relay-finish`、`scripts/finish.mjs`）が加わり、port のスキーマの説明文が変わりました。導入スクリプトをもう一度実行するとスキーマの違いを表示して止まるので、`openspec/schemas/spec-relay-*` を削除してから実行し直してください。
-
-- 後回しにした作業は、計画（`openspec/spec-relay/plan.md`）の `## Follow-up` の下に1件ずつ書きます。仕上げの工程がここから集めます。別の見出しに書いていた場合は移してください。
-- 進捗の表示は、全部の実装が終わっても「次は仕上げ」となり、仕上げの change を archive して初めて「移行完了」になります。
-
-## 0.9.0 から更新するとき
-
-0.10.0 で、データベースの扱いが加わりました。調査に `database.md`、移行先の設計に `data.md`（review.md の `## 5. Data`）が増え、解析と実装のスキーマの説明文も変わっています。
-
-1. `openspec/schemas/spec-relay-*` を削除してから、導入スクリプトをもう一度実行します（スキーマが新しい版と違うと表示して止まるためです）。
-2. 調査がまだ archive されていなければ、オーケストレーターに `database.md` を書いてもらい、レビューに D の項目を足します。データベースを使っていなければ、`## Databases` の下に None と書くだけです。
-3. 0.9.0 以前に archive した調査には `database.md` がないので、gate はデータベースの確認をしません。ストアドやトリガーにロジックがあるシステムなら、調査をやり直して（`survey-v2`）定義を取り込むことを勧めます。archive 済みの調査のあとで `openspec/spec-relay/db/` に定義を置くと、調査に記録した定義と違うため gate が止まるので、置くのは調査のやり直しの中で行います。移行先の設計をまだ archive していなければ、そのあとで `data.md` を足します。
-4. 進行中の target-design には `data.md` を足します（ないと gate と進捗の表示が先へ進みません）。調査がデータベースを使わないと記録しているか、0.9.0 以前の調査なら、None と書くだけです。
-5. `openspec/spec-relay/db/` の定義は元ファイルと同じく、計画（plan.md）のどれかの capability の下に書きます（`` - `openspec/spec-relay/db/sales/` ``）。`gate.mjs coverage` が確かめます。定義を置くのは 2 か 3 の調査の中だけです（調査の archive のあとに置くと gate が止まります）。
-
-## 0.8.0 から更新するとき
-
-0.9.0 で、仕様の抜けをファイル単位で gate が確かめるようになりました（[詳しく](docs/WORKFLOW.md#ファイル単位の網羅抜けの検出)）。スキーマが変わったので、`openspec/schemas/spec-relay-*` を削除してから、導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。進行中の移行では次のものが要ります。
-
-- `openspec/spec-relay/plan.md` の各 capability の下に、元ファイル・フォルダーを字下げした項目で書きます（`` - `src/billing/` ``）。調査の capabilities.md に書いてあれば、そこから写します。オーケストレーターに「plan に元ファイルを足して」と頼むと書き、`gate.mjs coverage` で確かめます。plan に1つも書いていない間は、調査の capabilities.md の割り当てを使います。
-- 進行中の extract と amend の change では、source-map.md の表に割り当てのファイルがすべてあり、trace.md にすべての要件の行がないと `gate.mjs review` が止まります。止まったら、オーケストレーターが解析担当に直させます。
-- extract の review.md の「4. Coverage」（C1、C2）は不要になりました。残っていても、チェックすれば gate は通ります。
-
-## 0.7.0 から更新するとき
-
-0.8.0 で、画面の見た目を引き継ぐ決まりが加わりました。調査の一覧に扱いの列（`port` か `carry`）、移行先の設計に `ui.md`、screens.md に見た目の出どころと詳細、port の design.md に画面ごとの方針と carry のファイルの欄があります。
-
-1. スキーマが変わったので、導入スクリプトは「キットの版と違う」と表示して止まります。`openspec/schemas/spec-relay-*` を削除してから、導入スクリプトをもう一度実行してください。
-2. archive 済みの調査はそのまま使えます。扱いの列がない一覧は、すべて `port` として読みます。CSS などを `carry` にしたいときは、調査をやり直します（`survey-v2`）。進行中の調査は、inventory.md に扱いの列（`| Path | Context | Handling | Notes |`）を足さないと gate を通りません。分担して書いている途中の部分ファイルも同じ列にそろえてください。
-3. 進行中の target-design は、`ui.md` と review.md の `## 4. Screens`（コンテキストごとの `U<n>` と `U90`）を書き足さないと gate を通りません。archive 済みのときは、前の版の architecture.md・conventions.md・verification.md をそのまま写し、`ui.md` を足した `target-design-v2` を作ってレビューすると、以後の port が方針に従います。
-4. 進行中の extract の screens.md には、見た目の出どころと詳細を書き足すと、実装で見た目を再現しやすくなります（gate はこの欄を見ないので、なくても通ります）。archive 済みの target-design に `ui.md` がないまま port を始めると、オーケストレーターは画面ごとの方針を人に聞いて design.md に記録します。
-
-## 0.6.0 から更新するとき
-
-0.7.0 は OpenSpec 2.0.0 が前提で、その版を移行対象のリポジトリの中に固定します。2.0.0 はスキルを `.github/skills/` ではなく `.agents/skills/` に置くので、0.6.0 のままでは標準の apply・archive・sync を無効にできませんでした。0.7.0 は `.agents/skills/` だけを見ます。グローバルに入れた `openspec` は使わなくなるので、残しても消してもかまいません。
-
-進行中の移行では、次の順に実行します。
-
-1. 導入スクリプトをもう一度実行します（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。`openspec/spec-relay/tools/` に OpenSpec 2.0.0 が入り、`.github/` に残ったファイルを `leftover` として表示して止まります（まだ完了ではありません）。
-2. 移行対象のリポジトリで `node "<キットのフォルダー>/scripts/openspec.mjs" update` を実行します。OpenSpec が置いた古いファイルは消え、`.agents/skills/` に新しいスキルが入ります。
-3. 0.6.0 が無効にしたファイル（`.github/skills/openspec-*` と `.github/prompts/opsx-*` のうち、`<!-- spec-relay: disabled -->` を含むもの。apply・archive・sync、広いプロファイルでは bulk-archive も）は、編集済みとして残ります。中身はキットの案内だけなので、手で消してください。残っていると導入スクリプトは完了せず、doctor は `legacy` で FAIL を出します（元フォルダーが `.` のときは、調査の gate も元コードとして数えます）。
-4. 導入スクリプトをもう一度実行し、`.agents/skills/` の OpenSpec 標準のスキルを無効にします。最後に doctor で FAIL がないことを確かめ、`openspec/spec-relay/tools/` の3つのファイル、`.agents/skills/`、`.github/` で消えたファイルをコミットします。
-
-## 0.5.0 から更新するとき
-
-- 0.6.0 で、レビューの学びを `openspec/spec-relay/lessons.md` に残すようになりました。最初の学びが出たときにオーケストレーターが作るので、用意は要りません。進行中の移行では、これまでのレビューで繰り返し直したことがあれば、オーケストレーターに伝えると最初の行として書きます。
-- スキーマと設定は変わっていないので、導入スクリプトのやり直しは不要です。
-
-## 0.4.0 から更新するとき
-
-- extract と amend の承認（`gate.mjs review`）に、調査の archive、調査の一覧（または計画の `## Capabilities`）にある capability、その capability の change 名が必要になりました。進行中の change が通らなくなったら、表示に従って計画に capability を足すか、change の名前を合わせます。
-- フックを使うときは、`openspec/config.yaml` に「止まったとき」の1行を足します（なければ無効）。スキーマは変わっていないので、導入スクリプトのやり直しは不要です。
-
-## 0.3.0 から更新するとき
-
-0.4.0 で環境チェック（`scripts/doctor.mjs`）が加わりました。スキーマと設定は変わっていないので、導入し直す必要はありません。次のセッションの最初に、オーケストレーターが環境を確かめ、サブエージェントの試運転を1回行います。
-
-## 0.2.0 から更新するとき
-
-0.3.0 で、サブエージェントを並列に動かす手順に変わり、survey・extract・amend のスキーマの説明文が変わりました。導入スクリプトをもう一度実行するとスキーマの違いを表示して止まるので、`openspec/schemas/spec-relay-*` を削除してから実行し直してください。`openspec/config.yaml` はそのまま残るので、次の2か所を手で直します。
-
-- context に並列化の5行を足す（ない場合は既定の 4・2・`session` で動きます）。
-
-  ```yaml
-    Parallel subagents (at once, whole session): 16
-    Analyses ahead of review: 2
-    Analyst model: session
-    Checker model: session
-    Implementer model: session
-  ```
-
-- rules の `raise doubts in questions.md.` を `raise doubts as questions for questions.md.` に変える（questions.md はオーケストレーターだけが書くため）。
-
-## 0.1.0 から更新するとき
-
-0.2.0 で、解析の前に「調査」と「移行先の設計」の工程が加わりました。導入スクリプトをもう一度実行すると、スキーマが新しい版と違うと表示して止まるので、`openspec/schemas/spec-relay-*` を削除してから実行し直してください。進行中の extract change は、新しく加わった screens.md と crosscheck.md を書き足したうえで、調査を archive すると gate を通ります（0.5.0 から、extract の承認には調査が必要です）。先にオーケストレーターに調査を頼み、その一覧に進行中の capability を入れてください。確定済みの仕様（ベースライン）はそのまま残り、`gate.mjs port-ready` はこの2つが終わるまで実装の開始を止めます。
-
-## リポジトリの構成
-
-```text
-plugin.json                    プラグイン定義（Agent Plugins 1.0）
-.github/plugin/marketplace.json マーケットプレイス定義
-com.github.copilot/agents/     オーケストレーター・解析担当・照合担当・実装担当・コードガイドの説明担当
-com.github.copilot/hooks/      実行前に archive と書き込みを確かめるフック（既定は無効）と、サブエージェントの時間の記録
-com.github.copilot/extensions/ canvas の拡張（進み具合・レビュー画面・仕様・コードガイドを Copilot の canvas に出し、レビューのチェックと判断、役立った Q&A を書き戻す。試験中）
-skills/spec-relay/SKILL.md     オーケストレーターの手順
-skills/spec-relay-view/        markdown を HTML にして見せるスキル
-openspec-schemas/              移行用の OpenSpec スキーマ
-templates/openspec-config.yaml 移行対象に置く OpenSpec 設定のひな形
-scripts/setup.mjs              導入スクリプト（外部パッケージなし）
-scripts/gate.mjs               承認・実装の前に使う機械的な確認（止まったときの次の一手も出す）
-scripts/coverage.mjs           ファイル単位の網羅の確認（gate.mjs から使う。どの元ファイルもどれかの capability の仕様に入るか）
-scripts/sites.mjs              元コードの箇所（メソッドや関数など）と目印の一覧。照合担当が箇所ごとに仕様の抜けを判定する台帳のもと
-scripts/hook.mjs               フックの本体（gate を通らない archive と保護されたファイルへの書き込みを拒否）
-scripts/status.mjs             進捗の計算（TODO リスト・チャット用）と、次に並列で始めてよい作業
-scripts/finish.mjs             仕上げの工程（開始の確認、残りものの収集と下書き、移行先のハッシュ、仕上げの gate）
-scripts/metrics.mjs            工程ごとにかかった時間の記録と集計
-scripts/merge.mjs              サブエージェントが分担して書いた表を1つの成果物にまとめる
-scripts/verify.mjs             実装のテスト・境界チェック・比べ方を実行し、結果を記録する（port-done が読む）
-scripts/compare.mjs            比べ方 B1：元のプログラムから記録したケースと新しいコードの結果を1件ずつ比べる
-scripts/http.mjs               比べ方 B1 の HTTP 版：動いている元のシステムにリクエストを送って記録し、新しいシステムに同じリクエストを送る
-scripts/e2e.mjs                比べ方 B2・C：画面のテスト（Playwright）を元のシステムで通して記録し、同じテストを新しいシステムに流す
-scripts/e2e-config.mjs         画面のテストを新旧で同じ条件にする Playwright の設定（e2e.mjs が使う）
-scripts/run.mjs                verify と compare がコマンドを実行する部分（Windows では PowerShell）
-scripts/render.mjs             成果物の markdown をレビュー用の HTML に、承認済みの仕様を読みものの HTML にする（デザイン固定）
-scripts/canvas.mjs             canvas の画面を出すサーバー（拡張から使う。単独でブラウザーでも試せる）
-scripts/review-edit.mjs        canvas から review.md への書き込み（チェック・判断・レビュー担当）と、その記録
-scripts/guide.mjs              コードガイド（任意）の準備・ハッシュの記録・確認と、画面の部品（図は設計から描く）
-scripts/doctor.mjs             最初の環境チェックとサブエージェントの試運転
-scripts/openspec.mjs           リポジトリに固定した OpenSpec CLI の起動（`node <キット>/scripts/openspec.mjs <引数>`、シェルを通さない）
-templates/openspec-tools/      リポジトリに置く、OpenSpec の版を固定する package.json と package-lock.json
-templates/e2e/                 移行先の tests/e2e/ に置く、Playwright の版を固定した package.json・設定・補助関数
-tests/                         node:test のテスト（npm があれば、OpenSpec を実際に入れて動かす通しの確認も）
-docs/WORKFLOW.md               流れと設計の説明、今後の課題
-docs/WINDOWS.md                Windows での準備と注意点
-docs/DATABASE.md               データベースの扱いと、定義の書き出し方
-docs/COMPARE.md                比べ方 B1（元のプログラムから記録したケースとの比較）の書き方
-docs/E2E.md                    シナリオごとの確認方法と、比べ方 B2・C（画面のテスト）の書き方
-docs/CANVAS.md                 canvas で見る（試験中）
-docs/GUIDE.md                  コードガイド（任意）
-```
-
-## 開発
-
-```powershell
-npm test
-```
-
-通しのテストは、一時フォルダーに `npm ci` で OpenSpec を入れて動かします（npm のレジストリへの接続が必要です）。npm がない端末では、その部分だけ skip と表示されます（CI では skip せず失敗にします）。OpenSpec の版を上げるときは、`templates/openspec-tools/package.json` の版を変えて、そのフォルダーで `npm install --package-lock-only --ignore-scripts` を実行し、lock ファイルを作り直します。`scripts/openspec.mjs` の `OPENSPEC_VERSION` と `scripts/doctor.mjs` の `OPENSPEC_TESTED` も合わせます（テストが3つの一致を確かめます）。移行中のリポジトリでは、新しいキットの導入スクリプトが古い package.json と package-lock.json を衝突として止めるので、その2つを消してから導入スクリプトを実行し直すよう、更新の手順に書いてください。テストは一時フォルダーの設定を使うので、手元の OpenSpec の設定は変わりません。CI は Windows と Ubuntu の Node.js 22・24 で実行しています。
-
-画面のテストの通しの確認（Playwright を実際に入れてブラウザを動かす）は、`SPEC_RELAY_E2E_REAL=1` を付けたときだけ実行します（Windows は Edge、ほかは `SPEC_RELAY_E2E_CHANNEL=chrome` か `SPEC_RELAY_E2E_EXECUTABLE=<ブラウザのパス>`）。CI では Windows（Edge）と Ubuntu（Chrome）で実行しています。Playwright の版を上げるときは、`templates/e2e/package.json` の版を変えて、そのフォルダーで `npm install --package-lock-only --ignore-scripts` を実行します。
+| [WORKFLOW.md](docs/WORKFLOW.md) | 流れと設計、工程ごとの成果物、今後の課題 |
+| [SETUP.md](docs/SETUP.md) | 導入の詳しい手順 |
+| [WINDOWS.md](docs/WINDOWS.md) | Windows での準備と注意点 |
+| [SAFEGUARDS.md](docs/SAFEGUARDS.md) | 守っていることと、確かめる仕組み |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 止まったときの対処と、フック（試験中） |
+| [UPGRADING.md](docs/UPGRADING.md) | 前の版から更新するとき |
+| [DATABASE.md](docs/DATABASE.md) | データベースの扱い |
+| [COMPARE.md](docs/COMPARE.md) | 元のプログラムの記録との比較（比べ方 B1） |
+| [E2E.md](docs/E2E.md) | シナリオごとの確認と画面のテスト（比べ方 B2・C） |
+| [CANVAS.md](docs/CANVAS.md) | Copilot の canvas で見る（試験中） |
+| [GUIDE.md](docs/GUIDE.md) | コードガイド（任意） |
+| [DEVELOPMENT.md](docs/DEVELOPMENT.md) | キットの開発（リポジトリの構成とテスト） |
 
 ## ライセンス
 
@@ -388,6 +96,4 @@ npm test
 - キットのスクリプトは外部のパッケージを使わず、ほかのプロジェクトのコードも同梱していません。
 - Playwright（`@playwright/test`・`playwright`・`playwright-core` 1.64.1、いずれも Apache-2.0）も同梱していません。画面のテストを使う移行先で、利用者が `tests/e2e/` に `npm ci` で入れます（`templates/e2e/package-lock.json` で 2026-11-19 に確認）。
 - OpenSpec（`@fission-ai/openspec`、MIT License）は同梱していません。導入スクリプトが npm から移行対象のリポジトリに入れます。固定している 2.0.0 と、それが使うパッケージを合わせた 57 個のライセンスは、MIT 50、ISC 6、BSD-3-Clause 1 です（`templates/openspec-tools/package-lock.json` で 2026-11-18 に確認）。OpenSpec の版を上げるときは、この内訳も確かめ直します。
-- 参考にした code-migration-kit-with-github-copilot は Apache-2.0 です。参考にしたのは構成と考え方で、ファイルは写していません。
-
-構成と考え方は [code-migration-kit-with-github-copilot](https://github.com/umauma00/code-migration-kit-with-github-copilot) を参考にしています。違いは [docs/WORKFLOW.md](docs/WORKFLOW.md#先行例code-migration-kit-with-github-copilotから引き継いだこと) にあります。
+- 構成と考え方は [code-migration-kit-with-github-copilot](https://github.com/umauma00/code-migration-kit-with-github-copilot)（Apache-2.0）を参考にしました。ファイルは写していません。違いは [docs/WORKFLOW.md](docs/WORKFLOW.md#先行例code-migration-kit-with-github-copilotから引き継いだこと) にあります。
