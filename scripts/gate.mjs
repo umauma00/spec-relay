@@ -82,6 +82,44 @@ export function checkboxes(text) {
     .map(([, mark, body]) => ({ done: ticked(mark), body: body.trim(), plain: plain(body) }));
 }
 
+// Notes under a review item, one per sub-list line: "  - fix: ..." (the
+// reviewer wants a change), "  - hold: ..." (the reviewer cannot decide yet)
+// and "  - fixed: ..." (the agent's answer to the fix above it). The person
+// writes fix and hold, in the file or with the canvas; the agent writes fixed.
+// Comments and fenced code are left out, so a template's example is no note.
+export const REMARK = /^\s+(?:[-*+]|\d+[.)])\s+(?:\*\*|__)?(fix|hold|fixed)(?:\*\*|__)?\s*:\s*(.*)$/i;
+const ITEM_ID = /^([A-Za-z])(\d+)\b/;
+
+// Each review item that has an id, with its notes in file order:
+// [{ id, done, remarks: [{ kind, text }], openFix }]. A fix is open until a
+// fixed line follows it.
+export function reviewRemarks(text) {
+  const lines = String(text ?? '').replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\r\n]/g, ' ')).split(/\r?\n/);
+  const items = [];
+  let item = null;
+  let fenced = false;
+  for (const line of lines) {
+    if (FENCE.test(line)) { fenced = !fenced; item = null; continue; }
+    if (fenced) continue;
+    const box = line.match(CHECKBOX);
+    if (box) {
+      const k = plain(box[2]).match(ITEM_ID);
+      item = k ? { id: `${k[1].toUpperCase()}${Number(k[2])}`, done: ticked(box[1]), remarks: [] } : null;
+      if (item) items.push(item);
+      continue;
+    }
+    if (/^#{1,6}\s/.test(line)) { item = null; continue; }
+    const r = item ? line.match(REMARK) : null;
+    if (r) item.remarks.push({ kind: r[1].toLowerCase(), text: r[2].trim() });
+    else if (line.trim() && !/^\s/.test(line)) item = null;
+  }
+  for (const it of items) {
+    const lastFix = it.remarks.map((r) => r.kind).lastIndexOf('fix');
+    it.openFix = lastFix >= 0 && !it.remarks.slice(lastFix + 1).some((r) => r.kind === 'fixed');
+  }
+  return items;
+}
+
 export function requirementNames(text) {
   return unfencedLines(text).map((line) => line.match(REQUIREMENT)).filter(Boolean).map((m) => m[1]);
 }
@@ -181,6 +219,15 @@ function commonReview(dir, problems) {
   const boxes = checkboxes(review);
   if (boxes.length === 0) problems.push('review.md has no checklist items');
   for (const box of boxes.filter((b) => !b.done)) problems.push(`not ticked: ${box.body}`);
+  // A change the reviewer asked for under an item ("  - fix: ...") that has no
+  // "  - fixed: ..." after it yet: the agent still owes it.
+  for (const item of reviewRemarks(review).filter((i) => i.openFix)) {
+    problems.push(`fix requested and not answered: ${item.id} — ${item.remarks.filter((r) => r.kind === 'fix').pop().text}`);
+  }
+  // An open item the reviewer put on hold ("  - hold: ...") waits for the reviewer, not the agent.
+  for (const item of reviewRemarks(review).filter((i) => !i.done && !i.openFix && i.remarks.filter((r) => r.kind !== 'fixed').pop()?.kind === 'hold')) {
+    problems.push(`on hold: ${item.id} — ${item.remarks.filter((r) => r.kind === 'hold').pop().text}`);
+  }
   return boxes;
 }
 
@@ -1646,6 +1693,8 @@ const NEXT = {
   en: {
     unticked: (n, list) => `${n} review item${n === 1 ? ' is' : 's are'} not approved yet (${list}). Approve them in the chat, or tick them in review.md yourself.`,
     reviewer: 'review.md has no reviewer name ("Reviewer:"). Tell me the name to record.',
+    fixing: (n, list) => `You asked for a change on ${n} item${n === 1 ? '' : 's'} (${list}). I correct the artifacts, write what I changed under each ("fixed:"), and ask you to look again.`,
+    onHold: (n, list) => `${n} item${n === 1 ? ' is' : 's are'} on hold (${list}). When you have decided, confirm it, or write what should change ("fix:").`,
     decision: (list) => `These questions have no decision yet: ${list}. Decide what the new system should do.`,
     archive: 'Everything is reviewed. Answer whether this change may be archived (that makes it final).',
     portArchive: 'Every task is done, the tests and the boundary check pass on the code as it is, and the independent crosscheck confirmed every requirement and screen. Answer whether the port may be archived.',
@@ -1668,6 +1717,8 @@ const NEXT = {
   ja: {
     unticked: (n, list) => `レビューで未承認の項目が ${n} 件あります（${list}）。チャットで承認を伝えるか、review.md で自分でチェックしてください。`,
     reviewer: 'review.md に承認者の名前（Reviewer:）がありません。記録する名前を教えてください。',
+    fixing: (n, list) => `直してほしいと書いた項目が ${n} 件あります（${list}）。AI が成果物を直し、各項目の下に直した内容（fixed:）を書くので、もう一度確認してください。`,
+    onHold: (n, list) => `保留中の項目が ${n} 件あります（${list}）。決まったら確認済みにするか、直してほしい点（fix:）を書いてください。`,
     decision: (list) => `判断がまだの質問があります（${list}）。新しいシステムでどうするかを決めてください。`,
     archive: 'すべてレビュー済みです。この change を archive（確定）してよいかを答えてください。',
     portArchive: 'すべてのタスクが完了し、今のコードでテストと境界チェックが通り、別の AI による照合ですべての要件と画面が確認できました。実装を archive してよいかを答えてください。',
@@ -1705,11 +1756,17 @@ export function nextSteps(command, result, lang = 'en') {
     return { person, agent: [...(result.problems ?? []), ...canvas] };
   }
   const problems = result.problems ?? [];
-  const unticked = problems.filter((p) => p.startsWith('not ticked: ')).map((p) => plain(p.slice('not ticked: '.length)).split(' ')[0]);
+  const idOf = (p, prefix) => p.slice(prefix.length).split(' ')[0];
+  const fixing = problems.filter((p) => p.startsWith('fix requested and not answered: ')).map((p) => idOf(p, 'fix requested and not answered: '));
+  const held = problems.filter((p) => p.startsWith('on hold: ')).map((p) => idOf(p, 'on hold: '));
+  const unticked = problems.filter((p) => p.startsWith('not ticked: ')).map((p) => plain(p.slice('not ticked: '.length)).split(' ')[0])
+    .filter((id) => !fixing.includes(id.toUpperCase()) && !held.includes(id.toUpperCase()));
   const undecided = problems.filter((p) => p.startsWith('question has no recorded decision: ')).map((p) => p.slice('question has no recorded decision: '.length));
   const active = problems.map((p) => p.match(/^(?:extract|amend) change (\S+) is still active/)?.[1]).filter(Boolean);
   const foundation = ['survey', 'target-design'].filter((name) => problems.some((p) => p.startsWith(`no archived ${name} change`)));
   if (unticked.length) person.push(words.unticked(unticked.length, shortList(unticked)));
+  if (fixing.length) person.push(words.fixing(fixing.length, shortList(fixing)));
+  if (held.length) person.push(words.onHold(held.length, shortList(held)));
   if (problems.some((p) => p.startsWith('review.md names no reviewer'))) person.push(words.reviewer);
   if (undecided.length) person.push(words.decision(shortList(undecided)));
   for (const name of active) person.push(words.activeReview(name));
@@ -1717,7 +1774,7 @@ export function nextSteps(command, result, lang = 'en') {
   if (problems.some((p) => p.startsWith('database definitions changed after the survey'))) person.push(words.dbDrift);
   const wide = problems.filter((p) => p.startsWith('database definition is UTF-16: ')).map((p) => p.slice('database definition is UTF-16: '.length));
   if (wide.length) person.push(words.dbUtf16(shortList(wide)));
-  agent = problems.filter((p) => !/^(not ticked: |review\.md names no reviewer|question has no recorded decision: |(?:extract|amend) change \S+ is still active|no archived (?:survey|target-design) change|database definitions changed after the survey|database definition is UTF-16: |\.\.\.and \d+ more UTF-16)/.test(p));
+  agent = problems.filter((p) => !/^(not ticked: |on hold: |review\.md names no reviewer|question has no recorded decision: |(?:extract|amend) change \S+ is still active|no archived (?:survey|target-design) change|database definitions changed after the survey|database definition is UTF-16: |\.\.\.and \d+ more UTF-16)/.test(p));
   if (result.ok && command === 'review') person.push(words.archive);
   if (result.ok && command === 'port-done') {
     person.push(words.portArchive);

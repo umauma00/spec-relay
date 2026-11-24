@@ -78,8 +78,8 @@ session = await joinSession({
   canvases: [
     createCanvas({
       id: 'spec-relay',
-      displayName: 'spec-relay',
-      description: 'Shows the spec-relay migration: progress, review pages, approved specs and the code guide, with a button to ask about any item. On the page of an active change the person can tick items, write decisions and the reviewer in review.md (their own edit; never an approval to archive). The agent cannot write through it.',
+      displayName: 'spec-relay HTML view',
+      description: 'Shows the spec-relay migration as HTML pages next to the chat: progress, review pages, approved specs and the code guide, with a button to ask about any item. On the page of an active change the person can tick items, ask for a change ("fix:") or put one on hold ("hold:") under an item, and write decisions and the reviewer in review.md (their own edit; never an approval to archive). The agent cannot write through it. When you offer it to the person, call it the HTML view, not a canvas.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -142,7 +142,7 @@ session = await joinSession({
         if (before && before !== keyOf(root)) await release(before, ctx.instanceId);
         // Opening a canvas that is already open may only focus it: move it when a page was asked for.
         if (before === keyOf(root) && ctx.input?.view) server.go(page.name, page.anchor);
-        return { url: server.url(page.name) + (page.anchor ? `#${page.anchor}` : ''), title: 'spec-relay', status: path.basename(root) };
+        return { url: server.url(page.name) + (page.anchor ? `#${page.anchor}` : ''), title: language(root) === 'ja' ? 'spec-relay（HTML ビュー）' : 'spec-relay (HTML view)', status: path.basename(root) };
       },
       onClose: async (ctx) => {
         const key = instances.get(ctx.instanceId);

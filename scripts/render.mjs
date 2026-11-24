@@ -20,10 +20,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkboxes, questionIds, tableRows, changeSchema, archivedChange } from './gate.mjs';
+import { checkboxes, questionIds, tableRows, changeSchema, archivedChange, REMARK } from './gate.mjs';
 import { guideView, guidePage, guideWords, modules as guideModules, moduleKey, GUIDE_CSS } from './guide.mjs';
 import { ledgerSummary } from './sites.mjs';
 import { leftoverRows } from './finish.mjs';
+import { itemGuide, guideWords as howWords, commonAdvice } from './review-guide.mjs';
+import { surveyFacts, contextCard, surveyAid, inventorySummary, SURVEY_CSS } from './survey-view.mjs';
 
 // ---------------------------------------------------------------- labels
 
@@ -41,7 +43,12 @@ const LABELS = {
     of: (all, done) => `${all} 件中 ${done} 件を確認済み`, left: '残り', sheet: '項目ごとの状態',
     legendDone: 'review.md でチェック済み', legendOpen: '未確認',
     firstOpen: (id) => `最初の未確認 ${id} へ ↓`, show: '表示', all: 'すべて', onlyOpen: '未確認のみ', allClear: 'この区分に未確認の項目はありません。',
-    howto: ['項目を読む', '根拠と照らし合わせる', '正しければ review.md の行を <code>[x]</code> にして作り直す'],
+    howto: ['項目を読む', '「確認すること」に沿って根拠と照らし合わせる', '正しければ review.md の行を <code>[x]</code> に。違うときは行の下に <code>  - fix: 直してほしいこと</code>、決められないときは <code>  - hold: 理由</code> と書いて、作り直す'],
+    states: { done: '確認済み', open: '未確認', fix: '直してほしい', hold: '保留', fixed: '直した・再確認' },
+    seals: { done: '済', open: '未', fix: '直', hold: '保', fixed: '再' },
+    remarks: { fix: 'あなた: 直してほしい', hold: 'あなた: 保留', fixed: 'AI: 直した内容' },
+    split: (n) => `うち ${[['直してほしい', n.fix], ['保留', n.hold], ['再確認', n.fixed]].filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join('・')}`,
+    folded: '確認済みのため折りたたんでいます — 内容を開く', appendixHint: '参照用の元の Markdown です。必要なときだけ開いてください。',
     scenario: 'シナリオ', evidence: '根拠（元コード）', source: '元コード', tests: '既存のテスト', crosscheck: '照合（AI の再確認）', lines: '行',
     noTrace: 'trace.md に記載がありません', unreadable: 'ファイルを読めませんでした', truncated: '長いため先頭のみ表示', encoding: (e) => `文字コード ${e} を変換して表示`, dedent: (n) => `字下げを ${n} 文字詰めて表示`,
     decision: '判断', noDecision: (id) => `未記入 — review.md の ${id} の行に decision: を書きます`,
@@ -80,7 +87,12 @@ const LABELS = {
     of: (all, done) => `${done} of ${all} confirmed`, left: 'left', sheet: 'State of each item',
     legendDone: 'ticked in review.md', legendOpen: 'open',
     firstOpen: (id) => `First open item ${id} ↓`, show: 'Show', all: 'All', onlyOpen: 'Open only', allClear: 'No open items in this group.',
-    howto: ['Read the item', 'Compare it with the evidence', 'If it is right, tick its line in review.md (<code>[x]</code>) and render again'],
+    howto: ['Read the item', 'Compare it with the evidence, following "Check"', 'If it is right, tick its line in review.md (<code>[x]</code>). If it is wrong, write <code>  - fix: what should change</code> under the line; if you cannot decide yet, <code>  - hold: why</code>. Then render again'],
+    states: { done: 'Confirmed', open: 'Open', fix: 'Needs a change', hold: 'On hold', fixed: 'Changed, look again' },
+    seals: { done: '✓', open: '–', fix: '!', hold: 'H', fixed: 'R' },
+    remarks: { fix: 'You: needs a change', hold: 'You: on hold', fixed: 'Agent: what changed' },
+    split: (n) => `of them ${[['need a change', n.fix], ['on hold', n.hold], ['to look again', n.fixed]].filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(', ')}`,
+    folded: 'Confirmed, so folded — show the content', appendixHint: 'The Markdown behind the page, for reference. Open it when you need it.',
     scenario: 'Scenario', evidence: 'Evidence (source code)', source: 'Source', tests: 'Existing tests', crosscheck: 'Crosscheck (second look by the AI)', lines: '',
     noTrace: 'No entry in trace.md', unreadable: 'Could not read the file', truncated: 'long; only the beginning is shown', encoding: (e) => `decoded from ${e}`, dedent: (n) => `indentation reduced by ${n} characters`,
     decision: 'Decision', noDecision: (id) => `blank — write decision: on the ${id} line of review.md`,
@@ -468,25 +480,48 @@ export function parseReview(text) {
   const groups = [];
   let group = null;
   let fenced = false;
-  for (const line of (text ?? '').split(/\r?\n/)) {
-    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+  let last = null;
+  // Comments blanked line by line (keeping the line breaks), so an example in one is no note.
+  const bare = (text ?? '').replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\r\n]/g, ' ')).split(/\r?\n/);
+  for (const [n, line] of (text ?? '').split(/\r?\n/).entries()) {
+    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; last = null; continue; }
     if (fenced) continue;
     const h = line.match(/^##\s+(.*?)\s*#*\s*$/);
-    if (h) { group = { title: plainText(h[1]).replace(/^\d+[.)]\s*/, ''), items: [] }; groups.push(group); continue; }
+    if (h) { group = { title: plainText(h[1]).replace(/^\d+[.)]\s*/, ''), items: [] }; groups.push(group); last = null; continue; }
     const [box] = checkboxes(line);
-    if (!box) continue;
+    if (!box) {
+      // "  - fix: ..." / "  - hold: ..." / "  - fixed: ..." under an item: its notes.
+      const r = last ? bare[n].match(REMARK) : null;
+      if (r) last.remarks.push({ kind: r[1].toLowerCase(), text: r[2].trim() });
+      else if (bare[n].trim() && !/^\s/.test(bare[n]) || /^#/.test(line)) last = null;
+      continue;
+    }
     if (!group) { group = { title: '', items: [] }; groups.push(group); }
     const m = box.plain.match(/^([A-Za-z])(\d+)\b\s*[.:)-]?\s*(.*)$/);
-    if (!m) { group.items.push({ id: '', letter: '', done: box.done, title: stripComments(box.body).trim(), decision: null, key: norm(box.plain), plain: box.plain }); continue; }
+    if (!m) { last = { id: '', letter: '', done: box.done, title: stripComments(box.body).trim(), decision: null, key: norm(box.plain), plain: box.plain, remarks: [] }; group.items.push(last); continue; }
     const rest = stripComments(box.body).replace(/^\W*[A-Za-z]\d+[\s*_\]`).:-]*/, '');
     const [title, decision] = rest.split(/\bdecision:/i);
-    group.items.push({
+    last = {
       id: `${m[1].toUpperCase()}${Number(m[2])}`, letter: m[1].toUpperCase(), done: box.done,
       title: title.trim().replace(/:$/, '').trim(), decision: decision === undefined ? null : decision.trim(),
-      key: norm(m[3].split(/\bdecision:/i)[0]).replace(/:$/, '').trim(), plain: box.plain,
-    });
+      key: norm(m[3].split(/\bdecision:/i)[0]).replace(/:$/, '').trim(), plain: box.plain, remarks: [],
+    };
+    group.items.push(last);
   }
+  for (const item of groups.flatMap((g) => g.items)) item.state = itemState(item);
   return groups;
+}
+
+// Where an item stands: done (ticked), fix (the reviewer asked for a change the
+// agent has not answered), fixed (the agent answered; the reviewer looks again),
+// hold (the reviewer cannot decide yet) or open.
+export function itemState(item) {
+  if (item.done) return 'done';
+  const kinds = (item.remarks ?? []).map((r) => r.kind);
+  const fix = kinds.lastIndexOf('fix');
+  if (fix >= 0 && !kinds.slice(fix + 1).includes('fixed')) return 'fix';
+  const last = kinds.filter((k) => k === 'hold' || k === 'fixed').pop();
+  return last ?? 'open';
 }
 
 // "### <Word>: <name>" blocks of a file, each with the lines up to the next
@@ -579,7 +614,22 @@ function findChange(root, name) {
   return found ? { dir: found, archived: true } : null;
 }
 
-const seal = (done, L) => `<span class="seal ${done ? 'is-done' : 'is-open'}"><b aria-hidden="true">${escapeHtml(done ? L.sealDone : L.sealOpen)}</b><span>${escapeHtml(done ? L.confirmed : L.open)}</span></span>`;
+const seal = (state, L) => `<span class="seal ${state === 'done' ? 'is-done' : 'is-open'} st-${state}"><b aria-hidden="true">${escapeHtml(L.seals[state])}</b><span>${escapeHtml(L.states[state])}</span></span>`;
+
+// What to check on an item, against what, and what to do when it is wrong (review-guide.mjs).
+function howHtml(g, code) {
+  const W = howWords(code);
+  return `<ol class="how-check">${g.check.map((c) => `<li>${escapeHtml(c)}</li>`).join('')}</ol>
+<p class="how-line"><span class="label">${escapeHtml(W.against)}</span><span>${escapeHtml(g.against)}</span></p>
+<p class="how-line"><span class="label">${escapeHtml(W.wrong)}</span><span>${escapeHtml(g.wrong ?? commonAdvice(code))}</span></p>`;
+}
+export const howBox = (g, code) => `<div class="how"><p class="how-title">${escapeHtml(howWords(code).check)}</p>${howHtml(g, code)}</div>`;
+
+// The notes under an item in review.md: the reviewer's fix and hold, the agent's fixed.
+function remarksHtml(remarks, L) {
+  if (!remarks?.length) return '';
+  return `<ol class="remarks">${remarks.map((r) => `<li class="rm-${r.kind}"><span class="label">${escapeHtml(L.remarks[r.kind])}</span><span>${inline(r.text)}</span></li>`).join('')}</ol>`;
+}
 const cautionsHtml = (list) => list.map((c) => `<p class="caution">${escapeHtml(c)}</p>`).join('');
 const deltaTag = (kind, L) => (L.deltas[kind] ? `<span class="delta ${kind}">${escapeHtml(L.deltas[kind])}</span>` : '');
 const withoutId = (s) => norm(s).replace(/^[a-z]\d+\s*[.:)-]?\s*/, '');
@@ -690,7 +740,7 @@ function leftoverBody(it, c) {
   return { tag: '', notes: [], html: `<div class="q-body"><p class="q-text">${inline(row.what)}</p><dl class="facts">${facts.filter(([, v]) => v).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${inline(v)}</dd>`).join('')}</dl></div>` };
 }
 
-function reviewView({ root, dir, schema, L, outDir }) {
+function reviewView({ root, dir, schema, L, outDir, lang = 'en' }) {
   const groups = parseReview(readText(path.join(dir, 'review.md')) ?? '');
   const review = stripComments(readText(path.join(dir, 'review.md')) ?? '');
   const reviewer = review.match(/^Reviewer:[ \t]*(.*)$/m)?.[1].trim() ?? '';
@@ -719,6 +769,10 @@ function reviewView({ root, dir, schema, L, outDir }) {
   const leftoversText = readText(path.join(dir, 'leftovers.md'));
   const leftovers = new Map(leftoverRows(leftoversText ?? '').map((row) => [row.id, row]));
   const c = { root, L, outDir, amend, baseline, cross, trace: parseTrace(readText(path.join(dir, 'trace.md'))) };
+  const survey = schema === 'spec-relay-survey' ? surveyFacts({
+    contexts, mapText, inventoryText: readText(path.join(dir, 'inventory.md')), capabilitiesText: readText(path.join(dir, 'capabilities.md')),
+    glossaryText: readText(path.join(dir, 'glossary.md')), databaseText: readText(path.join(dir, 'database.md')),
+  }) : null;
 
   // Tie each review row to the thing it names.
   const used = new Set();
@@ -763,7 +817,9 @@ function reviewView({ root, dir, schema, L, outDir }) {
   shown.forEach((group, n) => {
     group.id = `g${n + 1}`;
     group.title = L.groups[group.title.toLowerCase()] ?? (group.title || L.other);
+    group.how = '';
     for (const item of group.items) {
+      item.state ??= itemState(item);
       item.label ??= item.id || '—';
       let anchor = item.id || `x${unnamed += 1}`;
       for (let k = 2; ids.has(anchor); k += 1) anchor = `${item.id}-${k}`;
@@ -771,12 +827,28 @@ function reviewView({ root, dir, schema, L, outDir }) {
       item.anchor = anchor;
       const body = item.kind === 'req' ? requirementBody(item, c) : item.kind === 'screen' ? screenBody(item, c) : item.kind === 'q' ? questionBody(item, c)
         : item.kind === 'leftover' ? leftoverBody(item, c)
-        : item.kind === 'context' ? { tag: '', notes: [], html: `<div class="q-body"><div class="doc">${markdown(item.data.body.join('\n'), { headingOffset: 2 })}</div></div>` } : { tag: '', notes: [], html: '' };
+        : item.kind === 'context' ? { tag: '', notes: [], html: `<div class="q-body">${survey ? contextCard(survey, item.data, lang) : `<div class="doc">${markdown(item.data.body.join('\n'), { headingOffset: 2 })}</div>`}</div>` } : { tag: '', notes: [], html: '' };
+      // A survey's map items show the material they ask about (a diagram, a table, the files).
+      const aid = survey && !item.kind ? surveyAid(survey, item, lang) : '';
+      if (aid) body.html = `<div class="q-body aid">${aid}</div>`;
+      // What to check: an item of its own gets its guidance inline; items of one
+      // letter share theirs at the top of the group, and keep a folded copy each.
+      const g = itemGuide(schema, item, lang);
+      let how = '';
+      if (g?.own) how = `<div class="q-body">${howBox(g, lang)}</div>`;
+      else if (g) {
+        if (!group.how) group.how = howBox(g, lang);
+        how = `<div class="q-body"><details class="how-fold"><summary>${escapeHtml(howWords(lang).how)}</summary>${howHtml(g, lang)}</details></div>`;
+      }
       const notes = [...item.notes, ...body.notes];
       item.name = plainText(item.title) || plainText(item.data?.text ?? '') || item.label;
-      item.html = `<article class="item${body.html ? '' : ' small'}${item.kind ? ` k-${item.kind}` : ''} ${item.done ? 'is-done' : 'is-open'}${body.removed ? ' is-removed' : ''}" id="${escapeHtml(anchor)}" tabindex="-1">
-<header class="item-head"><span class="id">${escapeHtml(item.label)}</span><h3>${body.tag}${inline(item.title)}</h3>${seal(item.done, L)}</header>
-${cautionsHtml(notes)}${body.html}
+      const remarks = item.remarks?.length ? `<div class="q-body">${remarksHtml(item.remarks, L)}</div>` : '';
+      const inner = `${how}${body.html}`;
+      // A confirmed item folds its content away; its head, notes and buttons stay.
+      const content = item.done && inner ? `<details class="fold"><summary>${escapeHtml(L.folded)}</summary>${inner}</details>` : inner;
+      item.html = `<article class="item${inner ? '' : ' small'}${item.kind ? ` k-${item.kind}` : ''} ${item.done ? 'is-done' : 'is-open'} st-${item.state}${body.removed ? ' is-removed' : ''}" id="${escapeHtml(anchor)}" tabindex="-1">
+<header class="item-head"><span class="id">${escapeHtml(item.label)}</span><h3>${body.tag}${inline(item.title)}</h3>${seal(item.state, L)}</header>
+${cautionsHtml(notes)}${remarks}${content}
 </article>`;
     }
   });
@@ -797,6 +869,10 @@ ${purpose.trim() ? `<div class="purpose"><span class="label">${escapeHtml(L.purp
     if (rel === 'review.md' || (rel === 'screens.md' && screens.length)) continue;
     let text = readText(file) ?? '';
     if (rel === 'context-map.md' && contexts.length) text = withoutSection(text, /^##\s+Contexts\s*$/i);
+    if (rel === 'inventory.md' && survey) {
+      docs.push({ id: 'doc-inventory-md', title: rel.replace(/\.md$/, ''), html: inventorySummary(survey, text, lang) });
+      continue;
+    }
     if (rel === 'coverage.md' && ledger) {
       docs.push({ id: 'doc-coverage-md', title: L.ledgerTitle, html: ledgerHtml(ledger, text, L) });
       continue;
@@ -1234,6 +1310,43 @@ ins{text-decoration:none;font-weight:700;border-bottom:3px double var(--ink)}
 .shot img{display:block;border:1px solid var(--rule)}
 .shot figcaption{font-size:13px;margin-top:4px;overflow-wrap:anywhere}
 
+.remain-split{margin:4px 0 0;font-size:13px;font-weight:600;color:var(--ochre)}
+.cells a.st-fix,.legend i.st-fix{border:1.5px solid var(--ochre);background:var(--paper);color:var(--ochre)}
+.cells a.st-hold,.legend i.st-hold{border:1.5px solid var(--ink2);background:var(--paper);color:var(--ink2)}
+.cells a.st-fixed,.legend i.st-fixed{border:1.5px solid var(--ink);background:var(--paper);color:var(--ink)}
+.legend i.st-fix,.legend i.st-hold,.legend i.st-fixed{width:14px;height:14px;font:700 10px/11px var(--ui);text-align:center;font-style:normal}
+.toc li.st-fix .st{border:1.5px solid var(--ochre);color:var(--ochre)}
+.toc li.st-hold .st{border:1.5px solid var(--ink2)}
+.toc li.st-fixed .st{border:1.5px solid var(--ink);color:var(--ink)}
+.seal.st-fix b{border:2px solid var(--ochre);color:var(--ochre)}
+.seal.st-hold b{border:2px solid var(--ink2);color:var(--ink2)}
+.seal.st-fixed b{border:2px solid var(--ink);color:var(--ink)}
+.item.st-fix{box-shadow:inset 3px 0 0 var(--ochre);margin-left:-13px;padding-left:13px}
+.how{margin:10px 0 0;padding:10px 14px;border:1px solid var(--hair);background:var(--desk);max-width:60em;font-size:14px}
+.how-title{margin:0 0 4px;font:700 13px/1.4 var(--ui);letter-spacing:.04em}
+.how-check{margin:0 0 6px;padding-left:1.4em}.how-check li{margin:2px 0}
+.how-line{margin:2px 0 0;display:grid;grid-template-columns:7.5em minmax(0,1fr);gap:8px;align-items:baseline}
+.how-fold{margin-top:8px;font-size:14px;max-width:60em}
+.how-fold>summary{cursor:pointer;color:var(--ink2);font:600 13px/1.6 var(--ui)}
+.how-fold[open]{padding:8px 12px;background:var(--desk);border:1px solid var(--hair)}
+.group-how{margin:8px 0 4px}.group-how .how{margin:0}
+.remarks{list-style:none;margin:10px 0 0;padding:0;max-width:60em;display:grid;gap:6px}
+.remarks li{display:grid;grid-template-columns:9.5em minmax(0,1fr);gap:10px;align-items:baseline;padding:6px 10px;border:1.5px solid var(--hair);font-size:15px;overflow-wrap:anywhere}
+.remarks .rm-fix{border-color:var(--ochre)}.remarks .rm-fix .label{color:var(--ochre)}
+.remarks .rm-hold{border-style:dashed;border-color:var(--ink2)}
+.remarks .rm-fixed{border-color:var(--ink);background:var(--desk)}
+details.fold{margin-top:8px}
+details.fold>summary{cursor:pointer;color:var(--ink2);font:600 13px/1.6 var(--ui);padding:2px 0}
+@container (min-width:860px){details.fold>summary{padding-left:calc(3.1em + 26px)}}
+.appendix-hint{margin:8px 0 12px;padding-top:10px;border-top:3px solid var(--ink);font-size:14px;color:var(--ink2)}
+.group.appendix{margin:0 0 6px}
+.doc-fold>summary{cursor:pointer;list-style:none;display:flex;align-items:baseline;gap:8px;padding:8px 0;border-top:1px solid var(--rule)}
+.doc-fold>summary::-webkit-details-marker{display:none}
+.doc-fold>summary::before{content:"＋";font:700 14px/1 var(--mono);color:var(--ink2)}
+.doc-fold[open]>summary::before{content:"－"}
+.doc-fold>summary h2{margin:0;font:600 14px/1.4 var(--ui);letter-spacing:.04em;color:var(--ink2)}
+.doc-fold[open]>summary h2{color:var(--ink)}
+
 .dock{display:none}
 @media (max-width:999px){.js .dock{position:fixed;left:0;right:0;bottom:0;z-index:5;display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:stretch;background:var(--paper);border-top:2px solid var(--ink);font-family:var(--ui)}
 .dock button{font:600 15px/1.2 var(--ui);min-height:48px;padding:0 16px;border:0;background:var(--paper);color:var(--ink);cursor:pointer}
@@ -1253,6 +1366,7 @@ body{font-size:10.5pt}
 main{padding:0;max-width:none}
 body:has(#f-open:checked) main .item.is-done{display:block}
 .claim{position:static;max-height:none;overflow:visible}
+.appendix-hint{border-top:2px solid #000}
 .item-head{break-after:avoid}.item.small,.item.k-q,.src,.scenario,.decision{break-inside:avoid}
 .group>h2{break-after:avoid}
 .item.is-current .item-head .id{background:none;color:#000}.cells a[aria-current]{outline:0}
@@ -1318,6 +1432,10 @@ const SCRIPT = String.raw`(() => {
     const next = dir > 0 ? list.find((x) => all.indexOf(x) > at) : list.reverse().find((x) => all.indexOf(x) < at);
     go(next || null);
   };
+  // A link to a folded appendix document opens it.
+  const unfold = (hash) => { let el = null; try { el = d.getElementById(decodeURIComponent(hash.slice(1))); } catch (e) { /* bad escape */ } const f = el && el.querySelector(':scope > details.doc-fold'); if (f) f.open = true; };
+  d.addEventListener('click', (e) => { const a = e.target.closest ? e.target.closest('a[href^="#"]') : null; if (a) unfold(a.getAttribute('href')); }, true);
+  if (location.hash) unfold(location.hash);
   const itemOf = (hash) => { let el = null; try { el = d.getElementById(decodeURIComponent(hash.slice(1))); } catch (e) { /* bad escape */ } return el && el.classList.contains('item') ? el : null; };
   d.addEventListener('click', (e) => {
     const a = e.target.closest ? e.target.closest('a[href^="#"]') : null;
@@ -1347,7 +1465,7 @@ const SCRIPT = String.raw`(() => {
     else if (k === 'k') step(-1, false);
     else if (k === 'n') step(1, true);
     else if (k === 'p') step(-1, true);
-    else if (k === 'o' && current) current.querySelectorAll('details.src').forEach((x) => { x.open = !x.open; });
+    else if (k === 'o' && current) current.querySelectorAll('details.src, details.fold').forEach((x) => { x.open = !x.open; });
     else if (k === 'u' && fOpen && fAll) { (fOpen.checked ? fAll : fOpen).checked = true; remember(); }
     else return;
     e.preventDefault();
@@ -1395,15 +1513,18 @@ export function page({ title, kind, meta, brief = '', groups = [], docs = [], L,
   const read = mode === 'read';
   const reviewed = !read && all.length > 0;
   const count = (list) => `${list.filter((x) => x.done).length} / ${list.length}`;
-  const state = (x) => (x.done ? 'is-done' : 'is-open');
-  const word = (x) => escapeHtml(x.done ? L.confirmed : L.open);
+  const st = (x) => x.state ?? (x.done ? 'done' : 'open');
+  const state = (x) => `${x.done ? 'is-done' : 'is-open'} st-${st(x)}`;
+  const word = (x) => escapeHtml(L.states?.[st(x)] ?? (x.done ? L.confirmed : L.open));
+  const split = { fix: open.filter((x) => st(x) === 'fix').length, hold: open.filter((x) => st(x) === 'hold').length, fixed: open.filter((x) => st(x) === 'fixed').length };
   const letter = (g) => g.items.find((i) => i.letter)?.letter ?? '·';
 
   const progress = reviewed ? `<div class="left">
 <p class="remain">${open.length ? L.remain(open.length) : L.allDone}</p>
 <p class="remain-sub">${escapeHtml(L.of(all.length, all.length - open.length))}${open.length ? `（${escapeHtml(L.left)}: ${groups.filter((g) => g.items.some((i) => !i.done)).map((g) => `${escapeHtml(g.title)} ${g.items.filter((i) => !i.done).length}`).join('・')}）` : ''}</p>
-<ol class="sheet" aria-label="${escapeHtml(L.sheet)}">${groups.map((g) => `<li class="g" aria-hidden="true">${escapeHtml(letter(g))}</li><li class="cells">${g.items.map((x) => `<a href="#${escapeHtml(x.anchor)}" class="${state(x)}" title="${escapeHtml(`${x.label} ${x.name}`)} — ${word(x)}"><span class="vh">${escapeHtml(x.label)} ${word(x)}</span></a>`).join('')}</li>`).join('')}</ol>
-<p class="legend"><span><i class="is-done" aria-hidden="true"></i>${escapeHtml(L.legendDone)}</span><span><i aria-hidden="true"></i>${escapeHtml(L.legendOpen)}</span></p>
+${split.fix + split.hold + split.fixed ? `<p class="remain-split">${escapeHtml(L.split(split))}</p>` : ''}
+<ol class="sheet" aria-label="${escapeHtml(L.sheet)}">${groups.map((g) => `<li class="g" aria-hidden="true">${escapeHtml(letter(g))}</li><li class="cells">${g.items.map((x) => `<a href="#${escapeHtml(x.anchor)}" class="${state(x)}" title="${escapeHtml(`${x.label} ${x.name}`)} — ${word(x)}">${['fix', 'hold', 'fixed'].includes(st(x)) ? `<span aria-hidden="true">${escapeHtml(L.seals[st(x)])}</span>` : ''}<span class="vh">${escapeHtml(x.label)} ${word(x)}</span></a>`).join('')}</li>`).join('')}</ol>
+<p class="legend"><span><i class="is-done" aria-hidden="true"></i>${escapeHtml(L.legendDone)}</span><span><i aria-hidden="true"></i>${escapeHtml(L.legendOpen)}</span>${split.fix ? `<span><i class="st-fix" aria-hidden="true">${escapeHtml(L.seals.fix)}</i>${escapeHtml(L.states.fix)}</span>` : ''}${split.hold ? `<span><i class="st-hold" aria-hidden="true">${escapeHtml(L.seals.hold)}</i>${escapeHtml(L.states.hold)}</span>` : ''}${split.fixed ? `<span><i class="st-fixed" aria-hidden="true">${escapeHtml(L.seals.fixed)}</i>${escapeHtml(L.states.fixed)}</span>` : ''}</p>
 ${open.length ? `<a class="next" href="#${escapeHtml(open[0].anchor)}">${escapeHtml(L.firstOpen(open[0].label))}</a>` : ''}
 </div>
 <fieldset class="filter"><legend class="label">${escapeHtml(L.show)}</legend>
@@ -1418,7 +1539,7 @@ ${open.length ? `<a class="next" href="#${escapeHtml(open[0].anchor)}">${escapeH
 ${groups.map((g) => `<h2><a href="#${g.id}">${escapeHtml(g.title)}</a><span class="n">${tally(g)}</span></h2>
 <ol>${g.items.map((x) => (read
     ? `<li data-for="${escapeHtml(x.anchor)}"><a href="#${escapeHtml(x.anchor)}"><span class="id">${escapeHtml(x.label)}</span><span class="t">${escapeHtml(x.name)}</span></a></li>`
-    : `<li class="${state(x)}"><a href="#${escapeHtml(x.anchor)}"><span class="id">${escapeHtml(x.label)}</span><span class="t">${escapeHtml(x.name)}</span><span class="st" aria-hidden="true">${escapeHtml(x.done ? L.sealDone : L.sealOpen)}</span><span class="vh">${word(x)}</span></a></li>`)).join('')}</ol>`).join('\n')}
+    : `<li class="${state(x)}"><a href="#${escapeHtml(x.anchor)}"><span class="id">${escapeHtml(x.label)}</span><span class="t">${escapeHtml(x.name)}</span><span class="st" aria-hidden="true">${escapeHtml(L.seals?.[st(x)] ?? (x.done ? L.sealDone : L.sealOpen))}</span><span class="vh">${word(x)}</span></a></li>`)).join('')}</ol>`).join('\n')}
 ${docs.length ? `${reviewed ? `<h2><span>${escapeHtml(L.appendix)}</span></h2>` : ''}
 <ol>${docs.map((s) => `<li class="plain"><a href="#${escapeHtml(s.id)}"><span class="t">${escapeHtml(s.title)}</span></a></li>`).join('')}</ol>` : ''}
 </nav></details>`;
@@ -1430,12 +1551,19 @@ ${docs.length ? `${reviewed ? `<h2><span>${escapeHtml(L.appendix)}</span></h2>` 
     brief,
     read && all.length ? `<p class="no-match" id="no-match" hidden>${escapeHtml(L.noMatch)}</p>` : '',
     ...groups.map((g) => `<section class="group"><h2 id="${g.id}">${escapeHtml(g.title)}<span class="n">${read ? g.items.length : `${escapeHtml(L.confirmed)} ${count(g.items)}`}</span></h2>
+${g.how ? `<div class="group-how">${g.how}</div>` : ''}
 ${g.items.map((x) => x.html).join('\n')}
 ${read ? '' : `<p class="all-clear">${escapeHtml(L.allClear)}</p>`}
 </section>`),
-    ...docs.map((s) => `<section class="group" id="${escapeHtml(s.id)}"><h2>${reviewed ? `${escapeHtml(L.appendix)} — ` : ''}${escapeHtml(s.title)}</h2>
+    // On a review page the appendix is reference material: each document folded, opened when needed.
+    ...(reviewed && docs.length ? [`<p class="appendix-hint"><span class="label">${escapeHtml(L.appendix)}</span> ${escapeHtml(L.appendixHint)}</p>`] : []),
+    ...docs.map((s) => (reviewed
+      ? `<section class="group appendix" id="${escapeHtml(s.id)}"><details class="doc-fold"><summary><h2>${escapeHtml(L.appendix)} — ${escapeHtml(s.title)}</h2></summary>
 ${s.html}
-</section>`),
+</details></section>`
+      : `<section class="group" id="${escapeHtml(s.id)}"><h2>${escapeHtml(s.title)}</h2>
+${s.html}
+</section>`)),
   ].filter(Boolean).join('\n');
 
   return `<!doctype html>
@@ -1447,7 +1575,7 @@ ${s.html}
 <meta name="color-scheme" content="light dark">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data: file:">
 <title>${escapeHtml(title)}</title>
-<style>${CSS}</style>
+<style>${CSS}${SURVEY_CSS}</style>
 </head>
 <body>
 <a class="skip" href="#main">${escapeHtml(L.skip)}</a>
@@ -1551,7 +1679,7 @@ function buildView({ root = process.cwd(), change, spec, file, guide, lang, now 
     const schema = readText(path.join(found.dir, '.openspec.yaml')) === null ? '' : changeSchema(found.dir);
     const reviewed = fs.existsSync(path.join(found.dir, 'review.md'));
     const html = withImages(root, found.dir, resolved, (outDir) => {
-      const shown = reviewed ? reviewView({ root, dir: found.dir, schema: schema || 'spec-relay-extract', L, outDir }) : genericChangeView(found.dir);
+      const shown = reviewed ? reviewView({ root, dir: found.dir, schema: schema || 'spec-relay-extract', L, outDir, lang: code }) : genericChangeView(found.dir);
       const meta = [schema, found.archived ? L.archived : '', stamp].filter(Boolean).join(' · ');
       return page({ title: change, kind: L.kinds[schema || (reviewed ? 'spec-relay-extract' : '')] ?? L.document, meta, ...shown, L, lang: code, nav });
     });

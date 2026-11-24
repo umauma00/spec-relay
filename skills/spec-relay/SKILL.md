@@ -106,8 +106,15 @@ need the reasoning behind a step.
   here. It is a question, never an approval or a decision: do not tick
   `review.md`, write a `decision:`, or archive because of it. Ask in the chat
   when it sounds like one.
-- **Canvas edit**: a tick, an untick, a `decision:` or the `Reviewer:` line the
-  person wrote in `review.md` with the canvas buttons. It is their own edit of
+- **Review note**: a sub-list line under a review item in `review.md`:
+  `  - fix: <what should change>` (the person says the item is wrong),
+  `  - hold: <why>` (the person cannot decide yet), and your answer to a fix,
+  `  - fixed: <what you changed>`. The person writes fix and hold, in the file
+  or with the canvas; you write only fixed, and never delete or reword their
+  notes. `gate.mjs review` fails while a fix has no fixed after it.
+- **Canvas edit**: a tick, an untick, a `decision:`, a fix or hold note (or
+  its withdrawal) or the `Reviewer:` line the person wrote in `review.md` with
+  the canvas buttons. It is their own edit of
   the file, the same as typing it there; the canvas records each one in
   `openspec/spec-relay/local/canvas-log.jsonl` (never write that file). It is not an
   approval to archive.
@@ -305,20 +312,31 @@ you assist. This gate is the point of the kit.
    see the `spec-relay-view` skill) and give the person its path. Render again
    after every change to the artifacts.
    When the `spec-relay` canvas is available (a Copilot canvas extension of
-   this kit, see docs/CANVAS.md), also offer to show the page there:
+   this kit, see docs/CANVAS.md), also offer to show the page there. To the
+   person it is the **HTML view** (in Japanese 「HTML ビュー」): many people do
+   not know the word canvas, so never offer it as "canvas" alone:
    `open_canvas` with canvasId `spec-relay`, instanceId `spec-relay` and input
    `{ "view": "review", "name": "<change>" }`, or move an open canvas with
    `invoke_canvas_action` (instanceId `spec-relay`, actionName `open_review`,
    input `{ "name": "<change>" }`). Other views are `progress`, `specs` and
    `spec` (name: the capability); `list_canvas_capabilities` lists the actions.
    The canvas follows the files by itself. On an active change's page the
-   person can tick items, write decisions and their name there: the canvas
-   writes them to `review.md` as the person's own edit. You cannot write
-   through it. `invoke_canvas_action` `get_review_edits` lists what they
-   changed there.
-2. Ask how they want to review: here in the conversation, one item at a time,
-   or in the files or a pull request on their own (they tell you when done,
-   and you check what they ticked). Both are fine; never pick for them.
+   person can tick items, ask for a change or put one on hold, and write
+   decisions and their name there: the canvas writes them to `review.md` as
+   the person's own edit. You cannot write through it. `invoke_canvas_action`
+   `get_review_edits` lists what they changed there.
+2. Ask how they want to review. Offer these choices, with these words (the
+   first only when the canvas is available), and never pick for them:
+   - ja: 「HTML ビューでレビュー（チャットの横に画面を開き、ボタンで確認・直してほしい・保留を記録）」
+     / en: "Review in the HTML view (a page beside the chat; buttons record
+     confirm, needs a change, on hold)"
+   - ja: 「チャットで1件ずつ」 / en: "Here in the chat, one item at a time"
+   - ja: 「HTML をブラウザーで開いて、review.md を自分で直す（終わったら知らせる）」
+     / en: "Open the HTML page in a browser and edit review.md myself (tell
+     you when done)"
+   In the last two, tell them how to say an item is wrong in the file: a line
+   `  - fix: <what should change>` under it, or `  - hold: <why>` when they
+   cannot decide yet (the page shows the same under "Check" on every item).
 3. Follow the change's apply instruction (`node "<kit>/scripts/openspec.mjs" instructions apply --change
    <change> --json`). Tick a box only when the person accepts that item in this
    conversation, or when they ticked it in the file or the canvas themselves.
@@ -327,6 +345,16 @@ you assist. This gate is the point of the kit.
    decision after `decision:` and their name after `Reviewer:`. When they ask
    for a change, edit the artifacts, untick every item you changed, validate,
    render again and ask again.
+   - A `fix:` note under an item (written in the file or the canvas, or
+     sent from the canvas as "[canvas] ... change requests"), or a change
+     asked for in the chat, is that request. Correct the artifacts (in
+     extract and amend, have the checker check the changed rows again),
+     then write `  - fixed: <what you changed, in one line>` right under that
+     fix line, keep the item unticked, render again and ask the person to
+     look again. When you think the request is wrong, do not change the
+     artifacts: say why in the chat and let the person withdraw or keep it.
+   - A `hold:` note waits for the person. Do not answer it by ticking; ask
+     whether someone else must be asked, and note what they decide.
 4. When every box is ticked, run `node "<kit>/scripts/gate.mjs" review --change
    <change>`. `node "<kit>/scripts/openspec.mjs" archive --yes` checks none of what the gate checks, so
    never archive while the gate fails; report the failure as When something

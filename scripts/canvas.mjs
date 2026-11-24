@@ -28,7 +28,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { view, page, labels, escapeHtml, markdown, parseReview, capabilities, timeStamp } from './render.mjs';
 import { status, checklist, stepLabel, stepName, STEPS } from './status.mjs';
-import { language, changeSchema, archivedChange } from './gate.mjs';
+import { language, changeSchema, archivedChange, reviewRemarks } from './gate.mjs';
 import { writeReview, sha256, utf8Text, reviewerOf, decisionOf } from './review-edit.mjs';
 import { GUIDE, guidePage, modules as guideModules, saveQa, locate } from './guide.mjs';
 
@@ -51,7 +51,12 @@ const WORDS = {
     needDecision: '先に判断を書いてください。', placeholder: '「TBD」や「-」のような書きかけは判断になりません。判断を書いてください。',
     noFile: 'この画面の review.md が見つかりません。', bad: 'この操作はできません。', notUtf8: 'review.md が UTF-8 ではないため書き込めません。UTF-8 で保存し直してください。',
     busy: 'ほかのプログラムが review.md を使っていて書き込めませんでした。閉じてからもう一度押してください。', noLine: 'review.md にこの項目の行が見つかりません。',
-    howto: '正しければ「確認済みにする」を押す（review.md に書き込まれます）',
+    howto: '正しければ「確認済みにする」、違えば「直してほしい」、今は決められなければ「保留」を押す（どれも review.md に書き込まれます）',
+    fix: '直してほしい', hold: '保留', withdraw: '取り下げる', fixTitle: '直してほしいこと', holdTitle: '保留の理由',
+    fixHint: 'review.md のこの項目の下に「- fix: …」として書き、確認を外します。AI に直してもらうには、左の「直してほしい項目を AI に伝える」を押すか、チャットで伝えてください。',
+    holdHint: 'review.md のこの項目の下に「- hold: …」として書きます。決まったら「確認済みにする」か「直してほしい」を押してください。',
+    sendFixes: (n) => `直してほしい項目を AI に伝える（${n} 件）`, fixesSent: 'チャットに送りました。AI が直すと、項目の下に直した内容が出ます。',
+    openFix: 'AI がまだ直していない依頼があります。取り下げてから確認済みにしてください。', noNote: '取り下げるものがありません。',
     send: '送る', cancel: 'やめる', sending: '送っています…', sent: 'チャットに送りました。', failed: '送れませんでした', empty: '質問を書いてください。',
     notRepo: 'このフォルダには openspec/ がありません。spec-relay を導入したリポジトリでチャットを開いてください。',
     notFound: 'この画面はありません（変更や仕様が消えたか、名前が違います）。上の「進み具合」から選んでください。',
@@ -76,7 +81,12 @@ const WORDS = {
     needDecision: 'Write the decision first.', placeholder: 'A placeholder such as "TBD" or "-" is not a decision. Write the decision.',
     noFile: 'This page has no review.md.', bad: 'This cannot be done.', notUtf8: 'review.md is not UTF-8, so it cannot be written. Save it again as UTF-8.',
     busy: 'Another program is using review.md, so it could not be written. Close it and try again.', noLine: 'review.md has no line for this item.',
-    howto: 'If it is right, press "Mark confirmed" (it is written to review.md)',
+    howto: 'If it is right, press "Mark confirmed"; if it is wrong, "Needs a change"; if you cannot decide yet, "On hold" (each is written to review.md)',
+    fix: 'Needs a change', hold: 'On hold', withdraw: 'Withdraw', fixTitle: 'What should change', holdTitle: 'Why it is on hold',
+    fixHint: 'This writes "- fix: ..." under the item in review.md and unticks it. To have the agent correct it, press "Send the change requests to the agent" on the left, or say so in the chat.',
+    holdHint: 'This writes "- hold: ..." under the item in review.md. When you have decided, press "Mark confirmed" or "Needs a change".',
+    sendFixes: (n) => `Send the change requests to the agent (${n})`, fixesSent: 'Sent to the chat. When the agent has corrected it, what changed shows under the item.',
+    openFix: 'The agent has not answered a change request yet. Withdraw it before confirming.', noNote: 'Nothing to withdraw.',
     send: 'Send', cancel: 'Cancel', sending: 'Sending…', sent: 'Sent to the chat.', failed: 'Could not send', empty: 'Write a question first.',
     notRepo: 'This folder has no openspec/. Open the chat in a repository where spec-relay is set up.',
     notFound: 'There is no such page (the change or spec is gone, or the name is wrong). Pick one from Progress above.',
@@ -178,6 +188,19 @@ dialog.ask-box::backdrop{background:rgba(0,0,0,.35)}
 .canvas-answer{margin:10px 0 0;padding:10px 12px;border:1.5px solid var(--ai)}
 .canvas-answer .q{font-weight:700;margin:4px 0}
 .canvas-answer .ask{margin-top:8px}
+.act{font:600 13px/1.2 var(--ui);padding:6px 12px;min-height:32px;margin:0 8px 6px 0;cursor:pointer;border:1.5px solid var(--ink);background:var(--paper);color:var(--ink)}
+.act-ok{background:var(--ink);color:var(--paper)}
+.act-ok:hover{background:var(--paper);color:var(--ink)}
+.act-fix{border-color:var(--ochre);color:var(--ochre)}
+.act-fix:hover{background:var(--ochre);color:var(--paper)}
+.act-hold{border-style:dashed;border-color:var(--ink2);color:var(--ink2)}
+.act-hold:hover{border-style:solid;color:var(--ink)}
+.act-quiet{border-color:var(--hair);color:var(--ink2);font-weight:400}
+.act-quiet:hover{border-color:var(--ink);color:var(--ink)}
+.act-wide{width:100%;text-align:left;margin-right:0}
+.act[disabled]{opacity:.6;cursor:wait}
+.item.is-done .ask-row{margin-top:4px}
+@media print{.act{display:none!important}}
 .canvas-gone{position:sticky;top:0;z-index:8;margin:0;padding:8px 16px;background:var(--ochre);color:var(--paper);font:600 14px/1.4 var(--ui)}
 @media print{.canvas-nav,.ask,.ask-row,dialog.ask-box,.canvas-toast,.canvas-gone{display:none!important}}
 `;
@@ -257,7 +280,7 @@ const CANVAS_SCRIPT = String.raw`(() => {
   if (R && ebox) {
     const etitle = d.getElementById('edit-title'), etext = d.getElementById('edit-text'), emsg = d.getElementById('edit-msg'), esave = ebox.querySelector('.primary');
     let hash = R.hash, job = null;
-    const reload = (m) => { store('spec-relay-canvas-toast', m); keepFocus(); location.reload(); };
+    const reload = (m) => { store('spec-relay-canvas-toast', m); keepPlace(); location.reload(); };
     const post = async (action, id, value) => {
       const res = await fetch(base + '/review', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'review' }, body: JSON.stringify({ page: cfg.page, hash, action, id, value }) });
       let j = {};
@@ -283,25 +306,45 @@ const CANVAS_SCRIPT = String.raw`(() => {
       } catch (err) { report(W.saveFailed + ': ' + err.message); }
       finally { writing = false; }
     };
+    const ehint = d.getElementById('edit-hint'), hintDefault = ehint.textContent;
     const edit = (kind, id, value, then) => {
       job = { kind, id, then };
-      etitle.textContent = kind === 'reviewer' ? W.reviewerTitle : W.decisionTitle + ' — ' + id;
+      etitle.textContent = kind === 'reviewer' ? W.reviewerTitle : (kind === 'fix' ? W.fixTitle : kind === 'hold' ? W.holdTitle : W.decisionTitle) + ' — ' + id;
+      ehint.textContent = kind === 'fix' ? W.fixHint : kind === 'hold' ? W.holdHint : hintDefault;
       etext.value = value || ''; emsg.textContent = '';
       if (ebox.showModal) ebox.showModal(); else ebox.setAttribute('open', '');
       etext.focus();
     };
     const eshut = () => { if (ebox.close) ebox.close(); else ebox.removeAttribute('open'); };
+    // One row of buttons per item, each kind with its own look: confirm (filled),
+    // needs a change (ochre), on hold (dashed), withdraw and unmark (quiet), ask (indigo).
     R.items.forEach((it) => {
       const item = d.getElementById(it.id);
       const row = item && item.matches('main .item') ? item.querySelector('.ask-row') : null;
       if (!row) return;
-      const button = (label, onClick) => { const b = d.createElement('button'); b.type = 'button'; b.className = 'ask mark'; b.textContent = label; b.setAttribute('aria-label', label + ': ' + it.id); b.addEventListener('click', onClick); return b; };
+      const button = (label, cls, onClick) => { const b = d.createElement('button'); b.type = 'button'; b.className = 'act ' + cls; b.textContent = label; b.setAttribute('aria-label', label + ': ' + it.id); b.addEventListener('click', onClick); return b; };
       const first = row.firstChild;
-      const mark = it.done ? button(W.untick, () => run([['untick', it.id]], toast))
-        : it.q && !it.decided ? button(W.decideTick, () => edit('decision', it.id, '', 'tick'))
-        : button(W.tick, () => run([['tick', it.id]], toast));
-      row.insertBefore(mark, first);
-      if (it.q) row.insertBefore(button(W.decide, () => edit('decision', it.id, it.decision)), first);
+      const add = (b) => row.insertBefore(b, first);
+      if (it.done) add(button(W.untick, 'act-quiet', () => run([['untick', it.id]], toast)));
+      else if (it.state === 'fix') add(button(W.withdraw, 'act-quiet', () => run([['withdraw', it.id]], toast)));
+      else {
+        add(it.q && !it.decided ? button(W.decideTick, 'act-ok', () => edit('decision', it.id, '', 'tick')) : button(W.tick, 'act-ok', () => run([['tick', it.id]], toast)));
+        add(button(W.fix, 'act-fix', () => edit('fix', it.id, '')));
+        if (it.state === 'hold') add(button(W.withdraw, 'act-quiet', () => run([['withdraw', it.id]], toast)));
+        else add(button(W.hold, 'act-hold', () => edit('hold', it.id, '')));
+      }
+      if (it.q) add(button(W.decide, 'act-quiet', () => edit('decision', it.id, it.decision)));
+    });
+    // The change requests the agent has not answered, sent to the chat in one message.
+    const fixes = d.getElementById('send-fixes');
+    if (fixes) fixes.addEventListener('click', async () => {
+      fixes.disabled = true;
+      try {
+        const res = await fetch(base + '/fixes', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'fixes' }, body: JSON.stringify({ page: cfg.page }) });
+        if (!res.ok) throw new Error(String(res.status));
+        toast(W.fixesSent);
+      } catch (err) { toast(W.failed + ' (' + err.message + ')'); }
+      finally { fixes.disabled = false; }
     });
     const who = d.getElementById('edit-reviewer');
     if (who) who.addEventListener('click', () => edit('reviewer', null, R.reviewer));
@@ -312,7 +355,7 @@ const CANVAS_SCRIPT = String.raw`(() => {
       const value = etext.value.trim();
       if (!value) { emsg.textContent = W.emptyValue; etext.focus(); return; }
       esave.disabled = true; emsg.textContent = W.saving;
-      const steps = job.kind === 'reviewer' ? [['reviewer', null, value]] : [['decision', job.id, value], ...(job.then ? [[job.then, job.id]] : [])];
+      const steps = job.kind === 'reviewer' ? [['reviewer', null, value]] : job.kind === 'fix' || job.kind === 'hold' ? [[job.kind, job.id, value]] : [['decision', job.id, value], ...(job.then ? [[job.then, job.id]] : [])];
       await run(steps, (m) => { emsg.textContent = m; }, { kind: job.kind, id: job.id, then: job.then || null, value });
       esave.disabled = false;
     });
@@ -343,7 +386,40 @@ const CANVAS_SCRIPT = String.raw`(() => {
   if (said) { store('spec-relay-canvas-toast', null); toast(said); }
   const was = store('spec-relay-canvas-focus');
   if (was) { store('spec-relay-canvas-focus', null); const el = d.getElementById(was); if (el) el.focus({ preventScroll: true }); }
-  const keepFocus = () => { const el = d.activeElement && d.activeElement.closest ? d.activeElement.closest('[id]') : null; if (el && el !== d.body) store('spec-relay-canvas-focus', el.id); };
+  // Before a reload, remember where the reader is: the item they acted on (or the
+  // first one on screen) and how far from the top it stood. The page comes back
+  // there, not at its top. Kept in sessionStorage and in history.state (either
+  // may be refused); the address loses its #fragment, so the page does not jump to it.
+  const keepPlace = () => {
+    const active = d.activeElement && d.activeElement.closest ? d.activeElement.closest('[id]') : null;
+    if (active && active !== d.body) store('spec-relay-canvas-focus', active.id);
+    let el = d.activeElement && d.activeElement.closest ? d.activeElement.closest('main .item') : null;
+    if (!el || el.getBoundingClientRect().bottom < 0 || el.getBoundingClientRect().top > innerHeight) el = [...d.querySelectorAll('main .item, main .group > h2')].find((x) => x.offsetParent !== null && x.getBoundingClientRect().bottom > 0) || null;
+    const place = { page: cfg.page, id: el && el.id ? el.id : null, top: el ? el.getBoundingClientRect().top : 0, y: scrollY };
+    store('spec-relay-canvas-place', JSON.stringify(place));
+    try { history.replaceState(Object.assign({}, history.state, { specRelayPlace: place }), '', location.pathname + location.search); } catch (e) { /* refused */ }
+  };
+  try { history.scrollRestoration = 'manual'; } catch (e) { /* not supported */ }
+  let place = null;
+  try { place = JSON.parse(store('spec-relay-canvas-place') || 'null'); } catch (e) { place = null; }
+  if (!place && history.state && history.state.specRelayPlace) place = history.state.specRelayPlace;
+  store('spec-relay-canvas-place', null);
+  try { if (history.state && history.state.specRelayPlace) { const s2 = Object.assign({}, history.state); delete s2.specRelayPlace; history.replaceState(s2, ''); } } catch (e) { /* refused */ }
+  if (place && place.page === cfg.page) {
+    let moved = false;
+    const put = () => {
+      if (moved) return;
+      const el = place.id ? d.getElementById(place.id) : null;
+      if (el && el.offsetParent !== null) scrollTo(0, scrollY + el.getBoundingClientRect().top - place.top); else scrollTo(0, place.y);
+    };
+    put();
+    // Late layout (fonts, images) may move it once more; a scroll by the reader ends that.
+    addEventListener('wheel', () => { moved = true; }, { once: true, passive: true });
+    addEventListener('keydown', () => { moved = true; }, { once: true });
+    addEventListener('touchstart', () => { moved = true; }, { once: true, passive: true });
+    addEventListener('load', () => { put(); setTimeout(put, 80); });
+    setTimeout(put, 0);
+  }
   // Follow the files: reload when they change, go where the agent sent the canvas.
   let busy = false, misses = 0;
   setInterval(async () => {
@@ -355,7 +431,7 @@ const CANVAS_SCRIPT = String.raw`(() => {
       misses = 0;
       // Seen once: a jump to an anchor on this same page does not reload it, so it must not repeat.
       if (s.goto && s.goto.seq > cfg.seq) { cfg.seq = s.goto.seq; location.href = base + '/r/' + s.goto.path; }
-      else if (s.version !== cfg.version) { keepFocus(); location.reload(); }
+      else if (s.version !== cfg.version) { keepPlace(); location.reload(); }
     } catch (err) {
       misses += 1;
       if (misses === 3 && !d.querySelector('.canvas-gone')) { const p = d.createElement('p'); p.className = 'canvas-gone'; p.setAttribute('role', 'status'); p.textContent = W.gone; d.body.prepend(p); }
@@ -373,9 +449,10 @@ export function interactive(html, { lang, pagePath, title, version, seq, nonce, 
   const L = labels(lang);
   const current = path.posix.basename(pagePath);
   const nav = `<nav class="canvas-nav" aria-label="${escapeHtml(W.nav)}"><a href="progress.html"${current === 'progress.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.progress)}</a><a href="specs.html"${current === 'specs.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.specs)}</a>${guide ? `<a href="guide.html"${current === 'guide.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.guide)}</a>` : ''}</nav>
-<p class="ask-row ask-page"><button type="button" class="ask" id="ask-page">${escapeHtml(W.askPage)}</button>${review ? ` <button type="button" class="ask mark" id="edit-reviewer">${escapeHtml(review.reviewer ? `${W.reviewer}: ${review.reviewer}` : W.reviewerSet)}</button>` : ''}</p>`;
+<p class="ask-row ask-page"><button type="button" class="ask" id="ask-page">${escapeHtml(W.askPage)}</button>${review ? ` <button type="button" class="ask mark" id="edit-reviewer">${escapeHtml(review.reviewer ? `${W.reviewer}: ${review.reviewer}` : W.reviewerSet)}</button>` : ''}</p>${review?.fixes ? `\n<p class="ask-row ask-page"><button type="button" class="act act-fix act-wide" id="send-fixes">${escapeHtml(W.sendFixes(review.fixes))}</button></p>` : ''}`;
   const words = Object.fromEntries(['ask', 'askAbout', 'sending', 'sent', 'failed', 'empty', 'noLink', 'gone', ...(answers ? ['answer', 'helpful', 'qaSaved', 'qaFailed'] : []),
-    ...(review ? ['tick', 'untick', 'decide', 'decideTick', 'decisionTitle', 'reviewerTitle', 'saving', 'saved', 'changed', 'saveFailed', 'emptyValue', 'needDecision', 'notUtf8', 'busy', 'noLine', 'placeholder', 'noFile', 'bad'] : [])].map((k) => [k, W[k]]));
+    ...(review ? ['tick', 'untick', 'decide', 'decideTick', 'decisionTitle', 'reviewerTitle', 'saving', 'saved', 'changed', 'saveFailed', 'emptyValue', 'needDecision', 'notUtf8', 'busy', 'noLine', 'placeholder', 'noFile', 'bad',
+      'fix', 'hold', 'withdraw', 'fixTitle', 'holdTitle', 'fixHint', 'holdHint', 'fixesSent', 'openFix', 'noNote'] : [])].map((k) => [k, W[k]]));
   const config = JSON.stringify({ page: pagePath, title, version, seq, words, review, ...(answers ? { answers } : {}) }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const dialog = `<dialog class="ask-box" id="ask-box" aria-labelledby="ask-title" aria-describedby="ask-about"><form method="dialog"><h2 id="ask-title">${escapeHtml(W.askTitle)}</h2><p class="about" id="ask-about"></p>
 <textarea id="ask-text" maxlength="4000" aria-labelledby="ask-title" aria-describedby="ask-about ask-hint ask-msg"></textarea>
@@ -409,6 +486,15 @@ export function askPrompt({ question, title, item, page: pagePath, id }, lang) {
   const back = id ? ` Then also send the answer to the canvas: invoke_canvas_action, actionName post_answer, input {"id": "${oneLine(id, 20)}", "answer": "<the answer, Markdown>"}; it shows under the item, and the person decides whether to save it.` : '';
   const prompt = `[canvas] ${q}\n\n(${lang === 'ja' ? '対象' : 'About'}: ${where}; page ${oneLine(pagePath, 300)}. The person typed this question in the spec-relay canvas. Answer it in the chat.${back} It is a question, not an approval: do not tick review.md, record a decision or archive because of it.)`;
   return { prompt, displayPrompt: `[canvas] ${q}${where ? `\n(${where})` : ''}` };
+}
+
+// The message for "send the change requests to the agent": what the person wrote
+// under each item, and what the agent does with it. A request for work, never an approval.
+export function fixPrompt({ change, items }, lang) {
+  const list = items.map((i) => `- ${i.id}: ${oneLine(i.remarks.filter((r) => r.kind === 'fix').pop()?.text, 500)}`).join('\n');
+  const head = lang === 'ja' ? `[canvas] ${change} のレビューで、直してほしい項目が ${items.length} 件あります。` : `[canvas] ${items.length} change request${items.length === 1 ? '' : 's'} in the review of ${change}.`;
+  const prompt = `${head}\n${list}\n\n(The person wrote these under the items of openspec/changes/${oneLine(change, 128)}/review.md with the canvas ("- fix: ..."). Read review.md again, correct the artifacts as the Reviews section of the spec-relay skill says, write "  - fixed: <what you changed>" under each fix line, keep the items unticked, render again and tell the person. It is a request for a change, not an approval: do not tick review.md or archive because of it.)`;
+  return { prompt, displayPrompt: `${head}\n${list}` };
 }
 
 // ---------------------------------------------------------------- the server
@@ -498,9 +584,9 @@ function reviewState(file) {
   const items = parseReview(text).flatMap((g) => g.items).filter((i) => i.id && !seen.has(i.id) && seen.add(i.id))
     .map((i) => {
       const decision = i.decision === null ? '' : decisionOf(`decision: ${i.decision}`);
-      return { id: i.id, done: i.done, q: i.letter === 'Q', decided: Boolean(decision), decision };
+      return { id: i.id, done: i.done, q: i.letter === 'Q', decided: Boolean(decision), decision, state: i.state };
     });
-  return { hash: sha256(buffer), items, reviewer: reviewerOf(text) };
+  return { hash: sha256(buffer), items, reviewer: reviewerOf(text), fixes: reviewRemarks(text).filter((i) => i.openFix).length };
 }
 
 const sameToken = (a, b) => {
@@ -627,6 +713,22 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         checked = Date.now();
         return reply(200, { ok: true, file: result.file });
       }
+      if (rest.length === 1 && rest[0] === 'fixes') {
+        // "Send the change requests to the agent": the open fix notes of this page's review.md, read here, in one message.
+        const origin = req.headers.origin;
+        if (req.method !== 'POST' || req.headers['x-spec-relay'] !== 'fixes' || (origin && origin !== `http://127.0.0.1:${port}`)) return send(res, 403, 'text/plain; charset=utf-8', 'forbidden');
+        const reply = (code, body) => send(res, code, 'application/json; charset=utf-8', JSON.stringify(body));
+        let body;
+        try { body = JSON.parse(await readBody(req)); } catch { return reply(400, { ok: false, problem: 'bad request' }); }
+        const name = body && typeof body.page === 'string' && body.page.startsWith(`${VIEWS}/`) ? path.posix.basename(body.page, '.html') : '';
+        const found = name ? reviewFile(root, name) : null;
+        if (!found) return reply(404, { ok: false, code: 'noFile', problem: 'this page has no review.md' });
+        const text = utf8Text(fs.readFileSync(found.file));
+        const open = text === null ? [] : reviewRemarks(text).filter((i) => i.openFix);
+        if (!open.length) return reply(409, { ok: false, problem: 'no change request is open' });
+        await ask(fixPrompt({ change: found.name, items: open }, lang()));
+        return reply(200, { ok: true, count: open.length });
+      }
       if (rest.length === 1 && rest[0] === 'review') {
         const origin = req.headers.origin;
         if (req.method !== 'POST' || req.headers['x-spec-relay'] !== 'review' || (origin && origin !== `http://127.0.0.1:${port}`)) return send(res, 403, 'text/plain; charset=utf-8', 'forbidden');
@@ -635,9 +737,9 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         try { body = JSON.parse(await readBody(req)); } catch { return reply(400, { ok: false, problem: 'bad request' }); }
         if (!body || typeof body !== 'object') return reply(400, { ok: false, problem: 'bad request' });
         const { action, id, value, hash } = body;
-        if (!['tick', 'untick', 'decision', 'reviewer'].includes(action) || typeof hash !== 'string'
+        if (!['tick', 'untick', 'decision', 'reviewer', 'fix', 'hold', 'withdraw'].includes(action) || typeof hash !== 'string'
           || (action === 'reviewer' ? typeof value !== 'string' : typeof id !== 'string')
-          || (action === 'decision' && typeof value !== 'string')) return reply(400, { ok: false, problem: 'bad request' });
+          || (['decision', 'fix', 'hold'].includes(action) && typeof value !== 'string')) return reply(400, { ok: false, problem: 'bad request' });
         const name = typeof body.page === 'string' && body.page.startsWith(`${VIEWS}/`) ? path.posix.basename(body.page, '.html') : '';
         const found = name ? reviewFile(root, name) : null;
         if (!found) return reply(404, { ok: false, code: 'noFile', problem: 'this page has no review.md to write' });

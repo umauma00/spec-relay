@@ -43,15 +43,32 @@ node "<kit>/scripts/render.mjs" --guide all
   `openspec/changes/archive/`. A change with a `review.md` (survey,
   target-design, extract, amend) gets the review layout: how many items are
   still open, one row per review item grouped by the headings of `review.md`,
-  and the other Markdown files after them as an appendix.
+  and the other Markdown files after them as a folded appendix.
   - A requirement (`R`) shows its scenarios beside its trace entry, the original
     source lines (Shift_JIS and other legacy encodings are shown as text; at most
     80 lines per reference) and its crosscheck verdict. In an amend change it
     shows the old wording from `openspec/specs/` against the new.
   - A screen (`S`) shows its entry in `screens.md` and its screenshot.
   - A question (`Q`) shows its text from `questions.md` and its decision.
-  - A context (`K`) shows its entry in `context-map.md`.
+  - A context (`K`) shows its entry in `context-map.md` as a card, beside
+    what the survey's tables say about it (upstream and downstream contexts,
+    the data it owns, writes and reads, its capabilities and its files).
+  - In a survey, the map items show what they ask about: M1 a diagram of the
+    relationships (drawn by the script) and their table, M2 a table of the
+    shared data against the contexts, M3 the glossary conflicts, M4 the
+    capability list, M5 the carried files, C1 the excluded files and their
+    reasons, D<n> the database's row and the logic in it, D90 the missing
+    definitions.
   - Every other item is one line.
+  - Each item tells the reviewer what to check, against what, and what to do
+    when it is wrong (the kit's fixed wording, scripts/review-guide.mjs).
+  - The notes under an item (`  - fix:`, `  - hold:`, `  - fixed:`) are shown
+    under its head, and its seal says where it stands: confirmed, open, needs
+    a change, on hold, or changed and waiting for a second look. A confirmed
+    item folds its content away (one click opens it).
+  - The other Markdown files of the change follow as an appendix, each folded;
+    a survey's inventory shows the number of files per context instead of
+    every row (the rows open with one click).
   - What has no review item (a requirement, screen, context or question missing
     from `review.md`) is shown as open with a caution, and so is a review item
     that names nothing. Tell the person about these cautions; do not hide them.
