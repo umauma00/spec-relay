@@ -34,8 +34,8 @@ import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const NODE_MIN = '22.12.0';
-export const OPENSPEC_TESTED = '2.0.0';
+export const NODE_MIN = '22.20.0';
+export const OPENSPEC_TESTED = '2.1.1';
 // Recommended client versions: fixes for parallel subagents and their permission
 // prompts (Copilot CLI 1.0.106-1.0.109); the Copilot harness is the VS Code default from 1.143.
 export const CLIENT_MIN = { cli: '1.0.109', vscode: '1.143.0' };
@@ -78,7 +78,7 @@ function setTo(env, name) {
   return key === undefined || env[key] === undefined ? undefined : String(env[key]).trim().toLowerCase();
 }
 
-// The same rules as OpenSpec 2.0.0 (src/telemetry, unchanged since 1.17.0): an opt-out in the
+// The same rules as OpenSpec 2.1.1 (src/telemetry, unchanged since 1.17.0): an opt-out in the
 // environment, CI, or `telemetry.enabled: false` in the global config.
 export function telemetryOff(env, platform, readFile) {
   const telemetry = setTo(env, 'OPENSPEC_TELEMETRY');
@@ -122,9 +122,10 @@ export function toolchainFor(language) {
 // Each returns { id, level: 'ok' | 'info' | 'warn' | 'fail', message, fix? }.
 // `ctx.t(ja, en)` picks the person's language.
 
-// Some packages the pinned OpenSpec depends on (@inquirer/*, mute-stream)
-// declare node ^22.22.2 || ^24.15.0 || >=26; npm ci warns (EBADENGINE) below.
-const NODE_DEPS = [['22.22.2', 22], ['24.15.0', 24], ['26.0.0', Infinity]];
+// The pinned OpenSpec (and its `skills` package) need 22.20.0; its @inquirer/*
+// packages declare node ^22.13.0 || >=23.5.0, so 23.0 to 23.4 is out of range
+// and npm ci warns (EBADENGINE) there.
+const NODE_DEPS = [['22.20.0', 22], ['23.5.0', Infinity]];
 
 export function checkNode(ctx) {
   const v = parseVersion(ctx.nodeVersion);
@@ -133,7 +134,7 @@ export function checkNode(ctx) {
     if (fits) return { id: 'node', level: 'ok', message: `Node.js ${showVersion(v)}` };
     return {
       id: 'node', level: 'warn',
-      message: ctx.t(`Node.js ${showVersion(v)} では、OpenSpec が使うパッケージの一部が対象外です（22.22.2 以上の 22 系、24.15.0 以上の 24 系、または 26 以上）。導入の npm ci が警告を出し、npm の engine-strict が有効だと止まります。`, `with Node.js ${showVersion(v)}, some packages the pinned OpenSpec uses are out of range (22.x from 22.22.2, 24.x from 24.15.0, or 26 and later); npm ci warns, and stops when npm's engine-strict is on.`),
+      message: ctx.t(`Node.js ${showVersion(v)} では、OpenSpec が使うパッケージの一部が対象外です（22.20.0 以上の 22 系、または 23.5.0 以上）。導入の npm ci が警告を出し、npm の engine-strict が有効だと止まります。`, `with Node.js ${showVersion(v)}, some packages the pinned OpenSpec uses are out of range (22.x from 22.20.0, or 23.5.0 and later); npm ci warns, and stops when npm's engine-strict is on.`),
       fix: ctx.t('`winget install OpenJS.NodeJS.LTS` で新しい LTS を入れることをおすすめします。', 'Updating to a current LTS is recommended (Windows: `winget install OpenJS.NodeJS.LTS`).'),
     };
   }
@@ -217,7 +218,9 @@ export function checkOpenspec(ctx) {
   return {
     id: 'openspec', level: 'fail',
     message: ctx.t(`openspec/spec-relay/tools の OpenSpec は ${showVersion(v)} で、キットが確認した ${OPENSPEC_TESTED} と違います。`, `the OpenSpec in openspec/spec-relay/tools is ${showVersion(v)}, not ${OPENSPEC_TESTED}, the version the kit is tested with.`),
-    fix: rerun,
+    // After a kit update the old package files are a conflict for setup, so they go first.
+    fix: ctx.t('キットを更新したときは、`openspec/spec-relay/tools/` の package.json と package-lock.json を消してから、導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`。docs/UPGRADING.md）。誰かがこの2つを書き換えたときは、元に戻してから導入スクリプトを実行します。',
+      'After a kit update, delete package.json and package-lock.json in `openspec/spec-relay/tools/`, then run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`; docs/UPGRADING.md). If someone edited those two files, restore them, then run setup.'),
   };
 }
 
@@ -367,6 +370,9 @@ function syncedFolder(ctx) {
   return hit ? hit.replace(/ - .*/, '') : null;
 }
 
+const PERSONAL_DIRS_JA = '`%USERPROFILE%\\.agents\\skills` と `%USERPROFILE%\\.copilot\\skills`（macOS・Linux は `~/.agents/skills` と `~/.copilot/skills`）';
+const PERSONAL_DIRS_EN = '`%USERPROFILE%\\.agents\\skills` and `%USERPROFILE%\\.copilot\\skills` (`~/.agents/skills` and `~/.copilot/skills` on macOS and Linux)';
+
 // What setup left in the repository, and whether it still matches this kit.
 export function checkSetup(ctx) {
   const configFile = path.join(ctx.target, 'openspec/config.yaml');
@@ -420,6 +426,46 @@ export function checkSetup(ctx) {
       message: ctx.t(`OpenSpec 標準のスキル（apply・archive・sync など）が元に戻っています（\`openspec update\` のあとによく起きます）: ${bypass.map((f) => path.relative(ctx.target, f).replace(/\\/g, '/')).join(', ')}`,
         `OpenSpec's generic skills (apply, archive, sync ...) are back (usually after \`openspec update\`): ${bypass.map((f) => path.relative(ctx.target, f).replace(/\\/g, '/')).join(', ')}`),
       fix: ctx.t('これらはレビューの確認を通らずに archive でき、PATH にある別の版の `openspec` を呼びます。導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。', 'They archive without the review gate and call whatever `openspec` is on PATH. Run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`).'),
+    });
+  }
+  const scope = ctx.skillsScope ? ctx.skillsScope(config) : 'project';
+  if (scope !== 'project') {
+    results.push({
+      id: 'skills-scope', level: 'fail',
+      message: scope === null
+        ? ctx.t('openspec/config.yaml に `skillsScope: project` がありません（0.21.0 以前に導入したか、スキルがホームフォルダーへ移されたときに OpenSpec が消しました）。OpenSpec 2.1 以降の `openspec update` は、スキルをホームフォルダーへ移すか尋ね、移すとキットが無効にしたスキルが元に戻ります。', 'openspec/config.yaml has no `skillsScope: project` (set up with 0.21.0 or earlier, or OpenSpec removed it when the skills moved to the home folder). From OpenSpec 2.1, `openspec update` offers to move the skills to the home folder, which brings back the skills the kit disabled.')
+        : ctx.t(`openspec/config.yaml の skillsScope が ${scope || '（空）'} です。キットはリポジトリの中のスキルしか無効にできません。`, `skillsScope in openspec/config.yaml is ${scope || '(empty)'}; the kit can disable skills only in this repository.`),
+      fix: scope === null
+        ? ctx.t('導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。この1行を足します。キットを更新した直後なら、先に docs/UPGRADING.md の「0.21.0 から更新するとき」のとおり、`openspec/spec-relay/tools/` の package.json と package-lock.json を消します。', 'Run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`); it adds the line. Right after a kit update, first delete package.json and package-lock.json in `openspec/spec-relay/tools/` ("0.21.0 から更新するとき" in docs/UPGRADING.md).')
+        : ctx.t('`skillsScope: project` に直してから、導入スクリプトをもう一度実行してください。', 'Change it to `skillsScope: project`, then run setup again.'),
+    });
+  }
+  // The skills left the repository (an `openspec update` answered "Switch to
+  // global", or a global `openspec` 2.1+ ran here): setup has nothing to stub.
+  // Only once the pinned OpenSpec is installed: before that, the openspec check already fails.
+  const installed = ctx.exists(path.join(ctx.target, 'openspec/spec-relay/tools/node_modules/@fission-ai/openspec/package.json'));
+  if (installed && ctx.repoSkills && ctx.repoSkills(ctx.target).length === 0) {
+    results.push({
+      id: 'repo-skills', level: 'fail',
+      message: ctx.t('リポジトリの .agents/skills/ に OpenSpec のスキルがありません。ホームフォルダーへ移された（`openspec update` で「Switch to global」を選んだ、またはグローバルの `openspec` 2.1 以降をここで実行した）と考えられます。キットが無効にできるのはリポジトリの中のスキルだけです。',
+        'there are no OpenSpec skills in the repository\'s .agents/skills/; they were probably moved to the home folder (an `openspec update` answered "Switch to global", or a global `openspec` 2.1+ ran here). The kit can disable skills only in the repository.'),
+      fix: ctx.t('リポジトリで `node "<キットのフォルダー>/scripts/openspec.mjs" init --tools github-copilot --scope project .` を実行してから、導入スクリプトをもう一度実行してください。ホームフォルダーに残ったスキルは、下の personal-skills のとおりに扱います。',
+        'In the repository run `node "<kit>/scripts/openspec.mjs" init --tools github-copilot --scope project .`, then run setup again. Handle the skills left in the home folder as personal-skills below says.'),
+    });
+  }
+  const personal = ctx.personalBypassFiles ? ctx.personalBypassFiles(ctx.home) : [];
+  if (personal.length) {
+    // The same values the hook accepts (hook.mjs enforced()).
+    const hooks = /^(on|true|yes|enforce)$/i.test(ctx.cleanValue(ctx.configValue(ctx.target, 'Hook enforcement', 'off')));
+    const names = [...new Set(personal.map((f) => path.basename(path.dirname(f))))];
+    results.push({
+      id: 'personal-skills', level: hooks ? 'info' : 'warn',
+      message: ctx.t(`ホームフォルダーに OpenSpec 標準のスキルがあります（OpenSpec 2.1 以降の既定では、ほかのプロジェクトの \`openspec init\` がここに入れます）: ${names.join(', ')}。Copilot はこれをどのリポジトリでも読みます。同じ名前のスキルのどちらを使うかは公開されていないので、レビューの確認を通らない archive に使われるおそれがあります。`,
+        `OpenSpec's generic skills are in your home folder (from OpenSpec 2.1, \`openspec init\` in another project puts them there by default): ${names.join(', ')}. Copilot reads them in every repository, and which of two skills with the same name it uses is not documented, so they may be used to archive without the review gate.`),
+      fix: hooks
+        ? ctx.t('フックが有効なので、gate を通らない archive は拒否されます。', 'Hook enforcement is on, so an archive that fails the gate is denied.')
+        : ctx.t(`ほかのプロジェクトで OpenSpec を使っていなければ、${PERSONAL_DIRS_JA} の openspec-* のフォルダーを消してください。使っているなら、openspec/config.yaml の「Hook enforcement」を on にして、gate を通らない archive をフックで止めてください（docs/TROUBLESHOOTING.md の「フック」）。`,
+          `If you do not use OpenSpec in other projects, delete the openspec-* folders in ${PERSONAL_DIRS_EN}. If you do, set "Hook enforcement" in openspec/config.yaml to on, so the hook denies archives that fail the gate (docs/TROUBLESHOOTING.md, hooks).`),
     });
   }
   const sourceRoot = ctx.cleanValue(ctx.configValue(ctx.target, 'Source root', '.'));
@@ -711,7 +757,7 @@ async function machineContext(opts, overrides = {}) {
     kitRoot: KIT_ROOT,
     kitVersion: (readJson(readFileOrNull(path.join(KIT_ROOT, 'package.json'))) || {}).version || '?',
     schemas: setup.SCHEMAS, configMarker: setup.CONFIG_MARKER, normalizeText: setup.normalizeText,
-    bypassFiles: setup.bypassFiles, legacyFiles: setup.legacyFiles, configValue: gate.configValue, cleanValue: gate.cleanValue,
+    bypassFiles: setup.bypassFiles, repoSkills: setup.repoSkills, legacyFiles: setup.legacyFiles, personalBypassFiles: setup.personalBypassFiles, skillsScope: setup.skillsScope, configValue: gate.configValue, cleanValue: gate.cleanValue,
     machine: machineId(),
     exists: (file) => fs.existsSync(file),
     isDir: (dir) => { try { return fs.statSync(dir).isDirectory(); } catch { return false; } },

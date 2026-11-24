@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { main, parseArgs, plan, renderConfig, CONFIG_MARKER, KIT_ROOT, STUB_MARKER } from '../scripts/setup.mjs';
+import { main, parseArgs, plan, renderConfig, skillsScope, CONFIG_MARKER, KIT_ROOT, STUB_MARKER } from '../scripts/setup.mjs';
 import { findOpenspec, runOpenspec, findNpm, runCommand, OPENSPEC_VERSION } from '../scripts/openspec.mjs';
 import { tempDir, write, quiet, isolateOpenspec, crlf } from './helpers.mjs';
 
@@ -75,6 +75,31 @@ test('apply writes schemas and a filled config, and a second run keeps them', ()
   const again = plan(parseArgs(['--target', dir, ...BASE]));
   assert.equal(again.runInit, false);
   assert.ok(again.steps.every((step) => step.action === 'keep'));
+});
+
+test('a config from 0.21.0 or earlier gets skillsScope: project, in its own line endings', () => {
+  const dir = tempDir();
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
+  const file = path.join(dir, 'openspec/config.yaml');
+  const config = fs.readFileSync(file, 'utf8');
+  assert.match(config, /^schema: spec-relay-extract\n(#.*\n)*skillsScope: project\n/m);
+  // A Windows checkout of a config written by an older kit.
+  const old = crlf(config.replace(/^#.*OpenSpec 2\.1\+.*\n#.*\n/m, '').replace(/^skillsScope:.*\n/m, ''));
+  fs.writeFileSync(file, `\uFEFF${old}`);
+  const step = plan(parseArgs(['--target', dir, ...BASE])).steps.find((s) => s.path === file);
+  assert.equal(step.action, 'update');
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
+  const updated = fs.readFileSync(file, 'utf8');
+  assert.equal(updated, `\uFEFF${old.replace('schema: spec-relay-extract\r\n', 'schema: spec-relay-extract\r\nskillsScope: project\r\n')}`);
+  assert.equal(plan(parseArgs(['--target', dir, ...BASE])).steps.find((s) => s.path === file).action, 'keep');
+  // YAML forms a person may write by hand.
+  for (const [text, scope] of [['"skillsScope": project\n', 'project'], ["skillsScope : 'project' # kept\n", 'project'], ['skillsScope: project#x\n', 'project#x'], ['skillsScope:\n', ''], ['schema: x\n', null]]) {
+    assert.equal(skillsScope(text), scope, text);
+  }
+  // Someone moved the skills out of the repository: setup stops.
+  fs.writeFileSync(file, updated.replace('skillsScope: project', 'skillsScope: global'));
+  assert.equal(plan(parseArgs(['--target', dir, ...BASE])).steps.find((s) => s.path === file).action, 'conflict');
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 2);
 });
 
 test('a changed schema file or a foreign config is a conflict and nothing is written', () => {
@@ -152,9 +177,12 @@ test('running the script through a symlink still runs it', { skip: process.platf
 // A stand-in for npm: `--version` works, and `ci` "installs" an OpenSpec that
 // answers `--version` and fails everything else. Run by absolute node, since
 // PATH holds only this folder.
-function fakeNpm(version = '2.0.0') {
+function fakeNpm(version = OPENSPEC_VERSION) {
   const bin = tempDir('spec-relay-bin-');
-  const openspec = `if (process.argv[2] === '--version') { console.log(${JSON.stringify(version)}); } else { process.exitCode = 1; }\n`;
+  // Every call is logged to <bin>/calls.jsonl with the skills scope it got.
+  const log = JSON.stringify(path.join(bin, 'calls.jsonl'));
+  const openspec = `require('fs').appendFileSync(${log}, JSON.stringify({ args: process.argv.slice(2), scope: process.env.OPENSPEC_SKILLS_SCOPE, interactive: process.env.OPEN_SPEC_INTERACTIVE }) + '\\n');
+if (process.argv[2] === '--version') { console.log(${JSON.stringify(version)}); } else { process.exitCode = 1; }\n`;
   // On Windows the kit prefers an npm.cmd that has node_modules/npm/bin/npm-cli.js
   // beside it (as a real npm install does), and also looks in node's own folder,
   // so the fake is laid out the same way to come first.
@@ -185,11 +213,21 @@ function envWithPath(first) {
 
 test('setup installs the pinned OpenSpec into the repository and runs init with it', () => {
   const dir = tempDir();
-  const result = run('setup.mjs', ['--target', dir, ...BASE, '--apply'], { env: envWithPath(fakeNpm()) });
+  const bin = fakeNpm();
+  const result = run('setup.mjs', ['--target', dir, ...BASE, '--apply'], { env: envWithPath(bin) });
   // The fake OpenSpec fails init, so the run is undone: files and node_modules.
   assert.equal(result.status, 1, result.stderr + result.stdout);
-  assert.match(result.stdout, /npm ci in openspec\/spec-relay\/tools \(installs OpenSpec 2\.0\.0/);
+  assert.ok(result.stdout.includes(`npm ci in openspec/spec-relay/tools (installs OpenSpec ${OPENSPEC_VERSION}`));
   assert.match(result.stderr, /openspec init failed[\s\S]*were removed/);
+  // From OpenSpec 2.1, init installs the skills in the home folder unless told
+  // to keep them in the repository, where setup can disable them.
+  const calls = fs.readFileSync(path.join(bin, 'calls.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  const init = calls.find((call) => call.args[0] === 'init');
+  assert.deepEqual(init.args, ['init', '--tools', 'github-copilot', '--scope', 'project', '--no-copilot-cloud', '--no-animation', '.']);
+  assert.ok(calls.every((call) => call.scope === 'project'));
+  // init and update never ask where the skills go ("Switch to global" would move them out).
+  assert.equal(init.interactive, '0');
+  assert.ok(calls.filter((call) => !['init', 'update'].includes(call.args[0])).every((call) => call.interactive === process.env.OPEN_SPEC_INTERACTIVE));
   assert.ok(!fs.existsSync(path.join(dir, 'openspec/config.yaml')));
   assert.ok(!fs.existsSync(path.join(dir, 'openspec/spec-relay/tools/package.json')));
   assert.ok(!fs.existsSync(path.join(dir, 'openspec/spec-relay/tools/node_modules')));
@@ -327,11 +365,17 @@ test('a re-run disables every OpenSpec-generated skill and leaves the person\'s 
   write(dir, '.agents/skills/openspec-archive-change/SKILL.md', 'metadata:\n  generatedBy: "2.0.0"\n');
   write(dir, '.agents/skills/openspec-sync-specs/SKILL.md', 'my own notes\n');
   write(dir, '.agents/skills/openspec-propose/SKILL.md', 'metadata:\n  generatedBy: "2.0.0"\n');
+  // OpenSpec 2.1 writes no generatedBy line, only metadata.author.
+  write(dir, '.agents/skills/openspec-bulk-archive-change/SKILL.md', '\uFEFF---\r\nname: openspec-bulk-archive-change\r\nmetadata:\r\n  author: openspec\r\n  version: "1.0"\r\n---\r\nArchive all.\r\n');
+  // A skill of the person's own is left alone, even named openspec-*.
+  write(dir, '.agents/skills/openspec-notes/SKILL.md', '---\nname: openspec-notes\nmetadata:\n  author: taro\n---\nMy notes; mentions author: openspec in the body.\n');
   assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
   const read = (rel) => fs.readFileSync(path.join(dir, rel), 'utf8');
   assert.ok(read('.agents/skills/openspec-apply-change/SKILL.md').includes(STUB_MARKER));
   assert.match(read('.agents/skills/openspec-archive-change/SKILL.md'), /name: openspec-archive-change[\s\S]*spec-relay-orchestrator/);
   assert.equal(read('.agents/skills/openspec-sync-specs/SKILL.md'), 'my own notes\n');
+  assert.ok(read('.agents/skills/openspec-bulk-archive-change/SKILL.md').includes(STUB_MARKER));
+  assert.match(read('.agents/skills/openspec-notes/SKILL.md'), /^---\nname: openspec-notes/);
   // Propose, explore and the rest call a bare `openspec`, not the pinned one.
   assert.ok(read('.agents/skills/openspec-propose/SKILL.md').includes(STUB_MARKER));
   assert.equal(plan(parseArgs(['--target', dir, ...BASE])).steps.filter((st) => st.action === 'disable').length, 0);

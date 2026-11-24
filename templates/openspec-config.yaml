@@ -1,5 +1,8 @@
 # spec-relay: managed by scripts/setup.mjs. Edit the values; keep this line.
 schema: spec-relay-extract
+# Keeps OpenSpec's skills in this repository (OpenSpec 2.1+), where setup disables
+# the ones that bypass the review gate. Keep it as project.
+skillsScope: project
 
 context: |
   This repository is being migrated to another programming language with spec-relay.

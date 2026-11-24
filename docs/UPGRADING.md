@@ -6,7 +6,16 @@
 
 ## 0.21.0 から更新するとき
 
-キットが起動する OpenSpec は、既定で利用統計を送らなくなりました（環境変数 `OPENSPEC_TELEMETRY=0` を渡します。自分で `OPENSPEC_TELEMETRY` を設定している場合はその値が優先です）。導入のやり直しは要りません。README の詳細は docs へ移しました（[README](../README.md#ドキュメント) の一覧）。
+0.22.0 で、固定する OpenSpec を 2.0.0 から **2.1.1** に上げました。Node.js は **22.20 以上**が必要です（OpenSpec 2.1 の要件。doctor が FAIL にします）。移行中のリポジトリでは次の2つを行います。スキーマは変わっていません。
+
+1. `openspec/spec-relay/tools/` の package.json と package-lock.json を消してから、導入スクリプトをもう一度実行します（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。OpenSpec 2.1.1 が入り、openspec/config.yaml の `schema:` の次の行に `skillsScope: project` が足されます。
+2. 変わった3つのファイル（package.json、package-lock.json、openspec/config.yaml）をコミットします。ほかの人は pull したあと、同じく導入スクリプトを実行します。
+
+`skillsScope: project` が要るのは、OpenSpec 2.1 から `openspec init` の既定が、スキルをホームフォルダー（`~/.agents/skills`、すべてのプロジェクト用）に入れることに変わったためです。この行がないと、端末で実行した `openspec update` が「スキルをホームフォルダーに移すか」を尋ね、移すとキットが無効にした apply・archive・sync が元に戻ります。この行がないうちは doctor が `skills-scope` で FAIL にします。
+
+ほかのプロジェクトで OpenSpec 2.1 を使うと、ホームフォルダーに OpenSpec 標準のスキルが入ることがあります。Copilot はそれをどのリポジトリでも読み、同じ名前のスキルのどちらを使うかは公開されていません。doctor が見つけたときは `personal-skills` で知らせるので、ほかで使っていなければそのフォルダーを消し、使っているならフック（`Hook enforcement: on`、[TROUBLESHOOTING.md](TROUBLESHOOTING.md#フック試験中既定は無効)）を有効にしてください。
+
+キットが起動する OpenSpec は、既定で利用統計を送らなくなりました（環境変数 `OPENSPEC_TELEMETRY=0` を渡します。自分で `OPENSPEC_TELEMETRY` を設定している場合はその値が優先です）。README の詳細は docs へ移しました（[README](../README.md#ドキュメント) の一覧）。
 
 ## 0.20.0 から更新するとき
 
@@ -112,9 +121,9 @@ Playwright（`@playwright/test`、Apache-2.0）はキットに同梱していま
 
 進行中の移行では、次の順に実行します。
 
-1. 導入スクリプトをもう一度実行します（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。`openspec/spec-relay/tools/` に OpenSpec 2.0.0 が入り、`.github/` に残ったファイルを `leftover` として表示して止まります（まだ完了ではありません）。
+1. 導入スクリプトをもう一度実行します（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。`openspec/spec-relay/tools/` にキットが固定する OpenSpec が入り、`.github/` に残ったファイルを `leftover` として表示して止まります（まだ完了ではありません）。
 2. 移行対象のリポジトリで `node "<キットのフォルダー>/scripts/openspec.mjs" update` を実行します。OpenSpec が置いた古いファイルは消え、`.agents/skills/` に新しいスキルが入ります。
-3. 0.6.0 が無効にしたファイル（`.github/skills/openspec-*` と `.github/prompts/opsx-*` のうち、`<!-- spec-relay: disabled -->` を含むもの。apply・archive・sync、広いプロファイルでは bulk-archive も）は、編集済みとして残ります。中身はキットの案内だけなので、手で消してください。残っていると導入スクリプトは完了せず、doctor は `legacy` で FAIL を出します（元フォルダーが `.` のときは、調査の gate も元コードとして数えます）。
+3. 0.6.0 が無効にしたファイル（`.github/skills/openspec-*` と `.github/prompts/opsx-*` のうち、`<!-- spec-relay: disabled -->` を含むもの。apply・archive・sync、広いプロファイルでは bulk-archive も）は、編集済みとして残ることがあります（OpenSpec 2.1.1 では `.github/prompts/opsx-*` が残ります）。中身はキットの案内だけなので、残ったものは手で消してください。残っていると導入スクリプトは完了せず、doctor は `legacy` で FAIL を出します（元フォルダーが `.` のときは、調査の gate も元コードとして数えます）。
 4. 導入スクリプトをもう一度実行し、`.agents/skills/` の OpenSpec 標準のスキルを無効にします。最後に doctor で FAIL がないことを確かめ、`openspec/spec-relay/tools/` の3つのファイル、`.agents/skills/`、`.github/` で消えたファイルをコミットします。
 
 ## 0.5.0 から更新するとき

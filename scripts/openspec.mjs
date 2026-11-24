@@ -19,7 +19,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const OPENSPEC_VERSION = '2.0.0';
+export const OPENSPEC_VERSION = '2.1.1';
 // Where setup installs OpenSpec, relative to the repository being migrated.
 export const TOOLS_DIR = 'openspec/spec-relay/tools';
 const BIN = 'node_modules/@fission-ai/openspec/bin/openspec.js';
@@ -105,12 +105,21 @@ export function runCommand(launch, args, options = {}, hint = '') {
 // unless the person set OPENSPEC_TELEMETRY themselves. OpenSpec does not see
 // the pinned folder as a project install, so its update notice would tell
 // people to `npm install -g` a newer version; the kit pins the version and a
-// newer one comes with a kit update. Names are case-insensitive only on Windows.
+// newer one comes with a kit update. OPENSPEC_SKILLS_SCOPE=project: from 2.1.0,
+// init puts the skills in the home folder (~/.agents/skills, for every
+// project) unless told otherwise, and the kit can disable the gate-bypassing
+// skills only in the repository; setup also passes --scope project and records
+// skillsScope: project in openspec/config.yaml, which update reads. Names are
+// case-insensitive only on Windows, so there another spelling is dropped first.
 export function openspecEnv(env = process.env, platform = process.platform) {
   const own = platform === 'win32'
     ? Object.keys(env).some((k) => k.toUpperCase() === 'OPENSPEC_TELEMETRY' && env[k] !== undefined)
     : env.OPENSPEC_TELEMETRY !== undefined;
-  return { ...env, ...(own ? {} : { OPENSPEC_TELEMETRY: '0' }), OPENSPEC_NO_UPDATE_CHECK: '1' };
+  const forced = ['OPENSPEC_NO_UPDATE_CHECK', 'OPENSPEC_SKILLS_SCOPE'];
+  const rest = platform === 'win32'
+    ? Object.fromEntries(Object.entries(env).filter(([k]) => !forced.includes(k.toUpperCase())))
+    : env;
+  return { ...rest, ...(own ? {} : { OPENSPEC_TELEMETRY: '0' }), OPENSPEC_NO_UPDATE_CHECK: '1', OPENSPEC_SKILLS_SCOPE: 'project' };
 }
 
 // Runs the OpenSpec pinned in the working directory (`options.cwd`, or
@@ -119,7 +128,15 @@ export function openspecEnv(env = process.env, platform = process.platform) {
 export function runOpenspec(args, options = {}, root = options.cwd ?? process.cwd()) {
   const found = findOpenspec(root);
   if (!found.launch) return { notInstalled: true, pinned: found.pinned, reason: found.reason, status: null, stdout: '', stderr: '' };
-  return runCommand(found.launch, args, { ...options, env: openspecEnv(options.env ?? process.env) });
+  const env = openspecEnv(options.env ?? process.env);
+  // init and update are the commands that ask where the skills go (2.1+); in a
+  // terminal a "Switch to global" answer would move them out of the repository,
+  // where the kit cannot disable them, so they never ask (OpenSpec's isInteractive).
+  if (['init', 'update'].includes(args.find((arg) => !arg.startsWith('-')))) {
+    for (const key of Object.keys(env)) if (key.toUpperCase() === 'OPEN_SPEC_INTERACTIVE') delete env[key];
+    env.OPEN_SPEC_INTERACTIVE = '0';
+  }
+  return runCommand(found.launch, args, { ...options, env });
 }
 
 // { ok, version } or { ok: false, notInstalled, pinned, reason } with a message a person can act on.

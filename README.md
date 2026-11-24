@@ -2,7 +2,7 @@
 
 [OpenSpec](https://github.com/Fission-AI/OpenSpec) を使って、コードベースを別のプログラミング言語へ移すための GitHub Copilot 用キットです。元のコードから仕様を起こし、人間がその仕様をレビューし、レビュー済みの仕様をもとに新しい言語で実装します。仕様と振る舞いを変えずに移し、画面の見た目をどこまで引き継ぐかは人が決めます。
 
-> **状態：0.21.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
+> **状態：0.22.0**。工程の骨組み・OpenSpec スキーマ・導入スクリプト・テストまでです。実アカウントでの通し確認はまだ行っていません。
 
 ## 流れ
 
@@ -28,9 +28,9 @@ flowchart LR
 
 | 必要なもの | Windows での入れ方の例 |
 |---|---|
-| Node.js 22.12 以上（OpenSpec の要件。npm を含む） | `winget install OpenJS.NodeJS.LTS` |
+| Node.js 22.20 以上（OpenSpec の要件。npm を含む） | `winget install OpenJS.NodeJS.LTS` |
 | GitHub Copilot：CLI 1.0.109 以降、VS Code 1.143 以降（Copilot ハーネス）、または Copilot app | CLI は `npm install -g @github/copilot` |
-| OpenSpec CLI 2.0.0 | 入れる必要はありません。導入スクリプトが移行対象のリポジトリの中に、この版を固定して入れます（npm のレジストリにつながる必要があります） |
+| OpenSpec CLI 2.1.1 | 入れる必要はありません。導入スクリプトが移行対象のリポジトリの中に、この版を固定して入れます（npm のレジストリにつながる必要があります） |
 
 Windows での準備と注意点は [docs/WINDOWS.md](docs/WINDOWS.md) にあります。
 
@@ -95,5 +95,5 @@ OpenSpec は初期設定で、匿名の利用統計（コマンド名と版。�
 
 - キットのスクリプトは外部のパッケージを使わず、ほかのプロジェクトのコードも同梱していません。
 - Playwright（`@playwright/test`・`playwright`・`playwright-core` 1.64.1、いずれも Apache-2.0）も同梱していません。画面のテストを使う移行先で、利用者が `tests/e2e/` に `npm ci` で入れます（`templates/e2e/package-lock.json` で 2026-11-19 に確認）。
-- OpenSpec（`@fission-ai/openspec`、MIT License）は同梱していません。導入スクリプトが npm から移行対象のリポジトリに入れます。固定している 2.0.0 と、それが使うパッケージを合わせた 57 個のライセンスは、MIT 50、ISC 6、BSD-3-Clause 1 です（`templates/openspec-tools/package-lock.json` で 2026-11-18 に確認）。OpenSpec の版を上げるときは、この内訳も確かめ直します。
+- OpenSpec（`@fission-ai/openspec`、MIT License）は同梱していません。導入スクリプトが npm から移行対象のリポジトリに入れます。固定している 2.1.1 と、それが使うパッケージを合わせた 66 個のライセンスは、MIT 54、ISC 7、BlueOak-1.0.0 4、BSD-3-Clause 1 です（`templates/openspec-tools/package-lock.json` で 2026-11-24 に確認）。OpenSpec の版を上げるときは、この内訳も確かめ直します。
 - 構成と考え方は [code-migration-kit-with-github-copilot](https://github.com/umauma00/code-migration-kit-with-github-copilot)（Apache-2.0）を参考にしました。ファイルは写していません。違いは [docs/WORKFLOW.md](docs/WORKFLOW.md#先行例code-migration-kit-with-github-copilotから引き継いだこと) にあります。

@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { main, bypassFiles, STUB_MARKER, SCHEMAS } from '../scripts/setup.mjs';
 import { checkReview, checkPortReady, checkPortDone, baselineHash, databaseHash } from '../scripts/gate.mjs';
@@ -63,6 +64,9 @@ test('setup runs openspec init, keeps the config and removes the gate-bypassing 
   for (const schema of SCHEMAS) openspec(dir, 'schema', 'validate', schema);
   assert.match(fs.readFileSync(path.join(dir, 'openspec/config.yaml'), 'utf8'), /spec-relay: managed[\s\S]*Source language: Python/);
   assert.ok(fs.existsSync(path.join(dir, '.agents/skills/openspec-propose/SKILL.md')));
+  // OpenSpec 2.1 would put the skills in the home folder without --scope project.
+  assert.match(fs.readFileSync(path.join(dir, 'openspec/config.yaml'), 'utf8'), /^skillsScope: project$/m);
+  assert.ok(!fs.existsSync(path.join(os.homedir(), '.agents')), 'nothing in the home folder');
   assert.ok(!fs.existsSync(path.join(dir, '.github/prompts')), 'OpenSpec 2.x writes no command files');
   assert.deepEqual(bypassFiles(dir), []);
   for (const rel of ['.agents/skills/openspec-apply-change/SKILL.md', '.agents/skills/openspec-archive-change/SKILL.md', '.agents/skills/openspec-sync-specs/SKILL.md']) {

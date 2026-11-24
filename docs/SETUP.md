@@ -41,15 +41,16 @@ node "C:\path\to\spec-relay\scripts\doctor.mjs" --target . --client cli
 
 | 対象 | 確かめること | 足りないとき |
 |---|---|---|
-| Node.js | 22.12 以上（古い Node.js でも、このメッセージは出ます） | FAIL |
+| Node.js | 22.20 以上（古い Node.js でも、このメッセージは出ます） | FAIL |
 | キット | スキーマ・スクリプト・エージェントがそろっているか | FAIL |
-| OpenSpec CLI | 導入前は npm があるか。導入後は、リポジトリの中の OpenSpec が入っていて動くか、版が 2.0.0 か（違えば FAIL。clone した直後で未導入のときは、導入スクリプトの再実行を案内） | FAIL |
+| OpenSpec CLI | 導入前は npm があるか。導入後は、リポジトリの中の OpenSpec が入っていて動くか、版が 2.1.1 か（違えば FAIL。clone した直後で未導入のときは、導入スクリプトの再実行を案内） | FAIL |
 | OpenSpec の利用統計 | キットの既定（`OPENSPEC_TELEMETRY=0` を渡す）で止まっているか。利用者が `OPENSPEC_TELEMETRY` を自分で設定して送る状態なら、そう知らせる | INFO |
 | PowerShell | 実行ポリシーで `npm` が止まるか（`npm.cmd` を案内） | INFO |
 | Copilot のアプリ | Copilot CLI 1.0.109 以上、VS Code 1.143 以上 | WARN |
 | git | git があるか、リポジトリの一番上か、「所有者が違う」で拒否されていないか、長いパス | WARN |
 | フォルダー | 書き込めるか（「コントロールされたフォルダー アクセス」など）、OneDrive などの同期フォルダーやネットワーク上のフォルダーでないか | FAIL・WARN |
-| 導入済みのリポジトリ | スキーマがキットの版と同じか、`openspec update` で apply・archive・sync が戻っていないか、元コードのフォルダーがあるか、移行先の言語のビルド道具（JDK・Python・.NET SDK など） | FAIL・WARN |
+| 導入済みのリポジトリ | スキーマがキットの版と同じか、`openspec update` で apply・archive・sync が戻っていないか、openspec/config.yaml に `skillsScope: project` があるか、`.agents/skills/` に OpenSpec のスキルが残っているか、元コードのフォルダーがあるか、移行先の言語のビルド道具（JDK・Python・.NET SDK など） | FAIL・WARN |
+| ホームフォルダーの OpenSpec のスキル | 導入済みのリポジトリで、Copilot がどのリポジトリでも読む `~/.agents/skills` と `~/.copilot/skills` に、OpenSpec 標準のスキルがないか（OpenSpec 2.1 以降は、ほかのプロジェクトの `openspec init` が既定で `~/.agents/skills` に入れます。レビューの確認を通らない archive に使われるおそれがあります）。フックが有効なら INFO | WARN |
 | サブエージェント | 導入のあとに1回、解析・照合・実装担当を同時に起動して、それぞれファイルを1つ書かせる試運転（`--trial`・`--trial-check`。実装担当は移行先のフォルダーに書き、`node --version` も実行）。エージェントが見つかるか、モデルが使えるか、書き込みとコマンド実行の許可が出るかを最初に確かめます | FAIL |
 
 終了コードは、0 なら始められる（WARN が残ることはある）、1 なら FAIL を直してからです。試運転の結果は PC とアプリごとに `openspec/spec-relay/local/trial.json`（git では無視）に残り、モデルの設定を変えたときや、別の PC・アプリで使い始めたときは、もう一度試運転を求めます。
@@ -82,9 +83,11 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 | `openspec/schemas/spec-relay-*/` | 各工程のスキーマとテンプレート（survey・target・extract・amend・port・finish） |
 | `openspec/config.yaml` | 移行元・移行先の言語とフォルダー（全成果物の生成に使われる） |
 | `openspec/spec-relay/tools/` | キットが確認した版の OpenSpec を固定する package.json と package-lock.json（コミットします）。`npm ci` で入る `node_modules/` は Git の対象外です。OpenSpec は `node "<キットのフォルダー>/scripts/openspec.mjs" <引数>` で呼びます（キットのスクリプトもオーケストレーターもこれを使います） |
-| `.agents/skills/openspec-*` | `openspec init --tools github-copilot` が置く OpenSpec 標準のスキル。導入スクリプトがすべて「`spec-relay-orchestrator` を使ってください」という案内に置き換えます（下の説明）。Copilot はこのフォルダーを直接読むので、リンクは作られません |
+| `.agents/skills/openspec-*` | `openspec init --tools github-copilot --scope project` が置く OpenSpec 標準のスキル。導入スクリプトがすべて「`spec-relay-orchestrator` を使ってください」という案内に置き換えます（下の説明）。Copilot はこのフォルダーを直接読むので、リンクは作られません |
 
 - 内容の違う既存ファイルがあると、上書きせずに衝突を表示して止まります。`openspec init` が置き換え・削除・編集するファイル（`.agents/skills/` の既存の `openspec-*` と `.openspec-target`、OpenSpec 1.x が `.github/`・`.claude/`・`.cursor/` などのツールのフォルダーに置いた `openspec-*`・`opsx*`、`openspec/AGENTS.md` など）が既にある場合も、同じく止まります。
-- OpenSpec 標準のスキルは、導入スクリプトが中身を「`spec-relay-orchestrator` を使ってください」という案内に置き換えて無効にします。apply・archive（bulk-archive を含む）・sync はレビューの確認を通らずにチェックや archive ができてしまい、propose・explore などのほかのスキルも、固定した版ではなく PATH にある `openspec`（どの版か分からないか、入っていない）を呼ぶためです。ファイル自体を消さないのは、消すと後の `openspec update` が利用者の OpenSpec 全体の設定（Windows では `%APPDATA%\openspec`）から、ほかのプロジェクトも含めてこれらのワークフローを外してしまうためです。OpenSpec 2.0.0 の `openspec update`（`node "<キットのフォルダー>/scripts/openspec.mjs" update`）は毎回これらを元の中身に戻すので、update のあとは毎回、導入スクリプトをもう一度実行してください（doctor が `workflows` で知らせます）。
+- OpenSpec 標準のスキルは、導入スクリプトが中身を「`spec-relay-orchestrator` を使ってください」という案内に置き換えて無効にします。apply・archive（bulk-archive を含む）・sync はレビューの確認を通らずにチェックや archive ができてしまい、propose・explore などのほかのスキルも、固定した版ではなく PATH にある `openspec`（どの版か分からないか、入っていない）を呼ぶためです。ファイル自体を消さないのは、消すと後の `openspec update` が利用者の OpenSpec 全体の設定（Windows では `%APPDATA%\openspec`）から、ほかのプロジェクトも含めてこれらのワークフローを外してしまうためです。OpenSpec 2.x の `openspec update`（`node "<キットのフォルダー>/scripts/openspec.mjs" update`）は毎回これらを元の中身に戻すので、update のあとは毎回、導入スクリプトをもう一度実行してください（doctor が `workflows` で知らせます）。
+- OpenSpec 2.1 から、`openspec init` は何も指定しないとスキルをホームフォルダー（`~/.agents/skills`、すべてのプロジェクト用）に入れます。そこではキットがスキルを無効にできないので、導入スクリプトは `--scope project` を付けて実行し、openspec/config.yaml に `skillsScope: project` を書きます。この行があると、`openspec update` は「スキルをどこに置くか」を尋ねず、リポジトリの中のまま更新します（キットの `openspec.mjs` は、init と update をそもそも質問しない形で起動します）。この行は消したり `global` に変えたりしないでください（doctor が `skills-scope` で FAIL にします。スキルがリポジトリからなくなったときは `repo-skills` で FAIL にし、戻し方を案内します）。
+- OpenSpec 2.1 の `openspec update` は、ホームフォルダー（`~/.agents/skills`）にも OpenSpec のスキルがあると、それもこの版の内容に更新します（手で変えた内容は上書きされ、ほかのプロジェクトが別の版の OpenSpec を使っていても同じです）。また init と update は、実行したリポジトリの場所を `%LOCALAPPDATA%\openspec\projects.json`（macOS・Linux は `~/.local/share/openspec/projects.json`）に記録します。どちらも OpenSpec 自体の動作です。
 - 導入済みのリポジトリでは、導入スクリプトは `node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply` だけで再実行できます（言語やフォルダーは openspec/config.yaml から読みます）。リポジトリを新しく clone した人は、最初にこれを実行してください。`openspec/spec-relay/tools/` の lock ファイルどおりに `npm ci` で OpenSpec を入れます（doctor が知らせます）。
 - `openspec/spec-relay/tools/` の package.json と package-lock.json は、Dependabot や Renovate などの依存関係の自動更新の対象から外してください。版を上げるのはキットの更新のときだけです（違う版は導入スクリプトが衝突として止め、doctor が FAIL にします）。
