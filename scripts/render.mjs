@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkboxes, questionIds, tableRows, changeSchema, archivedChange, REMARK } from './gate.mjs';
+import { checkboxes, questionIds, tableRows, changeSchema, archivedChange, REMARK, noteState } from './gate.mjs';
 import { guideView, guidePage, guideWords, modules as guideModules, moduleKey, GUIDE_CSS } from './guide.mjs';
 import { ledgerSummary } from './sites.mjs';
 import { leftoverRows } from './finish.mjs';
@@ -43,7 +43,7 @@ const LABELS = {
     of: (all, done) => `${all} 件中 ${done} 件を確認済み`, left: '残り', sheet: '項目ごとの状態',
     legendDone: 'review.md でチェック済み', legendOpen: '未確認',
     firstOpen: (id) => `最初の未確認 ${id} へ ↓`, show: '表示', all: 'すべて', onlyOpen: '未確認のみ', allClear: 'この区分に未確認の項目はありません。',
-    howto: ['項目を読む', '「確認すること」に沿って根拠と照らし合わせる', '正しければ review.md の行を <code>[x]</code> に。違うときは行の下に <code>  - fix: 直してほしいこと</code>、決められないときは <code>  - hold: 理由</code> と書いて、作り直す'],
+    howto: ['項目を読む', '「確認すること」に沿って根拠と照らし合わせる', '正しければ review.md の行を <code>[x]</code> に。違うときはその行のすぐ下に <code>- fix: 直してほしいこと</code>、決められないときは <code>- hold: 理由</code> の行を足して（行頭に空白2つ）、作り直す'],
     states: { done: '確認済み', open: '未確認', fix: '直してほしい', hold: '保留', fixed: '直した・再確認' },
     seals: { done: '済', open: '未', fix: '直', hold: '保', fixed: '再' },
     remarks: { fix: 'あなた: 直してほしい', hold: 'あなた: 保留', fixed: 'AI: 直した内容' },
@@ -87,7 +87,7 @@ const LABELS = {
     of: (all, done) => `${done} of ${all} confirmed`, left: 'left', sheet: 'State of each item',
     legendDone: 'ticked in review.md', legendOpen: 'open',
     firstOpen: (id) => `First open item ${id} ↓`, show: 'Show', all: 'All', onlyOpen: 'Open only', allClear: 'No open items in this group.',
-    howto: ['Read the item', 'Compare it with the evidence, following "Check"', 'If it is right, tick its line in review.md (<code>[x]</code>). If it is wrong, write <code>  - fix: what should change</code> under the line; if you cannot decide yet, <code>  - hold: why</code>. Then render again'],
+    howto: ['Read the item', 'Compare it with the evidence, following "Check"', 'If it is right, tick its line in review.md (<code>[x]</code>). If it is wrong, add a line <code>- fix: what should change</code> right under it; if you cannot decide yet, <code>- hold: why</code> (indented by two spaces). Then render again'],
     states: { done: 'Confirmed', open: 'Open', fix: 'Needs a change', hold: 'On hold', fixed: 'Changed, look again' },
     seals: { done: '✓', open: '–', fix: '!', hold: 'H', fixed: 'R' },
     remarks: { fix: 'You: needs a change', hold: 'You: on hold', fixed: 'Agent: what changed' },
@@ -491,7 +491,7 @@ export function parseReview(text) {
     const [box] = checkboxes(line);
     if (!box) {
       // "  - fix: ..." / "  - hold: ..." / "  - fixed: ..." under an item: its notes.
-      const r = last ? bare[n].match(REMARK) : null;
+      const r = last?.id ? bare[n].match(REMARK) : null;
       if (r) last.remarks.push({ kind: r[1].toLowerCase(), text: r[2].trim() });
       else if (bare[n].trim() && !/^\s/.test(bare[n]) || /^#/.test(line)) last = null;
       continue;
@@ -515,14 +515,7 @@ export function parseReview(text) {
 // Where an item stands: done (ticked), fix (the reviewer asked for a change the
 // agent has not answered), fixed (the agent answered; the reviewer looks again),
 // hold (the reviewer cannot decide yet) or open.
-export function itemState(item) {
-  if (item.done) return 'done';
-  const kinds = (item.remarks ?? []).map((r) => r.kind);
-  const fix = kinds.lastIndexOf('fix');
-  if (fix >= 0 && !kinds.slice(fix + 1).includes('fixed')) return 'fix';
-  const last = kinds.filter((k) => k === 'hold' || k === 'fixed').pop();
-  return last ?? 'open';
-}
+export const itemState = (item) => noteState(item.done, item.remarks);
 
 // "### <Word>: <name>" blocks of a file, each with the lines up to the next
 // heading of the same or a higher level.
@@ -1436,6 +1429,7 @@ const SCRIPT = String.raw`(() => {
   const unfold = (hash) => { let el = null; try { el = d.getElementById(decodeURIComponent(hash.slice(1))); } catch (e) { /* bad escape */ } const f = el && el.querySelector(':scope > details.doc-fold'); if (f) f.open = true; };
   d.addEventListener('click', (e) => { const a = e.target.closest ? e.target.closest('a[href^="#"]') : null; if (a) unfold(a.getAttribute('href')); }, true);
   if (location.hash) unfold(location.hash);
+  addEventListener('hashchange', () => unfold(location.hash));
   const itemOf = (hash) => { let el = null; try { el = d.getElementById(decodeURIComponent(hash.slice(1))); } catch (e) { /* bad escape */ } return el && el.classList.contains('item') ? el : null; };
   d.addEventListener('click', (e) => {
     const a = e.target.closest ? e.target.closest('a[href^="#"]') : null;
@@ -1465,7 +1459,7 @@ const SCRIPT = String.raw`(() => {
     else if (k === 'k') step(-1, false);
     else if (k === 'n') step(1, true);
     else if (k === 'p') step(-1, true);
-    else if (k === 'o' && current) current.querySelectorAll('details.src, details.fold').forEach((x) => { x.open = !x.open; });
+    else if (k === 'o' && current) { const all = [...current.querySelectorAll('details.src, details.fold')]; const open = !all.every((x) => x.open); all.forEach((x) => { x.open = open; }); }
     else if (k === 'u' && fOpen && fAll) { (fOpen.checked ? fAll : fOpen).checked = true; remember(); }
     else return;
     e.preventDefault();

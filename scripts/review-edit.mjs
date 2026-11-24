@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { CANVAS_LOG, PLACEHOLDER, REMARK, plain } from './gate.mjs';
+import { CANVAS_LOG, PLACEHOLDER, REMARK, openFix, plain } from './gate.mjs';
 import { ignoreLocal } from './metrics.mjs';
 
 const CHECKBOX = /^(\s*(?:[-*+]|\d+[.)])\s+\[)(.?)(\]\s*)(.*)$/;
@@ -66,27 +66,35 @@ function findItem(lines, id) {
 // note lines ({ index, kind }) as gate.mjs reads them and where a new note goes.
 function itemNotes(lines, index) {
   const bare = masked(lines.join('\n')).split('\n');
+  // Whether a comment is still open at the end of each line: a note never goes inside one.
+  const open = [];
+  let inside = false;
+  for (const line of lines) {
+    let at = 0;
+    for (;;) {
+      const next = inside ? line.indexOf('-->', at) : line.indexOf('<!--', at);
+      if (next < 0) break;
+      inside = !inside;
+      at = next + (inside ? 4 : 3);
+    }
+    open.push(inside);
+  }
   const notes = [];
   let end = index;
   for (let i = index + 1; i < lines.length; i += 1) {
     const line = bare[i];
     if (CHECKBOX.test(line) || FENCE.test(line) || /^#{1,6}\s/.test(line)) break;
-    // An indented comment belongs to the item too: a new note goes after it.
-    if (!lines[i].trim()) continue;
-    if (!/^\s/.test(lines[i])) break;
-    end = i;
     const r = line.match(REMARK);
-    if (r) notes.push({ index: i, kind: r[1].toLowerCase() });
+    if (r) { notes.push({ index: i, kind: r[1].toLowerCase() }); if (!open[i]) end = i; continue; }
+    if (!lines[i].trim()) continue;
+    // Read as gate.mjs reads it: a comment (blank once comments are left out)
+    // does not end the item, other unindented text does.
+    if (line.trim() && !/^\s/.test(line)) break;
+    if (!open[i]) end = i;
   }
   return { notes, end };
 }
 
-// A fix the agent has not answered yet: the last fix with no fixed after it.
-const openFix = (notes) => {
-  const kinds = notes.map((n) => n.kind);
-  const last = kinds.lastIndexOf('fix');
-  return last >= 0 && !kinds.slice(last + 1).includes('fixed');
-};
 
 // The line index of "Reviewer:" as gate.mjs reads it (outside comments), or -1.
 function reviewerLine(lines) {

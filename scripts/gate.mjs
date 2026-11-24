@@ -87,7 +87,9 @@ export function checkboxes(text) {
 // and "  - fixed: ..." (the agent's answer to the fix above it). The person
 // writes fix and hold, in the file or with the canvas; the agent writes fixed.
 // Comments and fenced code are left out, so a template's example is no note.
-export const REMARK = /^\s+(?:[-*+]|\d+[.)])\s+(?:\*\*|__)?(fix|hold|fixed)(?:\*\*|__)?\s*:\s*(.*)$/i;
+// The line may also stand unindented right under the item (a browser shows the
+// example without its spaces) and use a full-width colon (a Japanese IME).
+export const REMARK = /^\s*(?:[-*+]|\d+[.)])\s+(?:\*\*|__)?(fix|hold|fixed)(?:\*\*|__)?\s*[:：]\s*(.*)$/i;
 const ITEM_ID = /^([A-Za-z])(\d+)\b/;
 
 // Each review item that has an id, with its notes in file order:
@@ -114,10 +116,26 @@ export function reviewRemarks(text) {
     else if (line.trim() && !/^\s/.test(line)) item = null;
   }
   for (const it of items) {
-    const lastFix = it.remarks.map((r) => r.kind).lastIndexOf('fix');
-    it.openFix = lastFix >= 0 && !it.remarks.slice(lastFix + 1).some((r) => r.kind === 'fixed');
+    it.openFix = openFix(it.remarks);
+    it.state = noteState(it.done, it.remarks);
   }
   return items;
+}
+
+// A fix is open until a fixed line follows it.
+export function openFix(remarks) {
+  const kinds = (remarks ?? []).map((r) => r.kind);
+  const last = kinds.lastIndexOf('fix');
+  return last >= 0 && !kinds.slice(last + 1).includes('fixed');
+}
+
+// Where an item stands, the same for the gate, the page and the canvas:
+// fix (a change asked for and not answered, even on a ticked line), done
+// (ticked), hold or fixed (whichever of the two comes last), or open.
+export function noteState(done, remarks) {
+  if (openFix(remarks)) return 'fix';
+  if (done) return 'done';
+  return (remarks ?? []).filter((r) => r.kind === 'hold' || r.kind === 'fixed').pop()?.kind ?? 'open';
 }
 
 export function requirementNames(text) {
@@ -225,7 +243,7 @@ function commonReview(dir, problems) {
     problems.push(`fix requested and not answered: ${item.id} — ${item.remarks.filter((r) => r.kind === 'fix').pop().text}`);
   }
   // An open item the reviewer put on hold ("  - hold: ...") waits for the reviewer, not the agent.
-  for (const item of reviewRemarks(review).filter((i) => !i.done && !i.openFix && i.remarks.filter((r) => r.kind !== 'fixed').pop()?.kind === 'hold')) {
+  for (const item of reviewRemarks(review).filter((i) => i.state === 'hold')) {
     problems.push(`on hold: ${item.id} — ${item.remarks.filter((r) => r.kind === 'hold').pop().text}`);
   }
   return boxes;
@@ -1756,11 +1774,12 @@ export function nextSteps(command, result, lang = 'en') {
     return { person, agent: [...(result.problems ?? []), ...canvas] };
   }
   const problems = result.problems ?? [];
-  const idOf = (p, prefix) => p.slice(prefix.length).split(' ')[0];
-  const fixing = problems.filter((p) => p.startsWith('fix requested and not answered: ')).map((p) => idOf(p, 'fix requested and not answered: '));
-  const held = problems.filter((p) => p.startsWith('on hold: ')).map((p) => idOf(p, 'on hold: '));
-  const unticked = problems.filter((p) => p.startsWith('not ticked: ')).map((p) => plain(p.slice('not ticked: '.length)).split(' ')[0])
-    .filter((id) => !fixing.includes(id.toUpperCase()) && !held.includes(id.toUpperCase()));
+  // "R1", "R1:", "**R01**" all name R1.
+  const idOf = (text) => { const m = plain(text).match(/^([A-Za-z])0*(\d+)/); return m ? `${m[1].toUpperCase()}${m[2]}` : plain(text).split(' ')[0]; };
+  const fixing = problems.filter((p) => p.startsWith('fix requested and not answered: ')).map((p) => idOf(p.slice('fix requested and not answered: '.length)));
+  const held = problems.filter((p) => p.startsWith('on hold: ')).map((p) => idOf(p.slice('on hold: '.length)));
+  const unticked = problems.filter((p) => p.startsWith('not ticked: ')).map((p) => idOf(p.slice('not ticked: '.length)))
+    .filter((id) => !fixing.includes(id) && !held.includes(id));
   const undecided = problems.filter((p) => p.startsWith('question has no recorded decision: ')).map((p) => p.slice('question has no recorded decision: '.length));
   const active = problems.map((p) => p.match(/^(?:extract|amend) change (\S+) is still active/)?.[1]).filter(Boolean);
   const foundation = ['survey', 'target-design'].filter((name) => problems.some((p) => p.startsWith(`no archived ${name} change`)));

@@ -60,7 +60,7 @@ const clean = (s) => stripComments(s).replace(/`/g, '').replace(/\*\*/g, '').tri
 const table = (head, rows, cls = '') => `<div class="table"><table${cls ? ` class="${cls}"` : ''}><thead><tr>${head.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 const cell = (row, pattern, fallback) => { const i = row.header.findIndex((h) => pattern.test(h)); return (row.cells[i >= 0 ? i : fallback] ?? '').trim(); };
 // A cell that lists contexts: "billing, order", "billing、order", "billing<br>order".
-const ids = (text) => plain(stripComments(text)).split(/[,、;／/]|<br\s*\/?>|\s+and\s+/i).map((s) => s.trim().toLowerCase()).filter((s) => s && !/^(-|—|none|なし|n\/a)$/.test(s));
+const ids = (text) => plain(stripComments(text).replace(/\([^)]*\)|（[^）]*）/g, ' ')).split(/[,、;／/]|<br\s*\/?>|\s+and\s+/i).map((s) => s.trim().toLowerCase()).filter((s) => s && !/^(-|—|none|なし|n\/a)$/.test(s));
 
 // Splits a value at its top-level separators (not inside brackets or code).
 function topLevel(text) {
@@ -79,15 +79,28 @@ function topLevel(text) {
   return parts;
 }
 
-// "- **Owned data**: ..." lines of a context block as { field: value } (continuation lines joined).
+// "- **Owned data**: ..." lines of a context block as { field: value }, with
+// continuation lines joined. Null when the block holds anything else (a
+// paragraph, a nested list, a table): the card then shows the block as written,
+// so nothing the analyst wrote is hidden from the reviewer.
 export function contextFields(body) {
   const fields = {};
   let last = null;
   for (const line of stripComments(body.join('\n')).split(/\r?\n/)) {
-    const m = line.match(/^\s*[-*+]\s+(?:\*\*|__)?([^*_:：]+?)(?:\*\*|__)?\s*[:：]\s*(.*)$/);
-    if (m) { last = m[1].trim().toLowerCase(); fields[last] = m[2].trim(); continue; }
-    if (last && line.trim()) fields[last] += ` ${line.trim()}`;
-    else if (!line.trim()) last = null;
+    if (!line.trim()) { last = null; continue; }
+    // "- **Key**: value", "- **Key:** value", "- Key: value" (a known key only).
+    const m = line.match(/^[-*+]\s+(\*\*|__)(.+?)\1\s*(.*)$/);
+    let key = null;
+    let value = null;
+    if (m && (/[:：]\s*$/.test(m[2]) || /^[:：]/.test(m[3]))) { key = m[2].replace(/[:：]\s*$/, ''); value = m[3].replace(/^[:：]\s*/, ''); }
+    else {
+      const p = line.match(/^[-*+]\s+([^:：`*_]+?)\s*[:：]\s*(.*)$/);
+      if (p && Object.values(FIELD_KEYS).some((re) => re.test(p[1].trim().toLowerCase()))) { key = p[1]; value = p[2]; }
+    }
+    if (key !== null) { last = key.trim().toLowerCase(); fields[last] = value.trim(); continue; }
+    // A continuation of the value above, never a list of its own.
+    if (last && /^\s+\S/.test(line) && !/^\s+(?:[-*+]|\d+[.)])\s/.test(line)) { fields[last] += ` ${line.trim()}`; continue; }
+    return null;
   }
   return fields;
 }
@@ -138,7 +151,7 @@ const chip = (id) => `<span class="ctx-chip">${escapeHtml(id)}</span>`;
 export function contextCard(facts, item, code) {
   const W = WORDS[code === 'ja' ? 'ja' : 'en'];
   const ctx = facts.contexts.find((c) => c.id === key(item.name)) ?? { id: key(item.name), fields: contextFields(item.body), body: item.body };
-  const f = ctx.fields;
+  const f = ctx.fields ?? {};
   const type = plain(field(f, 'type')).toLowerCase();
   const said = [];
   const name = field(f, 'name');
@@ -154,7 +167,8 @@ export function contextCard(facts, item, code) {
   if (evidence) said.push([W.fields.evidence, inline(evidence)]);
   // Fields the card does not know stay too (an analyst may add one).
   for (const [k, v] of Object.entries(f)) if (!Object.values(FIELD_KEYS).some((re) => re.test(k)) && v) said.push([k, inline(v)]);
-  if (!said.length) return `<div class="doc">${markdown(item.body.join('\n'), { headingOffset: 2 })}</div>`;
+  // Anything but plain fields: the block as written, beside the same facts.
+  const asWritten = ctx.fields === null || !said.length ? `<div class="doc">${markdown(item.body.join('\n'), { headingOffset: 2 })}</div>` : null;
 
   const up = facts.rel.filter((r) => r.down === ctx.id && r.up !== ctx.id);
   const down = facts.rel.filter((r) => r.up === ctx.id && r.down !== ctx.id);
@@ -173,7 +187,7 @@ export function contextCard(facts, item, code) {
   const capList = caps.length ? `<dt>${escapeHtml(W.capabilities)}</dt><dd><ol class="flat">${caps.map((c) => `<li><code>${escapeHtml(c.path)}</code> ${inline(c.name)}</li>`).join('')}</ol></dd>` : '';
   const fileList = files.length ? `<dt>${escapeHtml(W.files)}</dt><dd>${escapeHtml(W.fileCount(files.filter((r) => r.handling !== 'carry').length, files.filter((r) => r.handling === 'carry').length))}<details class="more"><summary>${escapeHtml(W.showFiles(files.length))}</summary><ul class="flat mono">${files.map((r) => `<li>${escapeHtml(r.path)}${r.handling === 'carry' ? ' <span class="sub">carry</span>' : ''}</li>`).join('')}</ul></details></dd>` : '';
   return `<div class="ctx-card">
-<dl class="ctx-said">${said.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${v}</dd>`).join('')}</dl>
+${asWritten ?? `<dl class="ctx-said">${said.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${v}</dd>`).join('')}</dl>`}
 ${connections || data || capList || fileList ? `<dl class="ctx-facts">${connections}${data}${capList}${fileList}</dl>` : ''}
 </div>`;
 }
@@ -183,8 +197,10 @@ ${connections || data || capList || fileList ? `<dl class="ctx-facts">${connecti
 const channelKind = (channel) => (/table|テーブル|db|database|データベース|共有/i.test(channel) ? 'table' : /event|イベント|file|ファイル|queue|キュー|message/i.test(channel) ? 'event' : 'call');
 
 // Contexts in columns from upstream (left) to downstream (right): each column is
-// the longest chain of upstreams before it. Edges that point back (a cycle) are
-// drawn as arcs. Same input, same picture.
+// the longest chain of upstreams before it. An edge that skips columns goes through
+// a slot of its own in each column it crosses, so it never runs under a box. An edge
+// that points back (a cycle) is laid out the other way and drawn with its arrow at
+// the start. Same input, same picture.
 export function relationsSvg(facts, code) {
   const W = WORDS[code === 'ja' ? 'ja' : 'en'];
   const order = [...facts.contexts.map((c) => c.id)];
@@ -224,44 +240,84 @@ export function relationsSvg(facts, code) {
   order.forEach((n) => depth(n));
   const cols = [];
   for (const n of order) { const d = layer.get(n); (cols[d] ??= []).push(n); }
-  // Two passes of ordering each column by the average row of its upstreams.
+  for (let c = 0; c < cols.length; c += 1) cols[c] ??= [];
+  // Each edge as a chain from its left end to its right end, with a slot in every
+  // column between. A back edge runs from its downstream (left) to its upstream.
+  const dummy = new Set();
+  const pred = new Map(), succ = new Map();
+  const link = (a, b) => { (succ.get(a) ?? succ.set(a, []).get(a)).push(b); (pred.get(b) ?? pred.set(b, []).get(b)).push(a); };
+  const chains = edges.map((e, i) => {
+    const rev = back.has(e);
+    const [a, b] = rev ? [e.down, e.up] : [e.up, e.down];
+    const chain = [a];
+    for (let c = layer.get(a) + 1; c < layer.get(b); c += 1) {
+      const d = `\0${i}:${c}`;
+      dummy.add(d);
+      cols[c].push(d);
+      chain.push(d);
+    }
+    chain.push(b);
+    for (let k = 1; k < chain.length; k += 1) link(chain[k - 1], chain[k]);
+    return { e, rev, chain };
+  });
+  // Order each column by the average row of its neighbours, sweeping right then left.
   const rowOf = new Map();
-  cols.forEach((col) => col.forEach((n, i) => rowOf.set(n, i)));
-  for (let pass = 0; pass < 2; pass += 1) {
-    cols.forEach((col, c) => {
-      if (c === 0) return;
-      const score = (n) => { const ups = forward.filter((e) => e.down === n).map((e) => rowOf.get(e.up)); return ups.length ? ups.reduce((a, b) => a + b, 0) / ups.length : rowOf.get(n); };
-      col.sort((a, b) => score(a) - score(b) || order.indexOf(a) - order.indexOf(b));
-      col.forEach((n, i) => rowOf.set(n, i));
-    });
+  const first = new Map();
+  cols.forEach((col) => col.forEach((n, i) => { rowOf.set(n, i); first.set(n, i); }));
+  const sweep = (c, side) => {
+    const col = cols[c];
+    const score = (n) => { const ns = side.get(n) ?? []; return ns.length ? ns.reduce((s, m) => s + rowOf.get(m), 0) / ns.length : rowOf.get(n); };
+    const scored = new Map(col.map((n) => [n, score(n)]));
+    col.sort((a, b) => scored.get(a) - scored.get(b) || first.get(a) - first.get(b));
+    col.forEach((n, i) => rowOf.set(n, i));
+  };
+  for (let pass = 0; pass < 3; pass += 1) {
+    for (let c = 1; c < cols.length; c += 1) sweep(c, pred);
+    for (let c = cols.length - 2; c >= 0; c -= 1) sweep(c, succ);
   }
-  const bw = 168, bh = 36, gx = 96, gy = 14, pad = 16;
-  const tallest = Math.max(...cols.map((c) => c.length));
-  const height = pad * 2 + tallest * (bh + gy) - gy;
-  const width = pad * 2 + cols.length * bw + (cols.length - 1) * gx + 40;
+  for (let c = 1; c < cols.length; c += 1) sweep(c, pred);
+  const bw = 168, bh = 36, dh = 8, gx = 96, gy = 14, pad = 16;
+  const tall = (n) => (dummy.has(n) ? dh : bh);
+  const colHeight = (col) => col.reduce((s, n) => s + tall(n), 0) + Math.max(0, col.length - 1) * gy;
+  const tallest = Math.max(...cols.map(colHeight));
+  const height = pad * 2 + tallest;
+  const width = pad * 2 + cols.length * bw + (cols.length - 1) * gx;
   const at = new Map();
   cols.forEach((col, c) => {
-    const top = pad + ((tallest - col.length) * (bh + gy)) / 2;
-    col.forEach((n, i) => at.set(n, { x: pad + c * (bw + gx), y: top + i * (bh + gy) }));
+    let y = pad + (tallest - colHeight(col)) / 2;
+    for (const n of col) { at.set(n, { x: pad + c * (bw + gx), y, cy: y + tall(n) / 2 }); y += tall(n) + gy; }
   });
   const short = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
   const nameOf = (id) => plain(field(facts.contexts.find((c) => c.id === id)?.fields ?? {}, 'name') || '') || '';
   const title = (e) => `${e.up} → ${e.down}${clean(e.pattern) ? ` · ${clean(e.pattern)}` : ''}${clean(e.channel) ? ` · ${clean(e.channel)}` : ''}`;
-  const lines = edges.map((e) => {
-    const p = at.get(e.up), q = at.get(e.down);
+  const curve = (x1, y1, x2, y2) => { const mid = (x1 + x2) / 2; return ` C${mid},${y1} ${mid},${y2} ${x2},${y2}`; };
+  // Edges leave a box's right side and enter its left side at spread-out points,
+  // ordered by where they go, so two edges between the same boxes do not overlap.
+  const ports = new Map();
+  const port = (n, side, i, other) => { const k = `${n}\0${side}`; (ports.get(k) ?? ports.set(k, []).get(k)).push({ i, other }); };
+  chains.forEach(({ chain }, i) => { port(chain[0], 'out', i, chain[1]); port(chain.at(-1), 'in', i, chain.at(-2)); });
+  const offset = new Map();
+  for (const [k, list] of ports) {
+    list.sort((a, b) => at.get(a.other).cy - at.get(b.other).cy || a.i - b.i);
+    const step = list.length > 1 ? Math.min(6, (bh - 12) / (list.length - 1)) : 0;
+    list.forEach(({ i }, j) => offset.set(`${k}\0${i}`, (j - (list.length - 1) / 2) * step));
+  }
+  const lines = chains.map(({ e, rev, chain }, i) => {
     const kind = channelKind(clean(e.channel));
-    let d;
-    if (back.has(e) || layer.get(e.down) <= layer.get(e.up)) {
-      // Pointing back or within a column: an arc on the right of both boxes.
-      const x1 = p.x + bw, y1 = p.y + bh / 2, x2 = q.x + bw, y2 = q.y + bh / 2;
-      const bulge = 40 + Math.abs(y2 - y1) / 6;
-      d = `M${x1},${y1} C${Math.max(x1, x2) + bulge},${y1} ${Math.max(x1, x2) + bulge},${y2} ${x2 + 2},${y2}`;
-    } else {
-      const x1 = p.x + bw, y1 = p.y + bh / 2, x2 = q.x - 2, y2 = q.y + bh / 2;
-      const mid = (x1 + x2) / 2;
-      d = `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`;
+    const p = at.get(chain[0]);
+    let x = p.x + bw + (rev ? 2 : 0), y = p.cy + offset.get(`${chain[0]}\0out\0${i}`);
+    let d = `M${x},${y}`;
+    for (const n of chain.slice(1)) {
+      const q = at.get(n);
+      if (dummy.has(n)) {
+        d += `${curve(x, y, q.x, q.cy)} L${q.x + bw},${q.cy}`;
+        x = q.x + bw; y = q.cy;
+      } else {
+        d += curve(x, y, q.x - (rev ? 0 : 2), q.cy + offset.get(`${n}\0in\0${i}`));
+      }
     }
-    return `<path d="${d}" class="rel-edge rel-${kind}" marker-end="url(#rel-arrow)"><title>${escapeHtml(title(e))}</title></path>`;
+    const arrow = rev ? 'marker-start="url(#rel-arrow)"' : 'marker-end="url(#rel-arrow)"';
+    return `<path d="${d}" class="rel-edge rel-${kind}${rev ? ' rel-back' : ''}" ${arrow}><title>${escapeHtml(title(e))}</title></path>`;
   });
   const boxes = order.map((id) => {
     const p = at.get(id);
@@ -319,7 +375,7 @@ export function surveyAid(facts, item, code, row = null) {
   }
   if (item.id === 'D90') return facts.missing === null ? '' : `<div class="doc">${markdown(facts.missing, { headingOffset: 2 })}</div>`;
   if (item.letter === 'D') {
-    const name = key(plain(item.title).split(':')[0]);
+    const name = key(plain(item.title).split(/[:：]/)[0]);
     const db = facts.databases.find((r) => key(r.cells[0] ?? '') === name);
     const facts1 = db ? `<dl class="facts">${db.header.map((h, i) => (i === 0 ? '' : `<dt>${escapeHtml(h)}</dt><dd>${inline(stripComments(db.cells[i] ?? ''))}</dd>`)).join('')}</dl>` : `<p class="caution">${escapeHtml(W.noDatabase)}</p>`;
     return `${facts1}${facts.logic ? `<h4 class="aid-h">${escapeHtml(W.logic)}</h4><div class="doc">${markdown(facts.logic)}</div>` : ''}`;

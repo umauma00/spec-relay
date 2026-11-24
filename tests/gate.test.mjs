@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { checkReview, checkPortReady, checkPortDone, baselineHash, archivedChange, sourceFiles, databaseHash, main, nextSteps, language, inventoryRows, inventoryRowFor, reviewRemarks } from '../scripts/gate.mjs';
+import { checkReview, checkPortReady, checkPortDone, baselineHash, archivedChange, sourceFiles, databaseHash, main, nextSteps, language, inventoryRows, inventoryRowFor, reviewRemarks, noteState } from '../scripts/gate.mjs';
 import { quiet } from './helpers.mjs';
 import { tempDir, write } from './helpers.mjs';
 
@@ -1002,4 +1002,15 @@ test('review notes: an unanswered fix stops the gate for the agent, a hold waits
   assert.match(next.person.join('\n'), /保留中の項目が 1 件あります（M1）/);
   assert.match(next.person.join('\n'), /未承認の項目が 1 件あります（M4）/, 'items with a note are not counted again as unticked');
   assert.deepEqual(next.agent, ['fix requested and not answered: K1 — rename too']);
+});
+
+test('review notes as people write them: unindented, full-width colons, bold labels; the latest note wins', () => {
+  const items = reviewRemarks('- [ ] K1 a\n- fix： 全角のコロン\n- [ ] K2 b\n  - **hold**: bold\n- [ ] K3 c\n  <!-- a comment line -->\n  - fix: after a comment\n');
+  assert.deepEqual(items.map((i) => [i.id, i.state, i.remarks.map((r) => r.text).join('|')]), [['K1', 'fix', '全角のコロン'], ['K2', 'hold', 'bold'], ['K3', 'fix', 'after a comment']]);
+  assert.equal(noteState(false, [{ kind: 'hold' }, { kind: 'fixed' }]), 'fixed');
+  assert.equal(noteState(false, [{ kind: 'fix' }, { kind: 'fixed' }, { kind: 'hold' }]), 'hold');
+  assert.equal(noteState(true, [{ kind: 'hold' }]), 'done');
+  assert.equal(noteState(true, [{ kind: 'fix' }]), 'fix', 'a tick does not hide an unanswered fix');
+  const next = nextSteps('review', { ok: false, problems: ['not ticked: R04: total', 'fix requested and not answered: R4 — wrong'] }, 'en');
+  assert.doesNotMatch(next.person.join('\n'), /not approved yet/, 'R04 and R4 are the same item');
 });

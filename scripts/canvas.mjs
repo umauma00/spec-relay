@@ -325,9 +325,10 @@ const CANVAS_SCRIPT = String.raw`(() => {
       const button = (label, cls, onClick) => { const b = d.createElement('button'); b.type = 'button'; b.className = 'act ' + cls; b.textContent = label; b.setAttribute('aria-label', label + ': ' + it.id); b.addEventListener('click', onClick); return b; };
       const first = row.firstChild;
       const add = (b) => row.insertBefore(b, first);
+      // An unanswered change request comes first: it can only be withdrawn (or answered by the agent).
+      if (it.state === 'fix') add(button(W.withdraw, 'act-quiet', () => run([['withdraw', it.id]], toast)));
       if (it.done) add(button(W.untick, 'act-quiet', () => run([['untick', it.id]], toast)));
-      else if (it.state === 'fix') add(button(W.withdraw, 'act-quiet', () => run([['withdraw', it.id]], toast)));
-      else {
+      else if (it.state !== 'fix') {
         add(it.q && !it.decided ? button(W.decideTick, 'act-ok', () => edit('decision', it.id, '', 'tick')) : button(W.tick, 'act-ok', () => run([['tick', it.id]], toast)));
         add(button(W.fix, 'act-fix', () => edit('fix', it.id, '')));
         if (it.state === 'hold') add(button(W.withdraw, 'act-quiet', () => run([['withdraw', it.id]], toast)));
@@ -397,9 +398,10 @@ const CANVAS_SCRIPT = String.raw`(() => {
     if (!el || el.getBoundingClientRect().bottom < 0 || el.getBoundingClientRect().top > innerHeight) el = [...d.querySelectorAll('main .item, main .group > h2')].find((x) => x.offsetParent !== null && x.getBoundingClientRect().bottom > 0) || null;
     const place = { page: cfg.page, id: el && el.id ? el.id : null, top: el ? el.getBoundingClientRect().top : 0, y: scrollY };
     store('spec-relay-canvas-place', JSON.stringify(place));
+    // Only for this reload: the browser's own restore would fight ours.
+    try { history.scrollRestoration = 'manual'; } catch (e) { /* not supported */ }
     try { history.replaceState(Object.assign({}, history.state, { specRelayPlace: place }), '', location.pathname + location.search); } catch (e) { /* refused */ }
   };
-  try { history.scrollRestoration = 'manual'; } catch (e) { /* not supported */ }
   let place = null;
   try { place = JSON.parse(store('spec-relay-canvas-place') || 'null'); } catch (e) { place = null; }
   if (!place && history.state && history.state.specRelayPlace) place = history.state.specRelayPlace;
@@ -417,9 +419,13 @@ const CANVAS_SCRIPT = String.raw`(() => {
     addEventListener('wheel', () => { moved = true; }, { once: true, passive: true });
     addEventListener('keydown', () => { moved = true; }, { once: true });
     addEventListener('touchstart', () => { moved = true; }, { once: true, passive: true });
-    addEventListener('load', () => { put(); setTimeout(put, 80); });
+    addEventListener('mousedown', () => { moved = true; }, { once: true });
+    addEventListener('hashchange', () => { moved = true; }, { once: true });
+    addEventListener('load', () => { put(); setTimeout(() => { put(); moved = true; }, 80); });
     setTimeout(put, 0);
   }
+  // A manual reload or Back gets the browser's own restore again.
+  try { history.scrollRestoration = 'auto'; } catch (e) { /* not supported */ }
   // Follow the files: reload when they change, go where the agent sent the canvas.
   let busy = false, misses = 0;
   setInterval(async () => {

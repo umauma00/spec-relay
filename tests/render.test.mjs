@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { render, markdown, inline, parseRefs, parseReview, parseQuestions, diffChars, commonIndent, timeStamp, main, capabilities } from '../scripts/render.mjs';
 import { tempDir, write, quiet, crlf } from './helpers.mjs';
+import { contextFields, surveyFacts, surveyAid, contextCard } from '../scripts/survey-view.mjs';
 
 const CHANGE = 'openspec/changes/extract-billing-invoice';
 const SPEC = '## Purpose\n\nComputes invoice totals from the lines of an invoice.\n\n## ADDED Requirements\n\n### Requirement: Total\nThe system SHALL add the lines.\n\n#### Scenario: two lines\n- **WHEN** 100 x 3 and 55 x 1\n- **THEN** `355`\n\n### Requirement: Reject empty\nThe system SHALL reject an invoice without lines.\n\n#### Scenario: none\n- **WHEN** no lines\n- **THEN** an error\n';
@@ -536,8 +537,13 @@ test('a survey review shows the material of each map item: the diagram, the data
   assert.match(page, /id="K2"[\s\S]*?ほか 3 件を表示[\s\S]*?上流（使う相手）[\s\S]*?platform[\s\S]*?order[\s\S]*?<code>billing\/invoice<\/code>/);
   // M1: the diagram (drawn by the script) and the table; the cycle billing <-> order is drawn too.
   assert.match(page, /id="M1"[\s\S]*?<figure class="diagram rel"><svg[^>]*aria-label="コンテキスト 3 個とつながり 3 本の図"/);
-  assert.equal(count(page.match(/<figure class="diagram rel">[\s\S]*?<\/figure>/)[0], /class="rel-edge rel-(call|table|event)" marker-end/g), 3);
-  assert.match(page, /class="rel-edge rel-table" marker-end[^>]*><title>order → billing · customer-supplier · table t_order<\/title>/);
+  const fig = page.match(/<figure class="diagram rel">[\s\S]*?<\/figure>/)[0];
+  assert.equal(count(fig, /class="rel-edge rel-(call|table|event)" marker-end/g), 2);
+  // The edge back (order -> billing, found after billing -> order) is laid out the
+  // other way, arrow at its start, beside the other edge between the two boxes.
+  assert.match(fig, /<path d="M450,31 [^"]*" class="rel-edge rel-table rel-back" marker-start[^>]*><title>order → billing/);
+  assert.match(fig, /<path d="M448,37 [^"]*" class="rel-edge rel-event" marker-end[^>]*><title>billing → order/);
+  assert.match(page, /class="rel-edge rel-table rel-back" marker-start[^>]*><title>order → billing · customer-supplier · table t_order<\/title>/);
   // M2: data across contexts; M4 capabilities; M5 carried files; C1 excluded with reasons.
   assert.match(page, /id="M2"[\s\S]*?<table class="matrix">[\s\S]*?t_order<span class="caution-inline">複数が書き込む<\/span>[\s\S]*?<td class="m-owns">所有<\/td>/);
   assert.match(page, /id="M3"[\s\S]*?&quot;order&quot; means two things/);
@@ -560,4 +566,19 @@ test('without a survey, items still get their guidance, notes and states', () =>
   assert.match(page, /<p class="how-title">Check<\/p>[\s\S]*?source lines do/);
   assert.match(page, /id="R1"[\s\S]*?<details class="fold"><summary>Confirmed, so folded/);
   assert.match(page, /<span class="seal is-open st-hold"><b aria-hidden="true">H<\/b><span>On hold<\/span>/);
+});
+
+test('survey facts read what analysts write, and show the rest as written', () => {
+  assert.deepEqual(contextFields(['- **Name:** Billing', '- Responsibility: invoices', '  and credit notes', '- **Owned data**：`t_invoice`']), { name: 'Billing', responsibility: 'invoices and credit notes', 'owned data': '`t_invoice`' });
+  assert.equal(contextFields(['- **Name**: Billing', '', 'A paragraph the analyst wrote.']), null, 'anything else: the card shows the block as written');
+  assert.equal(contextFields(['- **Name**: Billing', '  - a nested list']), null);
+  const facts = surveyFacts({
+    contexts: [{ name: 'billing', body: ['- **Name**: Billing', '', 'Note: invoices only.'] }, { name: 'order', body: [] }],
+    mapText: '## Shared data\n| Data | Owner | Also written by | Read by |\n|---|---|---|---|\n| t_order | order (batch, nightly) | billing（一部） | — |\n',
+    databaseText: '## Databases\n| Database | Product | Connection | Definitions |\n|---|---|---|---|\n| main | MySQL | default | none |\n',
+  });
+  assert.equal(facts.contexts[0].fields, null);
+  assert.match(contextCard(facts, { name: 'billing', body: facts.contexts[0].body }, 'en'), /<div class="doc">[\s\S]*?Note: invoices only\.[\s\S]*?<dl class="ctx-facts">/);
+  assert.deepEqual([facts.shared[0].owner, facts.shared[0].writers, facts.shared[0].readers], [['order'], ['billing'], []], 'notes in brackets are not contexts');
+  assert.match(surveyAid(facts, { id: 'D1', letter: 'D', title: 'main：定義とロジック' }, 'ja'), /MySQL/, 'a full-width colon ends the database name');
 });

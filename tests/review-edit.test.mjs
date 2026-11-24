@@ -161,3 +161,15 @@ test('fix and hold notes go under the item and open it again; withdraw takes the
   assert.equal(editReview(answered, { action: 'withdraw', id: 'K1' }).code, 'noNote', 'the agent\'s note is not the person\'s to withdraw');
   assert.equal(editReview(text, { action: 'fix', id: 'K2', value: '  ' }).code, 'emptyValue');
 });
+
+test('a note never lands inside a comment, and an unindented note still belongs to its item', () => {
+  const text = '## 1\n- [ ] K1 a\n  <!-- an example\n  - fix: not a note\n  -->\n- [ ] K2 b\n- hold: unindented\n\nnext paragraph\n';
+  const fixed = editReview(text, { action: 'fix', id: 'K1', value: 'merge' });
+  assert.equal(fixed.text, text.replace('  -->\n', '  -->\n  - fix: merge\n'), 'after the comment closes, not inside it');
+  assert.equal(parseReview(fixed.text)[0].items[0].state, 'fix');
+  assert.equal(parseReview(text)[0].items[1].state, 'hold');
+  const back = editReview(text, { action: 'withdraw', id: 'K2' });
+  assert.equal(back.text, text.replace('- hold: unindented\n', ''));
+  const open = '## 1\n- [ ] K1 a\n  <!-- not closed\n';
+  assert.equal(editReview(open, { action: 'fix', id: 'K1', value: 'x' }).text, '## 1\n- [ ] K1 a\n  - fix: x\n  <!-- not closed\n', 'an unclosed comment: the note goes before it');
+});
