@@ -50,7 +50,7 @@ node "C:\path\to\spec-relay\scripts\doctor.mjs" --target . --client cli
 | git | git があるか、リポジトリの一番上か、「所有者が違う」で拒否されていないか、長いパス | WARN |
 | フォルダー | 書き込めるか（「コントロールされたフォルダー アクセス」など）、OneDrive などの同期フォルダーやネットワーク上のフォルダーでないか | FAIL・WARN |
 | 導入済みのリポジトリ | スキーマがキットの版と同じか、`openspec update` で apply・archive・sync が戻っていないか、openspec/config.yaml に `skillsScope: project` があるか、`.agents/skills/` に OpenSpec のスキルが残っているか、元コードのフォルダーがあるか、移行先の言語のビルド道具（JDK・Python・.NET SDK など） | FAIL・WARN |
-| ホームフォルダーの OpenSpec のスキル | Copilot がどのリポジトリでも読む `~/.agents/skills` と `~/.copilot/skills` に、OpenSpec 標準のスキルがないか（OpenSpec 2.1 以降は、ほかのプロジェクトの `openspec init` が既定で `~/.agents/skills` に入れます。レビューの確認を通らない archive に使われるおそれがあります）。フックが有効なら INFO | WARN |
+| ホームフォルダーの OpenSpec のスキル | 導入済みのリポジトリで、Copilot がどのリポジトリでも読む `~/.agents/skills` と `~/.copilot/skills` に、OpenSpec 標準のスキルがないか（OpenSpec 2.1 以降は、ほかのプロジェクトの `openspec init` が既定で `~/.agents/skills` に入れます。レビューの確認を通らない archive に使われるおそれがあります）。フックが有効なら INFO | WARN |
 | サブエージェント | 導入のあとに1回、解析・照合・実装担当を同時に起動して、それぞれファイルを1つ書かせる試運転（`--trial`・`--trial-check`。実装担当は移行先のフォルダーに書き、`node --version` も実行）。エージェントが見つかるか、モデルが使えるか、書き込みとコマンド実行の許可が出るかを最初に確かめます | FAIL |
 
 終了コードは、0 なら始められる（WARN が残ることはある）、1 なら FAIL を直してからです。試運転の結果は PC とアプリごとに `openspec/spec-relay/local/trial.json`（git では無視）に残り、モデルの設定を変えたときや、別の PC・アプリで使い始めたときは、もう一度試運転を求めます。

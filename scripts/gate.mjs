@@ -38,7 +38,7 @@ import { checkSurveyCoverage, checkSourceMap, checkTrace, checkAmendSourceMap, c
 import { checkLedger } from './sites.mjs';
 import { E2E_DIR, OLD_RECEIPT, e2eCommandOptions, e2eDigest, isE2eCommand, oldReceipt } from './e2e.mjs';
 
-// Same shapes OpenSpec 2.0.0 (and 1.17.0) counts as tasks and requirements, so the gate never
+// Same shapes OpenSpec 2.1.1 (and 1.17.0, 2.0.0) counts as tasks and requirements, so the gate never
 // sees fewer items than `openspec instructions apply` or `openspec archive` do.
 const CHECKBOX = /^\s*(?:[-*+]|\d+[.)])\s+\[(.?)\]\s*(.*)$/;
 const REQUIREMENT = /^###\s*Requirement:\s*(.+?)\s*$/i;

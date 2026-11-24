@@ -78,7 +78,7 @@ function setTo(env, name) {
   return key === undefined || env[key] === undefined ? undefined : String(env[key]).trim().toLowerCase();
 }
 
-// The same rules as OpenSpec 2.0.0 (src/telemetry, unchanged since 1.17.0): an opt-out in the
+// The same rules as OpenSpec 2.1.1 (src/telemetry, unchanged since 1.17.0): an opt-out in the
 // environment, CI, or `telemetry.enabled: false` in the global config.
 export function telemetryOff(env, platform, readFile) {
   const telemetry = setTo(env, 'OPENSPEC_TELEMETRY');
@@ -218,7 +218,9 @@ export function checkOpenspec(ctx) {
   return {
     id: 'openspec', level: 'fail',
     message: ctx.t(`openspec/spec-relay/tools の OpenSpec は ${showVersion(v)} で、キットが確認した ${OPENSPEC_TESTED} と違います。`, `the OpenSpec in openspec/spec-relay/tools is ${showVersion(v)}, not ${OPENSPEC_TESTED}, the version the kit is tested with.`),
-    fix: rerun,
+    // After a kit update the old package files are a conflict for setup, so they go first.
+    fix: ctx.t('キットを更新したときは、`openspec/spec-relay/tools/` の package.json と package-lock.json を消してから、導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`。docs/UPGRADING.md）。誰かがこの2つを書き換えたときは、元に戻してから導入スクリプトを実行します。',
+      'After a kit update, delete package.json and package-lock.json in `openspec/spec-relay/tools/`, then run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`; docs/UPGRADING.md). If someone edited those two files, restore them, then run setup.'),
   };
 }
 
@@ -431,10 +433,10 @@ export function checkSetup(ctx) {
     results.push({
       id: 'skills-scope', level: 'fail',
       message: scope === null
-        ? ctx.t('openspec/config.yaml に `skillsScope: project` がありません（0.21.0 以前の導入）。OpenSpec 2.1 以降の `openspec update` は、スキルをホームフォルダーへ移すか尋ね、移すとキットが無効にしたスキルが元に戻ります。', 'openspec/config.yaml has no `skillsScope: project` (set up with 0.21.0 or earlier). From OpenSpec 2.1, `openspec update` offers to move the skills to the home folder, which brings back the skills the kit disabled.')
+        ? ctx.t('openspec/config.yaml に `skillsScope: project` がありません（0.21.0 以前に導入したか、スキルがホームフォルダーへ移されたときに OpenSpec が消しました）。OpenSpec 2.1 以降の `openspec update` は、スキルをホームフォルダーへ移すか尋ね、移すとキットが無効にしたスキルが元に戻ります。', 'openspec/config.yaml has no `skillsScope: project` (set up with 0.21.0 or earlier, or OpenSpec removed it when the skills moved to the home folder). From OpenSpec 2.1, `openspec update` offers to move the skills to the home folder, which brings back the skills the kit disabled.')
         : ctx.t(`openspec/config.yaml の skillsScope が ${scope || '（空）'} です。キットはリポジトリの中のスキルしか無効にできません。`, `skillsScope in openspec/config.yaml is ${scope || '(empty)'}; the kit can disable skills only in this repository.`),
       fix: scope === null
-        ? ctx.t('docs/UPGRADING.md の「0.21.0 から更新するとき」に従って、導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。この1行を足します。', 'Follow "0.21.0 から更新するとき" in docs/UPGRADING.md and run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`); it adds the line.')
+        ? ctx.t('導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。この1行を足します。キットを更新した直後なら、先に docs/UPGRADING.md の「0.21.0 から更新するとき」のとおり、`openspec/spec-relay/tools/` の package.json と package-lock.json を消します。', 'Run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`); it adds the line. Right after a kit update, first delete package.json and package-lock.json in `openspec/spec-relay/tools/` ("0.21.0 から更新するとき" in docs/UPGRADING.md).')
         : ctx.t('`skillsScope: project` に直してから、導入スクリプトをもう一度実行してください。', 'Change it to `skillsScope: project`, then run setup again.'),
     });
   }
@@ -453,7 +455,8 @@ export function checkSetup(ctx) {
   }
   const personal = ctx.personalBypassFiles ? ctx.personalBypassFiles(ctx.home) : [];
   if (personal.length) {
-    const hooks = (ctx.configValue(ctx.target, 'Hook enforcement', 'off') || '').toLowerCase().startsWith('on');
+    // The same values the hook accepts (hook.mjs enforced()).
+    const hooks = /^(on|true|yes|enforce)$/i.test(ctx.cleanValue(ctx.configValue(ctx.target, 'Hook enforcement', 'off')));
     const names = [...new Set(personal.map((f) => path.basename(path.dirname(f))))];
     results.push({
       id: 'personal-skills', level: hooks ? 'info' : 'warn',

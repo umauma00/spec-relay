@@ -11,7 +11,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
-        node: [22, 24]
+        # 22.20.0 is the lowest Node.js the pinned OpenSpec supports (doctor's NODE_MIN).
+        node: ['22.20.0', 22, 24]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

@@ -278,9 +278,6 @@ function initConflicts(target) {
   return found;
 }
 
-// The OpenSpec skills in a repository that bypass the review gate, recognised
-// by OpenSpec's frontmatter (generatedByOpenspec); a stub this script wrote is skipped.
-// Every change is shown in the dry run first.
 // Every OpenSpec skill in the repository, stubbed or not.
 export function repoSkills(target) {
   let names = [];
@@ -288,6 +285,9 @@ export function repoSkills(target) {
   return names.filter((n) => n.startsWith('openspec-')).map((n) => path.join(target, SKILLS_DIR, n, 'SKILL.md')).filter((f) => exists(f));
 }
 
+// The OpenSpec skills in a repository that bypass the review gate, recognised
+// by OpenSpec's frontmatter (generatedByOpenspec); a stub this script wrote is skipped.
+// Every change is shown in the dry run first.
 export function bypassFiles(target) {
   return openspecSkills(path.join(target, SKILLS_DIR));
 }
@@ -456,7 +456,7 @@ export function main(argv) {
   if (willInit) console.log('run      openspec init --tools github-copilot --scope project (adds OpenSpec skills under .agents/skills/)');
   else console.log(`skip     openspec init (${managed ? 'already set up; to refresh, run node <kit>/scripts/openspec.mjs update, then this setup again' : '--skip-init'})`);
   removals.forEach(show);
-  if (willInit) console.log('disable  the apply, archive and sync skills openspec init adds (they bypass the review gate)');
+  if (willInit) console.log('disable  every OpenSpec skill openspec init adds (apply, archive and sync bypass the review gate; the rest call an unpinned openspec)');
   leftovers.forEach(show);
   if (steps.some((s) => s.action === 'conflict')) {
     console.error('\nStopped: resolve the conflicts above, then run setup again. Nothing was changed.');

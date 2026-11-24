@@ -305,8 +305,8 @@ test('the skills stay in the repository: skillsScope, and OpenSpec skills in the
   assert.equal(byId(await run(), 'repo-skills'), undefined);
 
   // `openspec init` in another project (2.1 default) left live skills in the home folder.
-  write(home, '.agents/skills/openspec-archive-change/SKILL.md', '---\nname: openspec-archive-change\nmetadata:\n  generatedBy: "2.1.1"\n---\nRun openspec archive.\n');
-  write(home, '.copilot/skills/openspec-apply-change/SKILL.md', '---\nname: openspec-apply-change\nmetadata:\n  generatedBy: "2.1.1"\n---\n');
+  write(home, '.agents/skills/openspec-archive-change/SKILL.md', '---\nname: openspec-archive-change\nmetadata:\n  author: openspec\n  version: "1.0"\n---\nRun openspec archive.\n');
+  write(home, '.copilot/skills/openspec-apply-change/SKILL.md', '---\nname: openspec-apply-change\nmetadata:\n  author: openspec\n---\n');
   write(home, '.agents/skills/my-own-skill/SKILL.md', '---\nname: my-own-skill\n---\n');
   json = await run();
   const personal = byId(json, 'personal-skills');
@@ -316,8 +316,11 @@ test('the skills stay in the repository: skillsScope, and OpenSpec skills in the
   assert.match(personal.fix, /Hook enforcement/);
   assert.equal(json.ok, true, 'a warning, not a failure');
   // With the hooks on, the gate still stops an archive.
-  fs.writeFileSync(file, config.replace(/^(\s*Hook enforcement[^:\n]*:[ \t]*)off/m, '$1on'));
-  assert.equal(byId(await run(), 'personal-skills').level, 'info');
+  // The same values the hook accepts.
+  for (const value of ['on', 'yes', 'true']) {
+    fs.writeFileSync(file, config.replace(/^(\s*Hook enforcement[^:\n]*:[ \t]*)off/m, `$1${value}`));
+    assert.equal(byId(await run(), 'personal-skills').level, 'info', value);
+  }
 });
 
 test('a config from 0.2.0 has no parallel settings', async () => {

@@ -147,11 +147,21 @@ stop halfway on something the machine or the host lacks.
 2. If `openspec/config.yaml` already contains `# spec-relay: managed`, setup is
    done: read its context, run the trial (step 6) if the check reported `trial`
    as `warn`, and go to the first unfinished step. When the check reports
-   `openspec` or `workflows` as `fail` with "run setup again" (common right
-   after a clone, or after an OpenSpec update), run
-   `node "<kit>/scripts/setup.mjs" --target .` (the values come from the
-   config), show the plan, run it again with `--apply` after the person agrees,
-   then run the check again.
+   `openspec`, `workflows` or `skills-scope` as `fail` with "run setup again"
+   (common right after a clone, after an OpenSpec update, or after a kit
+   update), run `node "<kit>/scripts/setup.mjs" --target .` (the values come
+   from the config), show the plan, run it again with `--apply` after the
+   person agrees, then run the check again.
+   - If the plan shows a `conflict` on `openspec/spec-relay/tools/package.json`
+     or `package-lock.json`, the kit was updated and pins a new OpenSpec: tell
+     the person to delete those two files (docs/UPGRADING.md of the kit, the
+     section for the version they updated from), then run setup again.
+   - `repo-skills` (`fail`): the OpenSpec skills left the repository. After the
+     person agrees, run `node "<kit>/scripts/openspec.mjs" init --tools
+     github-copilot --scope project .` in the repository, then setup as above.
+   - `personal-skills` (`warn`): tell the person what doctor says. Never
+     delete skills in their home folder or change the Hook enforcement line
+     yourself.
 3. Otherwise ask, one question at a time: the source language (propose what you
    detect from the files), the target language, the source root, the target root,
    the language for artifacts (default: the person's language), how many

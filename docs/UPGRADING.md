@@ -121,9 +121,9 @@ Playwright（`@playwright/test`、Apache-2.0）はキットに同梱していま
 
 進行中の移行では、次の順に実行します。
 
-1. 導入スクリプトをもう一度実行します（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。`openspec/spec-relay/tools/` に OpenSpec 2.0.0 が入り、`.github/` に残ったファイルを `leftover` として表示して止まります（まだ完了ではありません）。
+1. 導入スクリプトをもう一度実行します（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。`openspec/spec-relay/tools/` にキットが固定する OpenSpec が入り、`.github/` に残ったファイルを `leftover` として表示して止まります（まだ完了ではありません）。
 2. 移行対象のリポジトリで `node "<キットのフォルダー>/scripts/openspec.mjs" update` を実行します。OpenSpec が置いた古いファイルは消え、`.agents/skills/` に新しいスキルが入ります。
-3. 0.6.0 が無効にしたファイル（`.github/skills/openspec-*` と `.github/prompts/opsx-*` のうち、`<!-- spec-relay: disabled -->` を含むもの。apply・archive・sync、広いプロファイルでは bulk-archive も）は、編集済みとして残ります。中身はキットの案内だけなので、手で消してください。残っていると導入スクリプトは完了せず、doctor は `legacy` で FAIL を出します（元フォルダーが `.` のときは、調査の gate も元コードとして数えます）。
+3. 0.6.0 が無効にしたファイル（`.github/skills/openspec-*` と `.github/prompts/opsx-*` のうち、`<!-- spec-relay: disabled -->` を含むもの。apply・archive・sync、広いプロファイルでは bulk-archive も）は、編集済みとして残ることがあります（OpenSpec 2.1.1 では `.github/prompts/opsx-*` が残ります）。中身はキットの案内だけなので、残ったものは手で消してください。残っていると導入スクリプトは完了せず、doctor は `legacy` で FAIL を出します（元フォルダーが `.` のときは、調査の gate も元コードとして数えます）。
 4. 導入スクリプトをもう一度実行し、`.agents/skills/` の OpenSpec 標準のスキルを無効にします。最後に doctor で FAIL がないことを確かめ、`openspec/spec-relay/tools/` の3つのファイル、`.agents/skills/`、`.github/` で消えたファイルをコミットします。
 
 ## 0.5.0 から更新するとき
