@@ -27,7 +27,7 @@ const WORDS = {
     carryHead: ['パス', 'コンテキスト', '備考'], noCarry: 'carry のファイルはありません。',
     excludedHead: ['パス', '理由'], noExcluded: '移行しない（excluded）ファイルはありません。', noReason: '理由がありません',
     conflicts: '用語の衝突', noConflicts: 'glossary.md に Conflicts の節がありません。',
-    noDatabase: 'database.md に同じ名前のデータベースがありません。', logic: 'データベースの中のロジック', missing: '読めなかった定義',
+    noDatabase: 'database.md に同じ名前のデータベースがありません。', dbLabels: { 'product and version': '製品と版', 'connection setting': '接続の設定', definitions: '定義ファイル', kind: '種類', count: '数', contexts: 'コンテキスト', notes: '備考' }, logic: 'データベースの中のロジック', missing: '読めなかった定義',
     invSummary: (rows) => `inventory の行 ${rows}（パスの数）。コンテキストごとの数は下の表、すべての行は「すべての行を表示」で開きます。`,
     invHead: ['コンテキスト', '移行（port）', 'そのまま（carry）', '計'], excluded: '移行しない（excluded）', allRows: (n) => `すべての行を表示（${n} 行）`,
     total: '計',
@@ -47,7 +47,7 @@ const WORDS = {
     carryHead: ['Path', 'Context', 'Notes'], noCarry: 'No file is marked carry.',
     excludedHead: ['Path', 'Reason'], noExcluded: 'No file is excluded.', noReason: 'no reason',
     conflicts: 'Glossary conflicts', noConflicts: 'glossary.md has no Conflicts section.',
-    noDatabase: 'database.md has no database of this name.', logic: 'Logic in the database', missing: 'Missing definitions',
+    noDatabase: 'database.md has no database of this name.', dbLabels: {}, logic: 'Logic in the database', missing: 'Missing definitions',
     invSummary: (rows) => `${rows} inventory rows (paths). The table counts them per context; "Show every row" opens the list.`,
     invHead: ['Context', 'Port', 'Carry', 'Total'], excluded: 'excluded', allRows: (n) => `Show every row (${n})`,
     total: 'Total',
@@ -58,7 +58,8 @@ const stripComments = (text) => String(text ?? '').replace(/<!--[\s\S]*?-->/g, '
 const key = (s) => plain(String(s)).toLowerCase();
 // A cell as text, keeping underscores (table names) that plain() would drop.
 const clean = (s) => stripComments(s).replace(/`/g, '').replace(/\*\*/g, '').trim();
-const table = (head, rows, cls = '') => `<div class="table"><table${cls ? ` class="${cls}"` : ''}><thead><tr>${head.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+// A head cell given as [text] is a number column (right-aligned like its cells).
+const table = (head, rows, cls = '') => `<div class="table"><table${cls ? ` class="${cls}"` : ''}><thead><tr>${head.map((h) => (Array.isArray(h) ? `<th class="num">${escapeHtml(h[0])}</th>` : `<th>${escapeHtml(h)}</th>`)).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 const cell = (row, pattern, fallback) => { const i = row.header.findIndex((h) => pattern.test(h)); return (row.cells[i >= 0 ? i : fallback] ?? '').trim(); };
 // A cell that lists contexts: "billing, order", "billing、order", "billing<br>order".
 const ids = (text) => plain(stripComments(text).replace(/\([^)]*\)|（[^）]*）/g, ' ')).split(/[,、;／/]|<br\s*\/?>|\s+and\s+/i).map((s) => s.trim().toLowerCase()).filter((s) => s && !/^(-|—|none|なし|n\/a)$/.test(s));
@@ -173,7 +174,8 @@ export function contextCard(facts, item, code) {
 
   const up = facts.rel.filter((r) => r.down === ctx.id && r.up !== ctx.id);
   const down = facts.rel.filter((r) => r.up === ctx.id && r.down !== ctx.id);
-  const how = (r) => [r.pattern, r.channel].map(clean).filter(Boolean).join(' · ');
+  const gloss = (p) => { const k = clean(p).toLowerCase(); return W.patterns[k] ? `${clean(p)}（${W.patterns[k]}）` : clean(p); };
+  const how = (r) => [gloss(r.pattern), clean(r.channel)].filter(Boolean).join(' · ');
   const link = (other, r) => `<li>${chip(other)}${how(r) ? ` <span class="sub">${escapeHtml(how(r))}</span>` : ''}</li>`;
   const owns = facts.shared.filter((s) => s.owner.includes(ctx.id));
   const writes = facts.shared.filter((s) => s.writers.includes(ctx.id));
@@ -356,7 +358,7 @@ function sharedMatrix(facts, W) {
 
 function capabilityTable(facts, W) {
   if (!facts.caps.length) return `<p class="caution">${escapeHtml(W.noCaps)}</p>`;
-  return table([W.order, ...W.capHead], facts.caps.map((c, i) => `<tr><td class="num">${i + 1}</td><td><code>${escapeHtml(c.path)}</code></td><td>${inline(c.name)}</td><td>${c.sources.map(inline).join('<br>')}</td></tr>`));
+  return table([[W.order], ...W.capHead], facts.caps.map((c, i) => `<tr><td class="num">${i + 1}</td><td><code>${escapeHtml(c.path)}</code></td><td>${inline(c.name)}</td><td>${c.sources.map(inline).join('<br>')}</td></tr>`));
 }
 
 const pathCell = (p) => `<td class="mono">${escapeHtml(p)}</td>`;
@@ -380,8 +382,11 @@ export function surveyAid(facts, item, code, row = null) {
   if (item.letter === 'D') {
     const name = key(plain(item.title).split(/[:：]/)[0]);
     const db = facts.databases.find((r) => key(r.cells[0] ?? '') === name);
-    const facts1 = db ? `<dl class="facts">${db.header.map((h, i) => (i === 0 ? '' : `<dt>${escapeHtml(h)}</dt><dd>${inline(stripComments(db.cells[i] ?? ''))}</dd>`)).join('')}</dl>` : `<p class="caution">${escapeHtml(W.noDatabase)}</p>`;
-    return `${facts1}${facts.logic ? `<h4 class="aid-h">${escapeHtml(W.logic)}</h4><div class="doc">${markdown(facts.logic)}</div>` : ''}`;
+    const label = (h) => W.dbLabels[plain(h).toLowerCase()] ?? h;
+    const facts1 = db ? `<dl class="facts">${db.header.map((h, i) => (i === 0 ? '' : `<dt>${escapeHtml(label(h))}</dt><dd>${inline(stripComments(db.cells[i] ?? ''))}</dd>`)).join('')}</dl>` : `<p class="caution">${escapeHtml(W.noDatabase)}</p>`;
+    // The logic table's English head row (the template's) in the page's language.
+    const logic = facts.logic ? facts.logic.replace(/^(\s*\|)([^\n]*)$/m, (m, a, rest) => a + rest.split('|').map((x) => (x.trim() ? ` ${label(x.trim())} ` : x)).join('|')) : null;
+    return `${facts1}${logic ? `<h4 class="aid-h">${escapeHtml(W.logic)}</h4><div class="doc">${markdown(logic)}</div>` : ''}`;
   }
   return row ?? '';
 }
@@ -396,7 +401,7 @@ export function inventorySummary(facts, text, code) {
   const excluded = rows.filter((r) => r.context === 'excluded').length;
   if (excluded) body.push(`<tr><td>${escapeHtml(W.excluded)}</td><td></td><td></td><td class="num">${excluded}</td></tr>`);
   body.push(`<tr class="sum"><td>${escapeHtml(W.total)}</td><td class="num">${rows.filter((r) => r.context !== 'excluded' && r.handling !== 'carry').length}</td><td class="num">${rows.filter((r) => r.handling === 'carry').length}</td><td class="num">${rows.length}</td></tr>`);
-  return `<div class="doc"><p>${escapeHtml(W.invSummary(rows.length))}</p>${table(W.invHead, body)}<details class="more"><summary>${escapeHtml(W.allRows(rows.length))}</summary>${markdown(text, { headingOffset: 2 })}</details></div>`;
+  return `<div class="doc"><p>${escapeHtml(W.invSummary(rows.length))}</p>${table([W.invHead[0], ...W.invHead.slice(1).map((h) => [h])], body)}<details class="more"><summary>${escapeHtml(W.allRows(rows.length))}</summary>${markdown(text, { headingOffset: 2 })}</details></div>`;
 }
 
 export const SURVEY_CSS = `
@@ -441,6 +446,7 @@ table.matrix td.m-reads{color:var(--ink2)}
 .caution-inline{display:inline-block;margin-left:8px;font:600 12px/1.4 var(--ui);color:var(--ochre)}
 .caution-inline::before{content:"△ "}
 td.num{text-align:right;font-family:var(--mono)}
+th.num{text-align:right}
 tr.sum td{font-weight:700;border-top:1.5px solid var(--ink)}
 .aid-h{font-size:14px;margin:14px 0 4px}
 `;

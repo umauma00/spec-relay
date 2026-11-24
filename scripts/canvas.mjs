@@ -53,12 +53,12 @@ const WORDS = {
     busy: 'ほかのプログラムが review.md を使っていて書き込めませんでした。閉じてからもう一度押してください。', noLine: 'review.md にこの項目の行が見つかりません。',
     howto: '正しければ「確認済みにする」、違えば「修正を依頼」、今は決められなければ「保留にする」を押す（どれも review.md に書き込まれます）',
     fix: '修正を依頼', hold: '保留にする', withdraw: '依頼を取り下げる', unhold: '保留を解除', fixTitle: '修正してほしいこと', holdTitle: '保留の理由',
-    fixPlaceholder: '例: questionnaire は points と統合したい', holdPlaceholder: '例: 業務の担当に確認してから決める', decisionPlaceholder: '新しいシステムでどうするか',
-    fixHint: 'review.md のこの項目の下に「- fix: …」として書き、確認を外します。AI に直してもらうには「修正依頼を AI に送る」を押すか、チャットで伝えてください。',
-    holdHint: 'review.md のこの項目の下に「- hold: …」として書きます。決まったら「保留を解除」してから、確認済みにするか修正を依頼してください。',
+    fixPlaceholder: '例: 期限は 24 時間ではなく 48 時間', holdPlaceholder: '例: 業務の担当に確認してから決める', decisionPlaceholder: '新しいシステムでどうするか',
+    fixHint: 'review.md のこの項目の下に「- fix: …」の1行として書き（改行は空白になります）、確認を外します。AI に直してもらうには「修正依頼を AI に送る」を押すか、チャットで伝えてください。',
+    holdHint: 'review.md のこの項目の下に「- hold: …」の1行として書きます（改行は空白になります）。決まったら「保留を解除」してから、確認済みにするか修正を依頼してください。',
     sendFixes: (n) => `修正依頼を AI に送る（${n} 件）`, fixesSent: 'チャットに送りました。AI が直すと、項目の下に直した内容が出ます。', fixesWaiting: '送りました — AI の対応待ち（{n} 件）',
     openFix: 'AI がまだ対応していない修正依頼があります。「依頼を取り下げる」を押してから確認済みにしてください。', noNote: '取り下げるものがありません。',
-    did: { tick: '{id} を確認済みにしました。', untick: '{id} の確認を外しました。', fix: '{id} に修正依頼を書きました（AI にはまだ送っていません）。', hold: '{id} を保留にしました。', withdraw: '{id} の依頼を取り下げました。', unhold: '{id} の保留を解除しました。', decision: '{id} の判断を保存しました。' }, undo: '元に戻す',
+    did: { tick: '{id} を確認済みにしました。', untick: '{id} の確認を外しました。', fix: '{id} に修正依頼を書きました（AI にはまだ送っていません）。', hold: '{id} を保留にしました。', withdraw: '{id} の依頼を取り下げました。', unhold: '{id} の保留を解除しました。', decision: '{id} の判断を保存しました。' }, undo: '元に戻す', undone: '元に戻しました。', keysWrite: [['x', '確認済みにする（下のバーの項目）'], ['f', '修正を依頼（下のバーの項目）'], ['h', '保留にする（下のバーの項目）']], noDecisionHere: '未記入 —「判断を書く…」で書きます',
     yourTurn: '{n} 件 あなたの番', next: '次へ ↓', decideFirst: '判断を書く…', decideSave: '保存して確認済みにする', decideOnly: '保存だけする', redecide: '判断を直す',
     send: '送る', cancel: 'やめる', sending: '送っています…', sent: 'チャットに送りました。', failed: '送れませんでした', empty: '質問を書いてください。',
     notRepo: 'このフォルダには openspec/ がありません。spec-relay を導入したリポジトリでチャットを開いてください。',
@@ -86,12 +86,12 @@ const WORDS = {
     busy: 'Another program is using review.md, so it could not be written. Close it and try again.', noLine: 'review.md has no line for this item.',
     howto: 'If it is right, press "Mark confirmed"; if it is wrong, "Request a change"; if you cannot decide yet, "Put on hold" (each is written to review.md)',
     fix: 'Request a change', hold: 'Put on hold', withdraw: 'Withdraw the request', unhold: 'Take off hold', fixTitle: 'What should change', holdTitle: 'Why it is on hold',
-    fixPlaceholder: 'e.g. merge questionnaire into points', holdPlaceholder: 'e.g. ask the business owner first', decisionPlaceholder: 'What the new system does',
-    fixHint: 'This writes "- fix: ..." under the item in review.md and unmarks it. To have the agent correct it, press "Send the change requests to the agent", or say so in the chat.',
-    holdHint: 'This writes "- hold: ..." under the item in review.md. When you have decided, take it off hold, then confirm it or request a change.',
+    fixPlaceholder: 'e.g. the limit is 48 hours, not 24', holdPlaceholder: 'e.g. ask the business owner first', decisionPlaceholder: 'What the new system does',
+    fixHint: 'This writes one line "- fix: ..." (line breaks become spaces) under the item in review.md and unmarks it. To have the agent correct it, press "Send the change requests to the agent", or say so in the chat.',
+    holdHint: 'This writes one line "- hold: ..." (line breaks become spaces) under the item in review.md. When you have decided, take it off hold, then confirm it or request a change.',
     sendFixes: (n) => `Send the change requests to the agent (${n})`, fixesSent: 'Sent to the chat. When the agent has corrected it, what changed shows under the item.', fixesWaiting: 'Sent — waiting for the agent ({n})',
     openFix: 'The agent has not answered a change request yet. Press "Withdraw the request" before confirming.', noNote: 'Nothing to withdraw.',
-    did: { tick: '{id} marked confirmed.', untick: '{id} unmarked.', fix: 'Change request written under {id} (not sent to the agent yet).', hold: '{id} put on hold.', withdraw: 'The request on {id} withdrawn.', unhold: '{id} taken off hold.', decision: 'The decision on {id} saved.' }, undo: 'Undo',
+    did: { tick: '{id} marked confirmed.', untick: '{id} unmarked.', fix: 'Change request written under {id} (not sent to the agent yet).', hold: '{id} put on hold.', withdraw: 'The request on {id} withdrawn.', unhold: '{id} taken off hold.', decision: 'The decision on {id} saved.' }, undo: 'Undo', undone: 'Undone.', keysWrite: [['x', 'mark confirmed (the item in the bar)'], ['f', 'request a change (the item in the bar)'], ['h', 'put on hold (the item in the bar)']], noDecisionHere: 'blank — write it with "Write the decision…"',
     yourTurn: '{n} your turn', next: 'Next ↓', decideFirst: 'Write the decision…', decideSave: 'Save and confirm', decideOnly: 'Save only', redecide: 'Edit the decision',
     send: 'Send', cancel: 'Cancel', sending: 'Sending…', sent: 'Sent to the chat.', failed: 'Could not send', empty: 'Write a question first.',
     notRepo: 'This folder has no openspec/. Open the chat in a repository where spec-relay is set up.',
@@ -191,6 +191,7 @@ dialog.ask-box::backdrop{background:rgba(0,0,0,.35)}
 .ask.mark:hover{background:var(--ink);color:var(--paper)}
 .ask-row .ask{margin-bottom:6px}
 .ask-box input[type=text]{display:block;width:100%;padding:8px;border:1.5px solid var(--ink);background:var(--paper);color:var(--ink);font:15px/1.6 var(--read)}
+.ask-box textarea[hidden],.ask-box input[type=text][hidden]{display:none}
 .canvas-answer{margin:10px 0 0;padding:10px 12px;border:1.5px solid var(--ai)}
 .canvas-answer .q{font-weight:700;margin:4px 0}
 .canvas-answer .ask{margin-top:8px}
@@ -212,14 +213,22 @@ dialog.ask-box::backdrop{background:rgba(0,0,0,.35)}
 .item.is-done .ask-row .ask:not(.mark){display:none}
 .shot.is-zoomed{overflow:auto;max-height:80vh}.shot.is-zoomed img{max-width:none}
 .act.zoom{min-height:28px;padding:3px 10px;margin:0 8px 0 0}
+.screen:has(.shot.is-zoomed){grid-template-columns:minmax(0,1fr)}
+.act.is-sent:hover{background:var(--paper);color:var(--ochre)}
+.item{position:relative}
+body.has-actbar .item.is-current::before{content:"";position:absolute;left:-11px;top:10px;bottom:10px;width:4px;background:var(--ink)}
+html{scroll-padding-bottom:calc(var(--bar,0px) + 12px)}
+.actbar-state{font:600 13px/1.2 var(--ui);color:var(--ink2);margin-right:8px}
+@media (max-width:999px){.js body.has-actbar .keys{display:flex;flex-wrap:wrap;gap:4px 16px;margin:6px 0 0;padding:6px 0 0}}
+@media (forced-colors:active){.filter label:has(input:checked){outline:3px solid Highlight;outline-offset:-5px}.item.is-current .item-head .id{outline:2px solid Highlight;outline-offset:2px}.act-ok{border-width:3px}}
 .act.is-sent{border-style:dashed;opacity:1;cursor:default}
 .canvas-toast{display:flex;gap:12px;align-items:center;justify-content:space-between}
 .canvas-toast button{font:600 13px/1.2 var(--ui);padding:6px 10px;min-height:32px;border:1.5px solid var(--paper);background:none;color:var(--paper);cursor:pointer;flex:none}
 .ask-box button.only{margin-right:auto}
 .ask-box textarea#edit-text{min-height:5em}
 body.has-actbar .dock{display:none!important}
-body.has-actbar main{padding-bottom:140px}
-body.has-actbar .canvas-toast{bottom:84px}
+body.has-actbar main{padding-bottom:calc(100vh - 160px)}
+body.has-actbar .canvas-toast{bottom:calc(var(--bar,72px) + 12px)}
 .actbar{position:fixed;left:0;right:0;bottom:0;z-index:6;display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:8px 16px;background:var(--paper);border-top:2px solid var(--ink);font-family:var(--ui)}
 .actbar[hidden]{display:none}
 @media (min-width:1000px){.actbar{left:288px;padding:8px 40px}}
@@ -249,7 +258,7 @@ const CANVAS_SCRIPT = String.raw`(() => {
     d.body.appendChild(t); setTimeout(() => t.remove(), action ? 8000 : 4000);
   };
   // An item's title as shown, without the English original under a translated one.
-  const headText = (item) => { const h = item.querySelector('.item-head h3'); if (!h) return ''; const c = h.cloneNode(true); c.querySelectorAll('.orig').forEach((x) => x.remove()); return c.textContent.trim(); };
+  const headText = (item) => { const h = item.querySelector('.item-head h3'); if (!h) return ''; const c = h.cloneNode(true); c.querySelectorAll('.orig, .delta, .klass').forEach((x) => x.remove()); return c.textContent.trim(); };
   const shut = () => { if (box.close) box.close(); else box.removeAttribute('open'); };
   let target = null, pending = false;
   const open = (item) => {
@@ -265,7 +274,10 @@ const CANVAS_SCRIPT = String.raw`(() => {
     const id = (item.querySelector('.item-head .id') || {}).textContent || '';
     b.setAttribute('aria-label', W.ask + ': ' + id + ' ' + headText(item));
     b.addEventListener('click', () => open(item));
-    row.appendChild(b); item.appendChild(row);
+    row.appendChild(b);
+    // A confirmed item keeps its buttons inside its fold.
+    const fold = item.classList.contains('is-done') ? item.querySelector(':scope > details.fold') : null;
+    (fold || item).appendChild(row);
   });
   // A screenshot cannot open in a page of its own here: it zooms in place.
   d.querySelectorAll('main .shot figcaption a').forEach((a) => {
@@ -327,7 +339,7 @@ const CANVAS_SCRIPT = String.raw`(() => {
     let hash = R.hash, job = null;
     const fill = (t, o) => String(t).replace(/\{(\w+)\}/g, (m, k) => (k in o ? o[k] : m));
     // What was saved, and how to take it back, survive the reload in the toast.
-    const reload = (m, undo) => { store('spec-relay-canvas-toast', JSON.stringify({ m, undo: undo || null })); keepPlace(); location.reload(); };
+    const reload = (m, undo, id) => { store('spec-relay-canvas-toast', JSON.stringify({ m, undo: undo || null })); keepPlace(id); location.reload(); };
     const post = async (action, id, value) => {
       const res = await fetch(base + '/review', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'review' }, body: JSON.stringify({ page: cfg.page, hash, action, id, value }) });
       let j = {};
@@ -349,7 +361,7 @@ const CANVAS_SCRIPT = String.raw`(() => {
             return;
           }
         }
-        reload(done ? done.m : W.saved, done ? done.undo : null);
+        reload(done ? done.m : W.saved, done ? done.undo : null, steps[0] && steps[0][1]);
       } catch (err) { report(W.saveFailed + ': ' + err.message); }
       finally { writing = false; }
     };
@@ -418,18 +430,27 @@ const CANVAS_SCRIPT = String.raw`(() => {
     bar.append(barHead, barButtons, barNext);
     d.body.appendChild(bar);
     d.body.classList.add('has-actbar');
+    const barSize = () => d.documentElement.style.setProperty('--bar', bar.offsetHeight + 'px');
+    barSize();
+    if (window.ResizeObserver) new ResizeObserver(barSize).observe(bar);
+    // The keys that write are listed with the others.
+    const keyList = d.querySelector('.keys ul');
+    if (keyList) (W.keysWrite || []).forEach(([k, text]) => { const li = d.createElement('li'); const kb = d.createElement('kbd'); kb.textContent = k; li.append(kb, text); keyList.appendChild(li); });
     let shown = null;
     const show = (id) => {
       const it = id ? byId(id) : null;
       shown = it;
       barHead.textContent = '';
       barButtons.textContent = '';
-      bar.hidden = !it;
       if (!it) return;
       const tag = d.createElement('span'); tag.className = 'id'; tag.textContent = it.id;
       const name = d.createElement('span'); name.className = 't'; name.textContent = titleOf(it.id);
       barHead.append(tag, name);
-      buttonsFor(it).forEach((b) => barButtons.appendChild(b));
+      if (it.done) { const st = d.createElement('span'); st.className = 'actbar-state'; st.textContent = (cfg.states && cfg.states.done) || ''; barButtons.appendChild(st); }
+      else buttonsFor(it).forEach((b) => barButtons.appendChild(b));
+      const q = d.createElement('button'); q.type = 'button'; q.className = 'ask'; q.textContent = W.ask; q.setAttribute('aria-label', W.ask + ': ' + it.id);
+      q.addEventListener('click', () => { const el = d.getElementById(it.id); if (el) open(el); });
+      barButtons.appendChild(q);
     };
     d.addEventListener('spec-relay-current', (e) => show(e.detail));
     const cur = d.querySelector('main .item.is-current');
@@ -467,6 +488,7 @@ const CANVAS_SCRIPT = String.raw`(() => {
     });
     const who = d.getElementById('edit-reviewer');
     if (who) who.addEventListener('click', () => edit('reviewer', null, R.reviewer));
+    etext.addEventListener('input', () => { emsg.textContent = ''; }); ename.addEventListener('input', () => { emsg.textContent = ''; });
     ebox.addEventListener('keydown', (e) => {
       e.stopPropagation();
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); ebox.querySelector('form').requestSubmit(); }
@@ -500,7 +522,7 @@ const CANVAS_SCRIPT = String.raw`(() => {
       store('spec-relay-canvas-toast', null);
       let t = null;
       try { t = JSON.parse(said); } catch (e) { t = { m: said }; }
-      if (t && t.m) toast(t.m, t.undo ? { label: W.undo, run: () => run(t.undo, toast) } : null);
+      if (t && t.m) toast(t.m, t.undo ? { label: W.undo, run: () => run(t.undo, toast, null, { m: W.undone, undo: null }) } : null);
     }
   }
   // Links the canvas cannot show (images, source files, other sites) would leave it with no way back.
@@ -523,10 +545,12 @@ const CANVAS_SCRIPT = String.raw`(() => {
   // first one on screen) and how far from the top it stood. The page comes back
   // there, not at its top. Kept in sessionStorage and in history.state (either
   // may be refused); the address loses its #fragment, so the page does not jump to it.
-  const keepPlace = () => {
-    const active = d.activeElement && d.activeElement.closest ? d.activeElement.closest('[id]') : null;
+  const keepPlace = (acted) => {
+    // The item a button acted on (in the bar too), else where the focus is.
+    const own = acted ? d.getElementById(acted) : null;
+    const active = own || (d.activeElement && d.activeElement.closest ? d.activeElement.closest('[id]') : null);
     if (active && active !== d.body) store('spec-relay-canvas-focus', active.id);
-    let el = d.activeElement && d.activeElement.closest ? d.activeElement.closest('main .item') : null;
+    let el = own && own.matches('main .item') ? own : d.activeElement && d.activeElement.closest ? d.activeElement.closest('main .item') : null;
     if (!el || el.getBoundingClientRect().bottom < 0 || el.getBoundingClientRect().top > innerHeight) el = [...d.querySelectorAll('main .item, main .group > h2')].find((x) => x.offsetParent !== null && x.getBoundingClientRect().bottom > 0) || null;
     const place = { page: cfg.page, id: el && el.id ? el.id : null, top: el ? el.getBoundingClientRect().top : 0, y: scrollY };
     store('spec-relay-canvas-place', JSON.stringify(place));
@@ -591,8 +615,8 @@ export function interactive(html, { lang, pagePath, title, version, seq, nonce, 
   const words = Object.fromEntries(['ask', 'zoomIn', 'zoomOut', 'askAbout', 'sending', 'sent', 'failed', 'empty', 'noLink', 'gone', ...(answers ? ['answer', 'helpful', 'qaSaved', 'qaFailed'] : []),
     ...(review ? ['tick', 'untick', 'decide', 'decideTick', 'decisionTitle', 'reviewerTitle', 'saving', 'saved', 'changed', 'saveFailed', 'emptyValue', 'needDecision', 'notUtf8', 'busy', 'noLine', 'placeholder', 'noFile', 'bad',
       'fix', 'hold', 'withdraw', 'unhold', 'fixTitle', 'holdTitle', 'fixHint', 'holdHint', 'fixesSent', 'fixesWaiting', 'openFix', 'noNote',
-      'fixPlaceholder', 'holdPlaceholder', 'decisionPlaceholder', 'did', 'undo', 'yourTurn', 'next', 'decideFirst', 'decideSave', 'decideOnly', 'redecide', 'reviewer', 'reviewerSet', 'save'] : [])].map((k) => [k, W[k]]));
-  const config = JSON.stringify({ page: pagePath, title, version, seq, words, review, ...(answers ? { answers } : {}) }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+      'fixPlaceholder', 'holdPlaceholder', 'decisionPlaceholder', 'did', 'undo', 'yourTurn', 'next', 'decideFirst', 'decideSave', 'decideOnly', 'redecide', 'reviewer', 'reviewerSet', 'save', 'undone', 'keysWrite'] : [])].map((k) => [k, W[k]]));
+  const config = JSON.stringify({ page: pagePath, title, version, seq, words, review, ...(review ? { states: L.states } : {}), ...(answers ? { answers } : {}) }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const dialog = `<dialog class="ask-box" id="ask-box" aria-labelledby="ask-title" aria-describedby="ask-about"><form method="dialog"><h2 id="ask-title">${escapeHtml(W.askTitle)}</h2><p class="about" id="ask-about"></p>
 <textarea id="ask-text" maxlength="4000" aria-labelledby="ask-title" aria-describedby="ask-about ask-hint ask-msg"></textarea>
 <p class="hint" id="ask-hint">${escapeHtml(W.askHint)}</p><p class="msg" id="ask-msg" role="status"></p><div class="buttons"><button type="button" class="cancel">${escapeHtml(W.cancel)}</button><button type="submit" class="primary">${escapeHtml(W.send)}</button></div></form></dialog>
@@ -610,6 +634,8 @@ ${review ? `<dialog class="ask-box" id="edit-box" aria-labelledby="edit-title"><
     // The canvas follows the files: no "render again", and the tick is a button here.
     .replace(`<footer>${escapeHtml(L.note)}</footer>`, () => `<footer>${escapeHtml(W.note)}</footer>`)
     .replace(`<li>${L.howto[2]}</li>`, () => (review ? `<li>${escapeHtml(W.howto)}</li>` : `<li>${L.howto[2]}</li>`))
+    // A blank decision is written with the button here, not in the file.
+    .replace(/(<div class="decision is-blank"><span class="label">[^<]*<\/span><p>)[^<]*(<\/p>)/g, (m, a, b) => (review ? `${a}${escapeHtml(W.noDecisionHere)}${b}` : m))
     .replace(/(<p class="meta">[^<]*<\/p>)/, (m) => `${m}\n${nav}`)
     .replace(/<\/body>\s*<\/html>\s*$/, () => `${dialog}\n</body>\n</html>\n`);
 }

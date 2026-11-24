@@ -24,8 +24,9 @@ import { checkboxes, questionIds, tableRows, changeSchema, archivedChange, REMAR
 import { guideView, guidePage, guideWords, modules as guideModules, moduleKey, GUIDE_CSS } from './guide.mjs';
 import { ledgerSummary } from './sites.mjs';
 import { leftoverRows } from './finish.mjs';
-import { itemGuide, itemTitle, guideWords as howWords, commonAdvice } from './review-guide.mjs';
+import { itemGuide, itemTitle, guideWords as howWords } from './review-guide.mjs';
 import { surveyFacts, contextCard, surveyAid, inventorySummary, SURVEY_CSS } from './survey-view.mjs';
+import { docAid, DOC_AID_CSS } from './doc-aid.mjs';
 
 // ---------------------------------------------------------------- labels
 
@@ -39,17 +40,18 @@ const LABELS = {
     document: '文書', requirements: '要件', screens: '画面', questions: '質問', contexts: 'コンテキスト', other: 'その他',
     reviewer: 'レビュー担当', notNamed: '未記入', scope: '対象', purpose: '目的', appendix: '付録', toc: '目次', skip: '本文へ移動', railLabel: '目次と進み具合',
     confirmed: '確認済み', open: '未確認', sealDone: '済', sealOpen: '未',
-    remain: (n) => `<b>${n}</b>件があなたの確認待ち`, allDone: '<b>0</b>すべて確認済み', noneMine: '<b>0</b>あなたの番の項目はありません', remainShort: '件 あなたの番',
+    remain: (n) => `<b>${n}</b>件 あなたの番`, allDone: '<b>0</b>すべて確認済み', noneMine: '<b>0</b>あなたの番の項目はありません', remainShort: '件 あなたの番',
     of: (all, done) => `${all} 件中 ${done} 件を確認済み`, left: '残り', sheet: '項目ごとの状態',
     legendDone: '確認済み', legendOpen: '未確認',
     firstOpen: (id) => `次に見る ${id} へ ↓`, show: '表示', all: 'すべて', onlyOpen: 'あなたの番だけ', allClear: 'この区分に、あなたの番の項目はありません。',
     howto: ['項目を読む', '「確認すること」に沿って根拠と照らし合わせる', '正しければ review.md の行を <code>[x]</code> に。違うときはその行のすぐ下に <code>- fix: 直してほしいこと</code>、決められないときは <code>- hold: 理由</code> を書き足して（行頭に空白 2 つ）、チャットで AI に伝える'],
     states: { done: '確認済み', open: '未確認', fix: '修正依頼中', hold: '保留中', fixed: '再確認待ち' },
     seals: { done: '済', open: '未', fix: '直', hold: '保', fixed: '再' },
-    remarks: { fix: 'あなた: 修正依頼', hold: 'あなた: 保留の理由', fixed: 'AI: 直した内容' },
+    remarks: { fix: 'あなた: 修正依頼', hold: 'あなた: 保留理由', fixed: 'AI: 直した内容' },
     split: (n) => [n.fixed ? `うち再確認待ち ${n.fixed}` : '', n.fix + n.hold ? `ほかに ${[['AI の対応待ち', n.fix], ['保留中', n.hold]].filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join('・')}` : ''].filter(Boolean).join('。'),
     folded: '内容を表示', appendixHint: '参照用の元の Markdown です。必要なときだけ開いてください。',
-    scenario: 'シナリオ', evidence: '根拠（元コード）', source: '元コード', tests: '既存のテスト', crosscheck: '照合（AI の再確認）', lines: '行', verdicts: { confirmed: '一致', mismatch: '不一致', unclear: '不明', question: '質問へ' },
+    scenario: 'シナリオ', evidence: '根拠（元コード）', source: '元コード', tests: '既存のテスト', crosscheck: '照合（AI の再確認）', lines: '行',
+    screenLabels: { entry: '入口', layout: 'レイアウト', look: '見た目', scripts: 'スクリプト', label: 'ラベル', kind: '種類', required: '必須', 'format and limits': '形式と制限', default: '初期値', editable: '編集可', 'look details': '見た目の詳細', item: '項目', 'element or control': '要素・コントロール', details: '詳細', actions: '操作', messages: 'メッセージ', transitions: '遷移' }, noneWord: 'なし', verdicts: { confirmed: '一致', mismatch: '不一致', unclear: '不明', question: '質問へ' },
     noTrace: 'trace.md に記載がありません', unreadable: 'ファイルを読めませんでした', truncated: '長いため先頭のみ表示', encoding: (e) => `文字コード ${e} を変換して表示`, dedent: (n) => `字下げを ${n} 文字詰めて表示`,
     decision: '判断', noDecision: (id) => `未記入 — review.md の ${id} の行に decision: を書きます`,
     leftoverKind: '種類', leftoverWhere: '場所', leftoverClass: '分類（案）', leftoverReason: '理由', noLeftover: '同じ id の行が leftovers.md にありません',
@@ -60,7 +62,7 @@ const LABELS = {
     was: '旧', now: '新', noBaseline: '現在の仕様（openspec/specs）に同じ名前の要件がありません',
     screenshot: 'スクリーンショット', openImage: '原寸で開く', noImage: '画像ファイルがありません',
     prevOpen: '前のあなたの番へ', nextOpen: '次へ ↓',
-    keysOn: '1 文字キーで移動する', keysList: 'キーの一覧', keys: [['j', 'k', '次／前の項目'], ['n', 'p', '次／前のあなたの番'], ['o', '', '元コードと折りたたみを開閉'], ['u', '', 'あなたの番だけ表示']],
+    keysOn: '1 文字キーを使う', keysList: 'キーの一覧', keys: [['j', 'k', '次／前の項目'], ['n', 'p', '次／前のあなたの番'], ['o', '', '元コードと折りたたみを開閉'], ['u', '', 'あなたの番だけ表示']],
     generated: '生成', archived: 'archive 済み',
     note: 'この画面は表示用です。正は Markdown のファイルで、判断は review.md に記録します。ファイルを直したら作り直してください。',
     ledger: '抜けの確認', ledgerTitle: '抜けの確認（箇所台帳）',
@@ -93,7 +95,7 @@ const LABELS = {
     remarks: { fix: 'You: change requested', hold: 'You: why on hold', fixed: 'Agent: what changed' },
     split: (n) => [n.fixed ? `${n.fixed} of them to look again` : '', n.fix + n.hold ? `besides: ${[['waiting for the agent', n.fix], ['on hold', n.hold]].filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(', ')}` : ''].filter(Boolean).join('. '),
     folded: 'Show the content', appendixHint: 'The Markdown behind the page, for reference. Open it when you need it.',
-    scenario: 'Scenario', evidence: 'Evidence (source code)', source: 'Source', tests: 'Existing tests', crosscheck: 'Crosscheck (second look by the AI)', lines: '',
+    scenario: 'Scenario', evidence: 'Evidence (source code)', source: 'Source', tests: 'Existing tests', crosscheck: 'Crosscheck (second look by the AI)', lines: '', noneWord: 'none',
     noTrace: 'No entry in trace.md', unreadable: 'Could not read the file', truncated: 'long; only the beginning is shown', encoding: (e) => `decoded from ${e}`, dedent: (n) => `indentation reduced by ${n} characters`,
     decision: 'Decision', noDecision: (id) => `blank — write decision: on the ${id} line of review.md`,
     leftoverKind: 'Kind', leftoverWhere: 'Where', leftoverClass: 'Class (proposed)', leftoverReason: 'Reason', noLeftover: 'No row of this id in leftovers.md',
@@ -104,7 +106,7 @@ const LABELS = {
     was: 'Old', now: 'New', noBaseline: 'No requirement of this name in the current specs (openspec/specs)',
     screenshot: 'Screenshot', openImage: 'Open full size', noImage: 'Image file not found',
     prevOpen: 'Previous for you', nextOpen: 'Next ↓',
-    keysOn: 'Single-key shortcuts', keysList: 'Key list', keys: [['j', 'k', 'next / previous item'], ['n', 'p', 'next / previous for you'], ['o', '', 'fold or unfold the source and folds'], ['u', '', 'your turn only']],
+    keysOn: 'Use single-key shortcuts', keysList: 'Key list', keys: [['j', 'k', 'next / previous item'], ['n', 'p', 'next / previous for you'], ['o', '', 'fold or unfold the source and folds'], ['u', '', 'your turn only']],
     generated: 'Generated', archived: 'archived',
     note: 'This page is a view. The Markdown files are the source of truth and decisions go into review.md. Render again after changing them.',
     ledger: 'Omission check', ledgerTitle: 'Omission check (site ledger)',
@@ -618,7 +620,7 @@ function howHtml(g, code) {
   const W = howWords(code);
   return `<ol class="how-check">${g.check.map((c) => `<li>${escapeHtml(c)}</li>`).join('')}</ol>
 <p class="how-line"><span class="label">${escapeHtml(W.against)}</span><span>${escapeHtml(g.against)}</span></p>
-<p class="how-line"><span class="label">${escapeHtml(W.wrong)}</span><span>${escapeHtml(g.wrong ?? commonAdvice(code))}</span></p>`;
+${g.wrong ? `<p class="how-line"><span class="label">${escapeHtml(W.wrong)}</span><span>${escapeHtml(g.wrong)}</span></p>` : ''}`;
 }
 export const howBox = (g, code) => `<div class="how"><p class="how-title">${escapeHtml(howWords(code).check)}</p>${howHtml(g, code)}</div>`;
 
@@ -683,7 +685,7 @@ ${scenariosHtml(req, old, c)}`;
     evidence += refs.map((ref) => snippet(root, ref, L)).join('\n');
     if (!refs.length && plainText(t.source)) evidence += `<p class="tests"><span class="label">${escapeHtml(L.source)}</span><span>${inline(t.source)}</span></p>`;
     const none = /^(none|なし|無し|-|—)?$/i.test(plainText(t.tests));
-    evidence += `<p class="tests"><span class="label">${escapeHtml(L.tests)}</span><span${none ? ' class="caution"' : ''}>${inline(t.tests || '—')}</span></p>`;
+    evidence += `<p class="tests"><span class="label">${escapeHtml(L.tests)}</span><span${none ? ' class="caution"' : ''}>${none ? escapeHtml(L.noneWord) : inline(t.tests)}</span></p>`;
   } else if (req.kind !== 'removed') evidence += `<p class="caution">${escapeHtml(L.noTrace)}</p>`;
   evidence += crossLine(c.cross.get(norm(req.name)), L);
   return { tag: c.amend || req.kind === 'modified' || req.kind === 'removed' ? deltaTag(req.kind, L) : '', removed: req.kind === 'removed', notes,
@@ -711,10 +713,31 @@ function screenshot(value, c) {
   return `<figure class="shot"><img src="${src}" alt="${escapeHtml(`${L.screenshot}: ${raw}`)}" loading="lazy"><figcaption><a href="${src}">${escapeHtml(L.openImage)}</a> <span class="mono">${escapeHtml(raw)}</span></figcaption></figure>`;
 }
 
+// The fixed English labels of screens.md (the template's) in the page's language.
+// The file keeps them; only the page shows the translation.
+function screenLabels(text, L) {
+  const map = L.screenLabels;
+  if (!map) return text;
+  const word = (w) => map[w.trim().toLowerCase()] ?? w;
+  return text.split('\n').map((line) => {
+    let m = line.match(/^(\s*[-*+]\s+\*\*)([^*]+)(\*\*.*)$/);
+    if (m) return `${m[1]}${word(m[2])}${m[3]}`;
+    m = line.match(/^\*\*([^*]+)\*\*\s*$/);
+    if (m) return `**${word(m[1])}**`;
+    // The first header row of a table: every cell a known label.
+    if (/^\s*\|/.test(line)) {
+      const cells = line.split('|');
+      const inner = cells.slice(1, -1).map((x) => x.trim()).filter(Boolean);
+      if (inner.length && inner.every((x) => map[x.toLowerCase()])) return cells.map((x) => (x.trim() ? ` ${word(x)} ` : x)).join('|');
+    }
+    return line;
+  }).join('\n');
+}
+
 function screenBody(it, c) {
   const shotLine = /^\s*[-*+]\s+\*\*Screenshot\*\*\s*:?\s*(.*)$/i;
   const value = it.data.body.map((l) => l.match(shotLine)).find(Boolean)?.[1] ?? '';
-  const rest = it.data.body.filter((l) => !shotLine.test(l)).join('\n');
+  const rest = screenLabels(it.data.body.filter((l) => !shotLine.test(l)).join('\n'), c.L);
   const shot = screenshot(value, c);
   return { tag: '', notes: [], html: `<div class="screen${shot ? '' : ' no-shot'}">${shot}<div class="doc">${markdown(rest, { headingOffset: 2 })}${crossLine(c.cross.get(norm(it.data.name)), c.L)}</div></div>` };
 }
@@ -737,7 +760,9 @@ function leftoverBody(it, c) {
   const { L } = c;
   const row = it.data;
   const facts = [[L.leftoverKind, L.leftoverKinds[row.kind] ?? row.kind], [L.leftoverWhere, row.where], [L.leftoverClass, L.leftoverClasses[row.klass] ?? row.klass], [L.leftoverReason, row.reason]];
-  return { tag: '', notes: [], html: `<div class="q-body"><p class="q-text">${inline(row.what)}</p><dl class="facts">${facts.filter(([, v]) => v).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${inline(v)}</dd>`).join('')}</dl></div>` };
+  const klass = L.leftoverClasses[row.klass] ?? row.klass;
+  const same = norm(plainText(row.what)) === norm(plainText(stripComments(it.title).replace(/\s+-\s*class\s*:.*$/i, '')));
+  return { tag: klass ? `<span class="klass k-${escapeHtml(String(row.klass).replace(/[^a-z-]/g, ''))}">${escapeHtml(klass)}</span>` : '', notes: [], html: `<div class="q-body">${same ? '' : `<p class="q-text">${inline(row.what)}</p>`}<dl class="facts">${facts.filter(([k, v]) => v && k !== L.leftoverClass).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${inline(v)}</dd>`).join('')}</dl></div>` };
 }
 
 function reviewView({ root, dir, schema, L, outDir, lang = 'en' }) {
@@ -829,16 +854,18 @@ function reviewView({ root, dir, schema, L, outDir, lang = 'en' }) {
         : item.kind === 'leftover' ? leftoverBody(item, c)
         : item.kind === 'context' ? { tag: '', notes: [], html: `<div class="q-body">${survey ? contextCard(survey, item.data, lang) : `<div class="doc">${markdown(item.data.body.join('\n'), { headingOffset: 2 })}</div>`}</div>` } : { tag: '', notes: [], html: '' };
       // A survey's map items show the material they ask about (a diagram, a table, the files).
-      const aid = survey && !item.kind ? surveyAid(survey, item, lang) : '';
+      const aid = survey && !item.kind ? surveyAid(survey, item, lang) : !item.kind ? docAid(dir, schema, item, lang) : '';
       if (aid) body.html = `<div class="q-body aid">${aid}</div>`;
       // What to check: an item of its own gets its guidance inline; items of one
       // letter share theirs at the top of the group, and keep a folded copy each.
       const g = itemGuide(schema, item, lang);
+      // A document of this change named in the guidance links to its place in the appendix.
+      const linkDocs = (html) => html.replace(/([\w-]+)\.md/g, (m, name) => (m !== 'review.md' && !(m === 'screens.md' && screens.length) && fs.existsSync(path.join(dir, m)) ? `<a href="#doc-${name}-md">${m}</a>` : m));
       let how = '';
-      if (g?.own) how = `<div class="q-body">${howBox(g, lang)}</div>`;
+      if (g?.own) how = `<div class="q-body">${linkDocs(howBox(g, lang))}</div>`;
       else if (g) {
-        if (!group.how) group.how = howBox(g, lang);
-        how = `<div class="q-body"><details class="how-fold"><summary>${escapeHtml(howWords(lang).how)}</summary>${howHtml(g, lang)}</details></div>`;
+        if (!group.how) group.how = linkDocs(howBox(g, lang));
+        how = `<div class="q-body"><details class="how-fold"><summary>${escapeHtml(howWords(lang).how)}</summary>${linkDocs(howHtml(g, lang))}</details></div>`;
       }
       const notes = [...item.notes, ...body.notes];
       // A finish leftover's "- class: x" is shown as its class, not as words of the title.
@@ -1144,6 +1171,10 @@ main{padding:8px 16px 96px;min-width:0}
 .rail>*{flex:none}
 .rail>.toc[open]{flex:1 1 auto;min-height:220px;overflow-y:auto;margin-right:-20px;padding-right:20px}
 main{padding:16px 40px 120px;max-width:1640px}}
+@media (min-width:1000px) and (max-height:820px){
+.remain-sub,.legend{display:none}
+.rail{padding-top:16px;padding-bottom:12px}
+.left{margin-top:10px;padding-top:8px}.filter{margin-top:10px}.toc{margin-top:8px}}
 
 .kind{margin:0;font:600 12px/1.4 var(--ui);letter-spacing:.06em;color:var(--ink2)}
 .rail h1{margin:2px 0 0;font:700 17px/1.4 var(--mono);overflow-wrap:anywhere}
@@ -1165,8 +1196,8 @@ main{padding:16px 40px 120px;max-width:1640px}}
 
 .sheet{margin:14px 0 0;padding:0;list-style:none;display:grid;grid-template-columns:1.6em minmax(0,1fr);gap:6px 4px;align-items:start}
 .sheet .g{font:600 12px/18px var(--mono);color:var(--ink2)}
-.cells{display:flex;flex-wrap:wrap;gap:3px}
-.cells a,.legend i{display:block;width:18px;height:18px;border:1.5px dashed var(--rule);text-decoration:none;font:700 12px/15px var(--ui);text-align:center;color:var(--paper)}
+.cells{display:flex;flex-wrap:wrap;gap:4px}
+.cells a,.legend i{display:block;width:20px;height:20px;border:1.5px dashed var(--rule);text-decoration:none;font:700 12px/15px var(--ui);text-align:center;color:var(--paper)}
 .cells a.is-done,.legend i.is-done{border:1.5px solid var(--shu);background:var(--shu)}
 .cells a:hover{border-color:var(--ink)}
 .cells a[aria-current]{outline:2px solid var(--ink);outline-offset:2px}
@@ -1243,7 +1274,7 @@ body:has(#f-open:checked) .group:not(:has(.item.is-mine)) .all-clear{display:blo
 .pair{margin-top:12px;display:grid;grid-template-columns:minmax(0,1fr);gap:18px 40px}
 .claim,.evidence{min-width:0}
 @container (min-width:860px){.pair{grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);padding-left:calc(3.1em + 26px)}
-.claim{position:sticky;top:12px;align-self:start;max-height:calc(100vh - 24px);overflow-y:auto}}
+.claim{position:sticky;top:12px;align-self:start;max-height:calc(100vh - 24px - var(--bar,0px));overflow-y:auto}}
 .statement{font-size:17px;max-width:38em;overflow-wrap:anywhere}
 .statement p{margin:0 0 .5em}
 .statement.gone,.gone h4>span:last-child,.gone dd,.gone>p,.gone>ul,.gone>ol{color:var(--ink2);text-decoration:line-through}
@@ -1275,6 +1306,12 @@ body:has(#f-open:checked) .group:not(:has(.item.is-mine)) .all-clear{display:blo
 .code .l{display:block;padding-right:12px}
 .code .l:hover{background:var(--code)}
 .code .ln{display:inline-block;width:3.6em;padding-right:10px;margin-right:12px;text-align:right;color:var(--ink2);border-right:1px solid var(--hair);user-select:none}
+/* Long lines wrap under their own text, the line number column stays clear. */
+.code{white-space:pre-wrap;overflow-wrap:anywhere}
+.code code{min-width:0}
+.code .l{padding-left:calc(3.6em + 23px + 2ch);text-indent:calc(-3.6em - 23px - 2ch);background:linear-gradient(var(--hair),var(--hair)) calc(3.6em + 10px) 0/1px 100% no-repeat}
+.code .l:hover{background-color:var(--code)}
+.code .ln{text-indent:0;border-right:0;margin-right:13px}
 .src-note{margin:0;padding:4px 10px;border-top:1px solid var(--hair);font:400 12px/1.5 var(--ui);color:var(--ink2)}
 .src-note.caution{color:var(--ochre);font-weight:600}
 .tests{margin:8px 0 0;font-size:14px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:baseline;overflow-wrap:anywhere}
@@ -1307,6 +1344,10 @@ li.done .box{border:1.5px solid var(--ink)}
 .delta{display:inline-block;font:700 12px/1.4 var(--ui);padding:1px 7px;border:1.5px solid var(--ink);margin-right:8px;white-space:nowrap;vertical-align:.15em}
 .delta.added{border-style:double;border-width:3px}
 .delta.removed{border-style:dashed}
+.klass{display:inline-block;font:700 13px/1.4 var(--ui);padding:1px 8px;border:1.5px solid var(--ink);margin-right:8px;white-space:nowrap;vertical-align:.12em}
+.klass.k-before-release{border-color:var(--ochre);color:var(--ochre)}
+.klass.k-wont-fix{border-style:dashed;color:var(--ink2)}
+del+ins{margin-left:.35em}
 .was,.now{display:grid;grid-template-columns:2.4em minmax(0,1fr);gap:8px;margin:0;padding:6px 0;max-width:40em;font-size:17px;overflow-wrap:anywhere;align-items:baseline}
 .was{color:var(--ink2)}
 del{text-decoration:line-through;text-decoration-thickness:2px;color:var(--ink2);background:var(--code)}
@@ -1314,12 +1355,14 @@ ins{text-decoration:none;font-weight:700;border-bottom:3px double var(--ink)}
 .item.is-removed .pair{background:repeating-linear-gradient(135deg,transparent 0 9px,var(--hair) 9px 10px)}
 
 .screen{display:grid;grid-template-columns:minmax(0,1fr);gap:14px 28px;margin-top:10px}
-@container (min-width:860px){.screen{grid-template-columns:minmax(0,420px) minmax(0,1fr);padding-left:calc(3.1em + 26px)}.screen.no-shot{grid-template-columns:minmax(0,1fr)}}
+@container (min-width:860px){.screen{padding-left:calc(3.1em + 26px)}}
+@container (min-width:1000px){.screen{grid-template-columns:minmax(0,420px) minmax(0,1fr)}.screen.no-shot{grid-template-columns:minmax(0,1fr)}}
+.screen .shot{max-width:640px}
 .shot{margin:0;min-width:0;align-self:start}
 .shot img{display:block;border:1px solid var(--rule)}
 .shot figcaption{font-size:13px;margin-top:4px;overflow-wrap:anywhere}
 
-.remain-split{margin:4px 0 0;font-size:13px;font-weight:600;color:var(--ochre)}
+.remain-split{margin:4px 0 0;font-size:13px;color:var(--ink2)}
 .cells a.st-fix,.legend i.st-fix{border:1.5px solid var(--ochre);background:var(--paper);color:var(--ochre)}
 .cells a.st-hold,.legend i.st-hold{border:1.5px solid var(--ink2);background:var(--paper);color:var(--ink2)}
 .cells a.st-fixed,.legend i.st-fixed{border:1.5px solid var(--ink);background:var(--paper);color:var(--ink)}
@@ -1449,13 +1492,25 @@ const SCRIPT = String.raw`(() => {
   const sync = () => {
     if (pinned !== null) { if (Math.abs(scrollY - pinned) < 2) return; pinned = null; }
     const list = items();
-    let hit = list[0] || null;
-    for (const el of list) { if (el.getBoundingClientRect().top <= innerHeight * 0.3) hit = el; else break; }
+    const line = innerHeight * 0.3;
+    let hit = null;
+    // The first item not yet scrolled past, when its head shows or it still fills the reading band;
+    // none while the reader is above the first item or below the last one (the appendix).
+    for (const el of list) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom < 48) continue;
+      if (r.top >= -4 || r.bottom > line) { if (r.top < innerHeight * 0.7) hit = el; break; }
+      hit = el; // its tail is still at the top: kept unless the next item is within reach
+    }
     mark(hit);
   };
   let tick = false;
   addEventListener('scroll', () => { if (!tick) { tick = true; requestAnimationFrame(() => { tick = false; sync(); }); } }, { passive: true });
   addEventListener('resize', () => { pinned = null; sync(); });
+  // Pressing or focusing something inside an item makes it the current one.
+  const own = (e) => { const it = e.target && e.target.closest ? e.target.closest('main .item') : null; if (it && it.offsetParent !== null) { mark(it); pinned = scrollY; } };
+  d.addEventListener('pointerdown', own, true);
+  d.addEventListener('focusin', own);
   const fOpen = d.getElementById('f-open'), fAll = d.getElementById('f-all');
   let filter = null;
   const go = (el) => {
@@ -1565,9 +1620,9 @@ export function page({ title, kind, meta, brief = '', groups = [], docs = [], L,
 
   const progress = reviewed ? `<div class="left">
 <p class="remain">${mine.length ? L.remain(mine.length) : open.length ? L.noneMine : L.allDone}</p>
-<p class="remain-sub">${escapeHtml(L.of(all.length, all.length - open.length))}${open.length ? `（${escapeHtml(L.left)}: ${groups.filter((g) => g.items.some((i) => !i.done)).map((g) => `${escapeHtml(g.title)} ${g.items.filter((i) => !i.done).length}`).join('・')}）` : ''}</p>
-${split.fix + split.hold + split.fixed ? `<p class="remain-split">${escapeHtml(L.split(split))}</p>` : ''}
+<p class="remain-sub">${escapeHtml(L.of(all.length, all.length - open.length))}</p>
 <ol class="sheet" aria-label="${escapeHtml(L.sheet)}">${groups.map((g) => `<li class="g" aria-hidden="true">${escapeHtml(letter(g))}</li><li class="cells">${g.items.map((x) => `<a href="#${escapeHtml(x.anchor)}" class="${state(x)}" title="${escapeHtml(`${x.label} ${x.name}`)} — ${word(x)}">${['fix', 'hold', 'fixed'].includes(st(x)) ? `<span aria-hidden="true">${escapeHtml(L.seals[st(x)])}</span>` : ''}<span class="vh">${escapeHtml(x.label)} ${word(x)}</span></a>`).join('')}</li>`).join('')}</ol>
+${split.fix + split.hold + split.fixed ? `<p class="remain-split">${escapeHtml(L.split(split))}</p>` : ''}
 <p class="legend"><span><i class="is-done" aria-hidden="true"></i>${escapeHtml(L.legendDone)}</span><span><i aria-hidden="true"></i>${escapeHtml(L.legendOpen)}</span>${split.fix ? `<span><i class="st-fix" aria-hidden="true">${escapeHtml(L.seals.fix)}</i>${escapeHtml(L.states.fix)}</span>` : ''}${split.hold ? `<span><i class="st-hold" aria-hidden="true">${escapeHtml(L.seals.hold)}</i>${escapeHtml(L.states.hold)}</span>` : ''}${split.fixed ? `<span><i class="st-fixed" aria-hidden="true">${escapeHtml(L.seals.fixed)}</i>${escapeHtml(L.states.fixed)}</span>` : ''}</p>
 ${mine.length ? `<a class="next" href="#${escapeHtml(mine[0].anchor)}">${escapeHtml(L.firstOpen(mine[0].label))}</a>` : ''}
 </div>
@@ -1602,7 +1657,7 @@ ${read ? '' : `<p class="all-clear">${escapeHtml(L.allClear)}</p>`}
     // On a review page the appendix is reference material: each document folded, opened when needed.
     ...(reviewed && docs.length ? [`<p class="appendix-hint"><span class="label">${escapeHtml(L.appendix)}</span> ${escapeHtml(L.appendixHint)}</p>`] : []),
     ...docs.map((s) => (reviewed
-      ? `<section class="group appendix" id="${escapeHtml(s.id)}"><details class="doc-fold"><summary><h2>${escapeHtml(L.appendix)} — ${escapeHtml(s.title)}</h2></summary>
+      ? `<section class="group appendix" id="${escapeHtml(s.id)}"><details class="doc-fold"><summary><h2>${escapeHtml(s.title)}</h2></summary>
 ${s.html}
 </details></section>`
       : `<section class="group" id="${escapeHtml(s.id)}"><h2>${escapeHtml(s.title)}</h2>
@@ -1619,7 +1674,7 @@ ${s.html}
 <meta name="color-scheme" content="light dark">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data: file:">
 <title>${escapeHtml(title)}</title>
-<style>${CSS}${SURVEY_CSS}</style>
+<style>${CSS}${SURVEY_CSS}${DOC_AID_CSS}</style>
 </head>
 <body>
 <a class="skip" href="#main">${escapeHtml(L.skip)}</a>

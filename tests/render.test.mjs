@@ -35,7 +35,7 @@ test('an extract change renders as a review page with progress, items, trace and
   assert.deepEqual(render({ root: dir, change: 'extract-billing-invoice' }), { ok: true, out: 'openspec/spec-relay/views/extract-billing-invoice.html' });
   const page = html(dir, 'extract-billing-invoice');
   assert.match(page, /<html lang="ja">/);
-  assert.match(page, /<p class="remain"><b>1<\/b>件があなたの確認待ち<\/p>/, 'one of three items is open');
+  assert.match(page, /<p class="remain"><b>1<\/b>件 あなたの番<\/p>/, 'one of three items is open');
   assert.match(page, /3 件中 2 件を確認済み/);
   assert.match(page, /class="item k-req is-done st-done" id="R1"[\s\S]*Total/);
   assert.match(page, /class="item k-req is-open is-mine st-open" id="R2"/);
@@ -191,7 +191,7 @@ test('a requirement without a review row is open and says so; a row that names n
   write(dir, `${CHANGE}/review.md`, 'Reviewer: Uma\n\n## 1. Requirements\n- [x] R1 Total\n- [x] R7 Gone\n\n## 2. Empty\n');
   render({ root: dir, change: 'extract-billing-invoice' });
   const page = html(dir, 'extract-billing-invoice');
-  assert.match(page, /<p class="remain"><b>2<\/b>件があなたの確認待ち<\/p>/, 'the unlisted requirement and the unlisted question count as open');
+  assert.match(page, /<p class="remain"><b>2<\/b>件 あなたの番<\/p>/, 'the unlisted requirement and the unlisted question count as open');
   assert.match(page, /class="item k-req is-open is-mine st-open" id="x1"[\s\S]*?Reject empty[\s\S]*?review\.md に項目がありません/);
   assert.match(page, /id="R7"[\s\S]*?同じ名前の要件が仕様にありません/);
   assert.doesNotMatch(page, /Empty/, 'a group without items is not shown');
@@ -212,7 +212,7 @@ test('review items are any <Letter><n> id, grouped by the headings of review.md'
   assert.match(page, /<h2 id="g1">アーキテクチャ<span class="n">確認済み 1 \/ 2<\/span>/);
   assert.match(page, /class="item is-open is-mine st-open" id="E1"[\s\S]*?<details class="how-fold"><summary>確認のしかた<\/summary>[\s\S]*?verification\.md/);
   assert.match(page, /id="doc-architecture-md"/);
-  assert.match(page, /<b>3<\/b>件があなたの確認待ち/);
+  assert.match(page, /<b>3<\/b>件 あなたの番/);
 });
 
 test('questions are found in every shape the gate accepts', () => {
@@ -271,7 +271,7 @@ test('a survey shows each context as an item and keeps the relationships table',
   assert.match(page, /id="doc-context-map-md"[\s\S]*?<th>Channel<\/th>[\s\S]*?<td>table t_order<\/td>/);
   assert.equal(count(page, /class="ctx-type t-core"/g), 1, 'the contexts are not repeated in the appendix');
   assert.equal(count(page, /<strong>Type<\/strong>/g), 0, 'the appendix does not repeat the contexts');
-  assert.match(page, /<b>4<\/b>件があなたの確認待ち/);
+  assert.match(page, /<b>4<\/b>件 あなたの番/);
 });
 
 test('an amendment shows the old wording from the baseline against the new', () => {
@@ -527,7 +527,7 @@ test('a survey review shows the material of each map item: the diagram, the data
   assert.match(page, /class="item k-context is-open st-fix" id="K2"[\s\S]*?<li class="rm-fix"><span class="label">あなた: 修正依頼<\/span><span>split invoices out<\/span>/);
   assert.match(page, /class="item k-context is-open is-mine st-fixed" id="K3"[\s\S]*?class="rm-fixed"[\s\S]*?renamed to ordering/);
   assert.match(page, /class="item is-open st-hold" id="M2"/);
-  assert.match(page, /<p class="remain"><b>[0-9]+<\/b>件があなたの確認待ち<\/p>[\s\S]*?<p class="remain-split">うち再確認待ち 1。ほかに AI の対応待ち 1・保留中 1<\/p>/);
+  assert.match(page, /<p class="remain"><b>[0-9]+<\/b>件 あなたの番<\/p>[\s\S]*?<p class="remain-split">うち再確認待ち 1。ほかに AI の対応待ち 1・保留中 1<\/p>/);
   // A confirmed item folds its content; the open ones do not.
   assert.match(page, /id="K1"[\s\S]*?<details class="fold"><summary>内容を表示/);
   assert.doesNotMatch(page.match(/id="K2"[\s\S]*?<\/article>/)[0], /class="fold"/);
@@ -554,7 +554,7 @@ test('a survey review shows the material of each map item: the diagram, the data
   assert.match(page, /id="D1"[\s\S]*?MySQL 5\.6[\s\S]*?データベースの中のロジック[\s\S]*?trigger/);
   assert.match(page, /id="D90"[\s\S]*?The log database has no dump/);
   // The appendix: folded, and the inventory as counts with every row behind one click.
-  assert.match(page, /<section class="group appendix" id="doc-inventory-md"><details class="doc-fold"><summary><h2>付録 — inventory<\/h2><\/summary>[\s\S]*?<tr class="sum"><td>計<\/td><td class="num">1<\/td><td class="num">1<\/td><td class="num">3<\/td><\/tr>[\s\S]*?すべての行を表示（3 行）/);
+  assert.match(page, /<section class="group appendix" id="doc-inventory-md"><details class="doc-fold"><summary><h2>inventory<\/h2><\/summary>[\s\S]*?<tr class="sum"><td>計<\/td><td class="num">1<\/td><td class="num">1<\/td><td class="num">3<\/td><\/tr>[\s\S]*?すべての行を表示（3 行）/);
   assert.doesNotMatch(page, /<details class="doc-fold" open/);
 });
 
@@ -582,4 +582,20 @@ test('survey facts read what analysts write, and show the rest as written', () =
   assert.match(contextCard(facts, { name: 'billing', body: facts.contexts[0].body }, 'en'), /<div class="doc">[\s\S]*?Note: invoices only\.[\s\S]*?<dl class="ctx-facts">/);
   assert.deepEqual([facts.shared[0].owner, facts.shared[0].writers, facts.shared[0].readers], [['order'], ['billing'], []], 'notes in brackets are not contexts');
   assert.match(surveyAid(facts, { id: 'D1', letter: 'D', title: 'main：定義とロジック' }, 'ja'), /MySQL/, 'a full-width colon ends the database name');
+});
+
+test('target, finish and amendment items show the part of their document they ask about', () => {
+  const dir = repo();
+  const page = change(dir, 'target-design', 'spec-relay-target', {
+    'review.md': 'Reviewer: Uma\n\n## 1. Architecture\n- [ ] A0 The style\n- [ ] A1 billing: Billing\n- [ ] A2 order: Order\n\n## 2. Conventions\n- [ ] V1 Runtime and frameworks\n\n## 3. Verification\n- [ ] E90 Sign-in and recorded data\n',
+    'architecture.md': '# Architecture\n\n## Style\nModular monolith, one module per context.\n\n## Modules\n| Context | Module path | Depends on |\n|---|---|---|\n| billing | target/billing | - |\n| platform | target/platform | - |\n',
+    'conventions.md': '# Conventions\n\n## Runtime and frameworks\nJava 21, Spring Boot 3.\n',
+    'verification.md': '# Verification\n\n## Sign-in\nA test user.\n\n## Recorded data\nNone kept.\n',
+  });
+  assert.match(page, /id="A0"[\s\S]*?<a href="#doc-architecture-md">architecture\.md より<\/a>[\s\S]*?Modular monolith/);
+  assert.match(page, /id="A1"[\s\S]*?<td>billing<\/td><td>target\/billing<\/td>/);
+  assert.doesNotMatch(page.match(/id="A1"[\s\S]*?<\/article>/)[0], /target\/platform/, 'only the row of the item\'s context');
+  assert.match(page, /id="A2"[\s\S]*?architecture\.md にこの項目の行がありません/);
+  assert.match(page, /id="V1"[\s\S]*?Java 21, Spring Boot 3/);
+  assert.match(page, /id="E90"[\s\S]*?Sign-in[\s\S]*?A test user[\s\S]*?Recorded data[\s\S]*?None kept/);
 });

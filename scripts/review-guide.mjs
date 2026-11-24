@@ -26,8 +26,8 @@ const GUIDE = {
     },
     'spec-relay-extract': {
       R: {
-        check: ['要件の文とシナリオが、右の元コードの動きと同じか（条件、計算、エラーのとき）', '照合（AI の再確認）が「一致」でなければ、その理由'],
-        against: '右の元コードの行、既存のテスト、照合の結果',
+        check: ['要件の文とシナリオが、根拠の元コードの動きと同じか（条件、計算、エラーのとき）', '照合（AI の再確認）が「一致」でなければ、その理由'],
+        against: '根拠の元コードの行、既存のテスト、照合の結果',
         wrong: '違う動きや抜けている条件を書く。元コードのほうがバグだと思うときも、そう書く',
       },
       S: { check: ['画面の項目・操作・メッセージ・遷移が、実際の画面と同じか', 'スクリーンショットがあれば見比べる'], against: 'スクリーンショットと screens.md の記述' },
@@ -124,8 +124,8 @@ const TITLES = {
 };
 // "<name>: <fixed words>" titles: the name stays, the words are translated.
 const SUFFIXES = {
-  'spec-relay-survey': [[/[:：]\s*definitions and the logic in it\s*$/i, '：定義と中のロジック']],
-  'spec-relay-target': [[/[:：]\s*levels\s*$/i, '：確かめ方の水準'], [/[:：]\s*screens\s*$/i, '：画面']],
+  'spec-relay-survey': [[/[:：]\s*definitions and the logic in it\s*$/i, ': 定義と中のロジック']],
+  'spec-relay-target': [[/[:：]\s*levels\s*$/i, ': 確かめ方の水準'], [/[:：]\s*screens\s*$/i, ': 画面']],
 };
 
 // The Japanese title of a kit item, or null (the title is shown as written).
