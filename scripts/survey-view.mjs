@@ -14,13 +14,14 @@ const WORDS = {
   ja: {
     fields: { name: '名前', type: '種類', responsibility: '責務', 'owned data': '所有データ', 'entry points': '入口', evidence: '根拠' },
     types: { core: '中核', supporting: '補助', generic: '汎用' },
-    connections: 'つながり', upstream: '上流（使う相手）', downstream: '下流（使われる相手）', none: 'なし',
+    connections: 'つながり', upstream: '上流（これが使う）', downstream: '下流（これを使う）', none: 'なし',
     data: 'データ', owns: '所有', writes: '書く', reads: '読む', alsoWrite: 'ほかにも書く', readBy: '読む',
-    files: 'ファイル', fileCount: (port, carry) => `移行 ${port}・そのまま持っていく（carry）${carry}`, showFiles: (n) => `ファイルを表示（${n} 件）`,
+    files: 'ファイル', fileCount: (port, carry) => `移行 ${port} 件・そのまま移す（carry）${carry} 件`, showFiles: (n) => `ファイルを表示（${n} 件）`,
     capabilities: 'capability', more: (n) => `ほか ${n} 件を表示`,
     diagram: (n, e) => `コンテキスト ${n} 個とつながり ${e} 本の図`,
     legend: [['call', '呼び出し'], ['table', 'テーブルを共有'], ['event', 'イベント・ファイル']],
-    relHead: ['上流', '下流', 'パターン', '経路'], noRelations: 'context-map.md の Relationships に行がありません。',
+    relHead: ['上流', '下流', 'パターン', '経路'], relTable: (n) => `つながりを表で見る（${n} 件）`,
+    patterns: { 'shared kernel': '共有カーネル', 'customer-supplier': '顧客／供給者', conformist: '順応者', 'open host': '公開ホスト', 'open host service': '公開ホストサービス', 'published language': '公表された言語', 'anticorruption layer': '腐敗防止層', acl: '腐敗防止層', partnership: 'パートナーシップ', 'separate ways': '別々の道' }, noRelations: 'context-map.md の Relationships に行がありません。',
     dataHead: 'データ', manyWriters: '複数が書き込む', noShared: 'context-map.md の Shared data に行がありません。',
     order: '順番', capHead: ['capability', '名前', '元コード'], noCaps: 'capabilities.md に capability がありません。',
     carryHead: ['パス', 'コンテキスト', '備考'], noCarry: 'carry のファイルはありません。',
@@ -40,7 +41,7 @@ const WORDS = {
     capabilities: 'Capabilities', more: (n) => `Show ${n} more`,
     diagram: (n, e) => `Diagram of ${n} contexts and ${e} connections`,
     legend: [['call', 'call'], ['table', 'shared table'], ['event', 'event or file']],
-    relHead: ['Upstream', 'Downstream', 'Pattern', 'Channel'], noRelations: 'context-map.md has no row under Relationships.',
+    relHead: ['Upstream', 'Downstream', 'Pattern', 'Channel'], relTable: (n) => `Show the connections as a table (${n})`, patterns: {}, noRelations: 'context-map.md has no row under Relationships.',
     dataHead: 'Data', manyWriters: 'several write it', noShared: 'context-map.md has no row under Shared data.',
     order: 'Order', capHead: ['Capability', 'Name', 'Source'], noCaps: 'capabilities.md lists no capability.',
     carryHead: ['Path', 'Context', 'Notes'], noCarry: 'No file is marked carry.',
@@ -276,7 +277,7 @@ export function relationsSvg(facts, code) {
     for (let c = cols.length - 2; c >= 0; c -= 1) sweep(c, succ);
   }
   for (let c = 1; c < cols.length; c += 1) sweep(c, pred);
-  const bw = 168, bh = 36, dh = 8, gx = 96, gy = 14, pad = 16;
+  const bw = 168, bh = 36, dh = 8, gx = 56, gy = 14, pad = 16;
   const tall = (n) => (dummy.has(n) ? dh : bh);
   const colHeight = (col) => col.reduce((s, n) => s + tall(n), 0) + Math.max(0, col.length - 1) * gy;
   const tallest = Math.max(...cols.map(colHeight));
@@ -322,17 +323,19 @@ export function relationsSvg(facts, code) {
   const boxes = order.map((id) => {
     const p = at.get(id);
     const label = nameOf(id);
-    return `<g><title>${escapeHtml(id)}${label ? ` — ${escapeHtml(label)}` : ''}</title><rect x="${p.x}" y="${p.y}" width="${bw}" height="${bh}" class="rel-box"/><text x="${p.x + 10}" y="${p.y + 15}" class="rel-id">${escapeHtml(short(id, 22))}</text>${label ? `<text x="${p.x + 10}" y="${p.y + 29}" class="rel-name">${escapeHtml(short(label, 13))}</text>` : ''}</g>`;
+    return `<g><title>${escapeHtml(id)}${label ? ` — ${escapeHtml(label)}` : ''}</title><rect x="${p.x}" y="${p.y}" width="${bw}" height="${bh}" class="rel-box"/><text x="${p.x + 10}" y="${p.y + 15}" class="rel-id">${escapeHtml(short(id, 19))}</text>${label ? `<text x="${p.x + 10}" y="${p.y + 29}" class="rel-name">${escapeHtml(short(label, 11))}</text>` : ''}</g>`;
   });
   const legend = `<p class="rel-legend">${W.legend.map(([k, label]) => `<span><svg width="34" height="10" aria-hidden="true"><line x1="0" y1="5" x2="34" y2="5" class="rel-edge rel-${k}"/></svg>${escapeHtml(label)}</span>`).join('')}</p>`;
-  return `<figure class="diagram rel"><svg viewBox="0 0 ${width} ${height}" style="max-width:${width}px;min-width:${Math.min(width, 520)}px" role="img" aria-label="${escapeHtml(W.diagram(order.length, edges.length))}" preserveAspectRatio="xMidYMin meet"><defs><marker id="rel-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rel-head"/></marker></defs>${lines.join('')}${boxes.join('')}</svg>${legend}</figure>`;
+  return `<figure class="diagram rel" tabindex="0" role="region" aria-label="${escapeHtml(W.diagram(order.length, edges.length))}"><svg viewBox="0 0 ${width} ${height}" style="max-width:${width}px;min-width:${Math.round(width * 0.85)}px" role="img" aria-label="${escapeHtml(W.diagram(order.length, edges.length))}" preserveAspectRatio="xMidYMin meet"><defs><marker id="rel-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="rel-head"/></marker></defs>${lines.join('')}${boxes.join('')}</svg>${legend}</figure>`;
 }
 
 // ---------------------------------------------------------------- the map items
 
 function relationsTable(facts, W) {
   if (!facts.rel.length) return `<p class="caution">${escapeHtml(W.noRelations)}</p>`;
-  return table(W.relHead, facts.rel.map((r) => `<tr><td>${chip(r.up)}</td><td>${chip(r.down)}</td><td>${inline(stripComments(r.pattern))}</td><td>${inline(stripComments(r.channel))}</td></tr>`));
+  // A DDD pattern keeps its English name, with the Japanese one beside it.
+  const pattern = (p) => { const k = clean(p).toLowerCase(); return `${inline(stripComments(p))}${W.patterns[k] ? ` <span class="sub">（${escapeHtml(W.patterns[k])}）</span>` : ''}`; };
+  return table(W.relHead, facts.rel.map((r) => `<tr><td>${chip(r.up)}</td><td>${chip(r.down)}</td><td>${pattern(r.pattern)}</td><td>${inline(stripComments(r.channel))}</td></tr>`));
 }
 
 // Data down, contexts across: who owns, who else writes, who reads.
@@ -361,7 +364,7 @@ const pathCell = (p) => `<td class="mono">${escapeHtml(p)}</td>`;
 // The extra body of a survey review item: the material it asks the person to judge. '' when none.
 export function surveyAid(facts, item, code, row = null) {
   const W = WORDS[code === 'ja' ? 'ja' : 'en'];
-  if (item.id === 'M1') return `${relationsSvg(facts, code)}${relationsTable(facts, W)}`;
+  if (item.id === 'M1') { const svg = relationsSvg(facts, code); return svg ? `${svg}<details class="more"><summary>${escapeHtml(W.relTable(facts.rel.length))}</summary>${relationsTable(facts, W)}</details>` : relationsTable(facts, W); }
   if (item.id === 'M2') return sharedMatrix(facts, W);
   if (item.id === 'M3') return facts.conflicts === null ? `<p class="caution">${escapeHtml(W.noConflicts)}</p>` : `<div class="doc">${markdown(facts.conflicts, { headingOffset: 2 })}</div>`;
   if (item.id === 'M4') return capabilityTable(facts, W);
@@ -400,7 +403,7 @@ export const SURVEY_CSS = `
 .ctx-card{display:grid;grid-template-columns:minmax(0,1fr);gap:12px 32px}
 @container (min-width:860px){.ctx-card{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr)}}
 .ctx-said,.ctx-facts{margin:0;display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 14px;font-size:15px;align-content:start}
-.ctx-said>dt,.ctx-facts>dt{font:600 12px/1.9 var(--ui);color:var(--ink2);letter-spacing:.04em}
+.ctx-said>dt,.ctx-facts>dt{font:600 13px/1.9 var(--ui);color:var(--ink2);letter-spacing:.04em}
 .ctx-said>dd,.ctx-facts>dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .ctx-facts{padding:10px 14px;background:var(--desk);border-left:3px solid var(--rule);grid-template-columns:minmax(0,1fr);gap:2px}
 .ctx-facts>dt{margin-top:6px}.ctx-facts>dt:first-child{margin-top:0}
@@ -414,22 +417,24 @@ ul.plain-list{list-style:none;margin:0;padding:0}ul.plain-list li{margin:2px 0;l
 .ctx-chip{display:inline-block;font:600 12px/1.5 var(--mono);padding:0 6px;border:1px solid var(--rule);background:var(--paper);white-space:nowrap}
 ul.flat,ol.flat{margin:0;padding-left:1.2em}ul.flat li,ol.flat li{margin:1px 0}
 ul.flat.mono{font:12px/1.6 var(--mono)}
-.sub{font-size:12px;color:var(--ink2)}
+.sub{font-size:13px;color:var(--ink2)}
 details.more>summary{cursor:pointer;color:var(--ai);font-size:13px;margin-top:2px}
 .diagram.rel{margin:12px 0 8px;overflow-x:auto}
 .diagram.rel>svg{display:block;width:100%;height:auto}
 .rel-box{fill:var(--paper);stroke:var(--ink);stroke-width:1.5}
-.rel-id{font:700 12px var(--mono);fill:var(--ink)}
-.rel-name{font:12px var(--ui);fill:var(--ink2)}
+.rel-id{font:700 13px var(--mono);fill:var(--ink)}
+.rel-name{font:13px var(--ui);fill:var(--ink2)}
 .rel-edge{fill:none;stroke:var(--ink2);stroke-width:1.4}
 .rel-table{stroke-dasharray:6 4;stroke:var(--ochre);stroke-width:1.8}
 .rel-event{stroke-dasharray:2 3}
 .rel-head{fill:var(--ink2)}
-.rel-legend{display:flex;flex-wrap:wrap;gap:4px 16px;margin:4px 0 0;font-size:12px;color:var(--ink2)}
+.rel-legend{display:flex;flex-wrap:wrap;gap:4px 16px;margin:4px 0 0;font-size:13px;color:var(--ink2)}
 .rel-legend span{display:inline-flex;gap:6px;align-items:center}
 table.matrix td{text-align:center;min-width:4.5em;font-size:13px}
 table.matrix th[scope=row]{font:400 14px/1.5 var(--read);color:var(--ink);letter-spacing:0;white-space:normal;border-bottom:1px solid var(--hair);min-width:10em}
 table.matrix th:not([scope]){text-align:center}
+table.matrix thead th:first-child{text-align:left}
+table.matrix th[scope=row],table.matrix thead th:first-child{position:sticky;left:0;background:var(--paper);z-index:1}
 table.matrix td.m-owns{font-weight:700;background:var(--desk)}
 table.matrix td.m-writes{font-weight:600;color:var(--ochre)}
 table.matrix td.m-reads{color:var(--ink2)}

@@ -327,7 +327,7 @@ you assist. This gate is the point of the kit.
    `get_review_edits` lists what they changed there.
 2. Ask how they want to review. Offer these choices, with these words (the
    first only when the canvas is available), and never pick for them:
-   - ja: 「HTML ビューでレビュー（チャットの横に画面を開き、ボタンで確認・直してほしい・保留を記録）」
+   - ja: 「HTML ビューでレビュー（チャットの横に画面を開き、ボタンで確認・修正の依頼・保留を記録）」
      / en: "Review in the HTML view (a page beside the chat; buttons record
      confirm, needs a change, on hold)"
    - ja: 「チャットで1件ずつ」 / en: "Here in the chat, one item at a time"

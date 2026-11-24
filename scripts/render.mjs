@@ -24,7 +24,7 @@ import { checkboxes, questionIds, tableRows, changeSchema, archivedChange, REMAR
 import { guideView, guidePage, guideWords, modules as guideModules, moduleKey, GUIDE_CSS } from './guide.mjs';
 import { ledgerSummary } from './sites.mjs';
 import { leftoverRows } from './finish.mjs';
-import { itemGuide, guideWords as howWords, commonAdvice } from './review-guide.mjs';
+import { itemGuide, itemTitle, guideWords as howWords, commonAdvice } from './review-guide.mjs';
 import { surveyFacts, contextCard, surveyAid, inventorySummary, SURVEY_CSS } from './survey-view.mjs';
 
 // ---------------------------------------------------------------- labels
@@ -39,28 +39,28 @@ const LABELS = {
     document: '文書', requirements: '要件', screens: '画面', questions: '質問', contexts: 'コンテキスト', other: 'その他',
     reviewer: 'レビュー担当', notNamed: '未記入', scope: '対象', purpose: '目的', appendix: '付録', toc: '目次', skip: '本文へ移動', railLabel: '目次と進み具合',
     confirmed: '確認済み', open: '未確認', sealDone: '済', sealOpen: '未',
-    remain: (n) => `<b>${n}</b>件が未確認`, allDone: '<b>0</b>すべて確認済み', remainShort: '件が未確認',
+    remain: (n) => `<b>${n}</b>件があなたの確認待ち`, allDone: '<b>0</b>すべて確認済み', noneMine: '<b>0</b>あなたの番の項目はありません', remainShort: '件 あなたの番',
     of: (all, done) => `${all} 件中 ${done} 件を確認済み`, left: '残り', sheet: '項目ごとの状態',
-    legendDone: 'review.md でチェック済み', legendOpen: '未確認',
-    firstOpen: (id) => `最初の未確認 ${id} へ ↓`, show: '表示', all: 'すべて', onlyOpen: '未確認のみ', allClear: 'この区分に未確認の項目はありません。',
-    howto: ['項目を読む', '「確認すること」に沿って根拠と照らし合わせる', '正しければ review.md の行を <code>[x]</code> に。違うときはその行のすぐ下に <code>- fix: 直してほしいこと</code>、決められないときは <code>- hold: 理由</code> の行を足して（行頭に空白2つ）、作り直す'],
-    states: { done: '確認済み', open: '未確認', fix: '直してほしい', hold: '保留', fixed: '直した・再確認' },
+    legendDone: '確認済み', legendOpen: '未確認',
+    firstOpen: (id) => `次に見る ${id} へ ↓`, show: '表示', all: 'すべて', onlyOpen: 'あなたの番だけ', allClear: 'この区分に、あなたの番の項目はありません。',
+    howto: ['項目を読む', '「確認すること」に沿って根拠と照らし合わせる', '正しければ review.md の行を <code>[x]</code> に。違うときはその行のすぐ下に <code>- fix: 直してほしいこと</code>、決められないときは <code>- hold: 理由</code> を書き足して（行頭に空白 2 つ）、チャットで AI に伝える'],
+    states: { done: '確認済み', open: '未確認', fix: '修正依頼中', hold: '保留中', fixed: '再確認待ち' },
     seals: { done: '済', open: '未', fix: '直', hold: '保', fixed: '再' },
-    remarks: { fix: 'あなた: 直してほしい', hold: 'あなた: 保留', fixed: 'AI: 直した内容' },
-    split: (n) => `うち ${[['直してほしい', n.fix], ['保留', n.hold], ['再確認', n.fixed]].filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join('・')}`,
-    folded: '確認済みのため折りたたんでいます — 内容を開く', appendixHint: '参照用の元の Markdown です。必要なときだけ開いてください。',
-    scenario: 'シナリオ', evidence: '根拠（元コード）', source: '元コード', tests: '既存のテスト', crosscheck: '照合（AI の再確認）', lines: '行',
+    remarks: { fix: 'あなた: 修正依頼', hold: 'あなた: 保留の理由', fixed: 'AI: 直した内容' },
+    split: (n) => [n.fixed ? `うち再確認待ち ${n.fixed}` : '', n.fix + n.hold ? `ほかに ${[['AI の対応待ち', n.fix], ['保留中', n.hold]].filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join('・')}` : ''].filter(Boolean).join('。'),
+    folded: '内容を表示', appendixHint: '参照用の元の Markdown です。必要なときだけ開いてください。',
+    scenario: 'シナリオ', evidence: '根拠（元コード）', source: '元コード', tests: '既存のテスト', crosscheck: '照合（AI の再確認）', lines: '行', verdicts: { confirmed: '一致', mismatch: '不一致', unclear: '不明', question: '質問へ' },
     noTrace: 'trace.md に記載がありません', unreadable: 'ファイルを読めませんでした', truncated: '長いため先頭のみ表示', encoding: (e) => `文字コード ${e} を変換して表示`, dedent: (n) => `字下げを ${n} 文字詰めて表示`,
     decision: '判断', noDecision: (id) => `未記入 — review.md の ${id} の行に decision: を書きます`,
     leftoverKind: '種類', leftoverWhere: '場所', leftoverClass: '分類（案）', leftoverReason: '理由', noLeftover: '同じ id の行が leftovers.md にありません',
     leftoverKinds: { todo: '実装の積み残し TODO(port)', 'follow-up': '後回しの作業', risk: 'リスク', verification: '実行できなかった比較', flow: 'テストのないコンテキスト間の流れ' },
     leftoverClasses: { 'before-release': '切替の前に直す', 'after-release': '切替の後の課題', 'wont-fix': '直さない' },
     noReviewRow: 'review.md に項目がありません', noReq: '同じ名前の要件が仕様にありません', noScreen: '同じ名前の画面が screens.md にありません', noContext: '同じ id のコンテキストが context-map.md にありません', noQuestion: 'questions.md に本文がありません',
-    tickedNoDecision: 'チェック済みですが、判断が未記入です', decisionNoTick: '判断は書かれていますが、チェックされていません',
+    tickedNoDecision: '確認済みですが、判断が未記入です', decisionNoTick: '判断は書かれていますが、まだ確認済みにしていません',
     was: '旧', now: '新', noBaseline: '現在の仕様（openspec/specs）に同じ名前の要件がありません',
     screenshot: 'スクリーンショット', openImage: '原寸で開く', noImage: '画像ファイルがありません',
-    prevOpen: '前の未確認へ', nextOpen: '次の未確認 ↓',
-    keysOn: '1 文字キーで移動する', keysList: 'キーの一覧', keys: [['j', 'k', '次／前の項目'], ['n', 'p', '次／前の未確認'], ['o', '', '元コードを開閉'], ['u', '', '未確認のみ表示']],
+    prevOpen: '前のあなたの番へ', nextOpen: '次へ ↓',
+    keysOn: '1 文字キーで移動する', keysList: 'キーの一覧', keys: [['j', 'k', '次／前の項目'], ['n', 'p', '次／前のあなたの番'], ['o', '', '元コードと折りたたみを開閉'], ['u', '', 'あなたの番だけ表示']],
     generated: '生成', archived: 'archive 済み',
     note: 'この画面は表示用です。正は Markdown のファイルで、判断は review.md に記録します。ファイルを直したら作り直してください。',
     ledger: '抜けの確認', ledgerTitle: '抜けの確認（箇所台帳）',
@@ -83,16 +83,16 @@ const LABELS = {
     document: 'Document', requirements: 'Requirements', screens: 'Screens', questions: 'Questions', contexts: 'Contexts', other: 'Other',
     reviewer: 'Reviewer', notNamed: 'not named', scope: 'Scope', purpose: 'Purpose', appendix: 'Appendix', toc: 'Contents', skip: 'Skip to content', railLabel: 'Contents and progress',
     confirmed: 'Confirmed', open: 'Open', sealDone: '✓', sealOpen: '–',
-    remain: (n) => `<b>${n}</b>open`, allDone: '<b>0</b>all confirmed', remainShort: 'open',
+    remain: (n) => `<b>${n}</b>for you to check`, allDone: '<b>0</b>all confirmed', noneMine: '<b>0</b>nothing for you now', remainShort: 'your turn',
     of: (all, done) => `${done} of ${all} confirmed`, left: 'left', sheet: 'State of each item',
-    legendDone: 'ticked in review.md', legendOpen: 'open',
-    firstOpen: (id) => `First open item ${id} ↓`, show: 'Show', all: 'All', onlyOpen: 'Open only', allClear: 'No open items in this group.',
-    howto: ['Read the item', 'Compare it with the evidence, following "Check"', 'If it is right, tick its line in review.md (<code>[x]</code>). If it is wrong, add a line <code>- fix: what should change</code> right under it; if you cannot decide yet, <code>- hold: why</code> (indented by two spaces). Then render again'],
-    states: { done: 'Confirmed', open: 'Open', fix: 'Needs a change', hold: 'On hold', fixed: 'Changed, look again' },
+    legendDone: 'confirmed', legendOpen: 'open',
+    firstOpen: (id) => `Next to look at: ${id} ↓`, show: 'Show', all: 'All', onlyOpen: 'Your turn only', allClear: 'Nothing in this group is your turn.',
+    howto: ['Read the item', 'Compare it with the evidence, following "Check"', 'If it is right, tick its line in review.md (<code>[x]</code>). If it is wrong, add a line <code>- fix: what should change</code> right under it; if you cannot decide yet, <code>- hold: why</code> (indented by two spaces), and tell the agent in the chat'],
+    states: { done: 'Confirmed', open: 'Open', fix: 'Change requested', hold: 'On hold', fixed: 'Changed, look again' },
     seals: { done: '✓', open: '–', fix: '!', hold: 'H', fixed: 'R' },
-    remarks: { fix: 'You: needs a change', hold: 'You: on hold', fixed: 'Agent: what changed' },
-    split: (n) => `of them ${[['need a change', n.fix], ['on hold', n.hold], ['to look again', n.fixed]].filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(', ')}`,
-    folded: 'Confirmed, so folded — show the content', appendixHint: 'The Markdown behind the page, for reference. Open it when you need it.',
+    remarks: { fix: 'You: change requested', hold: 'You: why on hold', fixed: 'Agent: what changed' },
+    split: (n) => [n.fixed ? `${n.fixed} of them to look again` : '', n.fix + n.hold ? `besides: ${[['waiting for the agent', n.fix], ['on hold', n.hold]].filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(', ')}` : ''].filter(Boolean).join('. '),
+    folded: 'Show the content', appendixHint: 'The Markdown behind the page, for reference. Open it when you need it.',
     scenario: 'Scenario', evidence: 'Evidence (source code)', source: 'Source', tests: 'Existing tests', crosscheck: 'Crosscheck (second look by the AI)', lines: '',
     noTrace: 'No entry in trace.md', unreadable: 'Could not read the file', truncated: 'long; only the beginning is shown', encoding: (e) => `decoded from ${e}`, dedent: (n) => `indentation reduced by ${n} characters`,
     decision: 'Decision', noDecision: (id) => `blank — write decision: on the ${id} line of review.md`,
@@ -100,11 +100,11 @@ const LABELS = {
     leftoverKinds: { todo: 'TODO(port) left in the code', 'follow-up': 'Work moved to after the migration', risk: 'Risk', verification: 'Comparison that did not run', flow: 'Cross-context flow without a test' },
     leftoverClasses: { 'before-release': 'Fix before the switch', 'after-release': 'Known issue after the switch', 'wont-fix': 'Accepted as it is' },
     noReviewRow: 'No item in review.md', noReq: 'No requirement of this name in the specs', noScreen: 'No screen of this name in screens.md', noContext: 'No context of this id in context-map.md', noQuestion: 'No text in questions.md',
-    tickedNoDecision: 'Ticked, but the decision is blank', decisionNoTick: 'A decision is written, but the item is not ticked',
+    tickedNoDecision: 'Confirmed, but the decision is blank', decisionNoTick: 'A decision is written, but the item is not confirmed yet',
     was: 'Old', now: 'New', noBaseline: 'No requirement of this name in the current specs (openspec/specs)',
     screenshot: 'Screenshot', openImage: 'Open full size', noImage: 'Image file not found',
-    prevOpen: 'Previous open item', nextOpen: 'Next open ↓',
-    keysOn: 'Single-key shortcuts', keysList: 'Key list', keys: [['j', 'k', 'next / previous item'], ['n', 'p', 'next / previous open item'], ['o', '', 'fold or unfold the source'], ['u', '', 'open items only']],
+    prevOpen: 'Previous for you', nextOpen: 'Next ↓',
+    keysOn: 'Single-key shortcuts', keysList: 'Key list', keys: [['j', 'k', 'next / previous item'], ['n', 'p', 'next / previous for you'], ['o', '', 'fold or unfold the source and folds'], ['u', '', 'your turn only']],
     generated: 'Generated', archived: 'archived',
     note: 'This page is a view. The Markdown files are the source of truth and decisions go into review.md. Render again after changing them.',
     ledger: 'Omission check', ledgerTitle: 'Omission check (site ledger)',
@@ -424,12 +424,14 @@ function snippet(root, ref, L) {
 
 const DIFF_CELLS = 1_000_000;
 
-// Character-level difference by longest common subsequence: a list of
-// [op, text] with op '=', '-' (only in a) or '+' (only in b). Null when the
-// texts are too long for the table; the caller then shows whole sentences.
+// Difference by longest common subsequence: a list of [op, text] with op '='
+// '-' (only in a) or '+' (only in b). Numbers and English words change as a whole
+// (48 to 24, not 2̲48̶); Japanese text by the character. Null when the texts are
+// too long for the table; the caller then shows whole sentences.
+const TOKEN = /\d+(?:[.,]\d+)*|[A-Za-z_][A-Za-z0-9_]*|\s+|./gsu;
 export function diffChars(a, b) {
-  const A = [...a];
-  const B = [...b];
+  const A = a.match(TOKEN) ?? [];
+  const B = b.match(TOKEN) ?? [];
   let head = 0;
   while (head < A.length && head < B.length && A[head] === B[head]) head += 1;
   let tail = 0;
@@ -516,6 +518,8 @@ export function parseReview(text) {
 // agent has not answered), fixed (the agent answered; the reviewer looks again),
 // hold (the reviewer cannot decide yet) or open.
 export const itemState = (item) => noteState(item.done, item.remarks);
+// The reviewer's turn: open, or fixed by the agent and waiting to be looked at again.
+const mineState = (state) => state === 'open' || state === 'fixed';
 
 // "### <Word>: <name>" blocks of a file, each with the lines up to the next
 // heading of the same or a higher level.
@@ -630,7 +634,10 @@ const withoutId = (s) => norm(s).replace(/^[a-z]\d+\s*[.:)-]?\s*/, '');
 function crossLine(row, L) {
   if (!row) return '';
   const ok = /^confirmed\b/i.test(row.verdict);
-  return `<p class="tests"><span class="label">${escapeHtml(L.crosscheck)}</span><span><span${ok ? '' : ' class="caution"'}>${inline(row.verdict || '—')}</span>${row.evidence ? ` — ${inline(row.evidence)}` : ''}</span></p>`;
+  // The verdict word in the page's language, the word as written beside it.
+  const word = (row.verdict.match(/^(confirmed|mismatch|unclear|question)\b/i) ?? [])[1]?.toLowerCase();
+  const said = word && L.verdicts?.[word] ? `${escapeHtml(L.verdicts[word])}（${inline(row.verdict)}）` : inline(row.verdict || '—');
+  return `<p class="tests"><span class="label">${escapeHtml(L.crosscheck)}</span><span><span${ok ? '' : ' class="caution"'}>${said}</span>${row.evidence ? ` — ${inline(row.evidence)}` : ''}</span></p>`;
 }
 
 function scenariosHtml(req, old, c) {
@@ -834,13 +841,17 @@ function reviewView({ root, dir, schema, L, outDir, lang = 'en' }) {
         how = `<div class="q-body"><details class="how-fold"><summary>${escapeHtml(howWords(lang).how)}</summary>${howHtml(g, lang)}</details></div>`;
       }
       const notes = [...item.notes, ...body.notes];
-      item.name = plainText(item.title) || plainText(item.data?.text ?? '') || item.label;
+      // A finish leftover's "- class: x" is shown as its class, not as words of the title.
+      const shown = schema === 'spec-relay-finish' && item.letter === 'L' ? stripComments(item.title).replace(/\s+-\s*class\s*:.*$/i, '').trim() : item.title;
+      const ja = itemTitle(schema, plainText(item.title), lang);
+      const titleHtml = ja ? `${escapeHtml(ja)}<span class="orig">${inline(item.title)}</span>` : inline(shown);
+      item.name = ja || plainText(shown) || plainText(item.data?.text ?? '') || item.label;
       const remarks = item.remarks?.length ? `<div class="q-body">${remarksHtml(item.remarks, L)}</div>` : '';
       const inner = `${how}${body.html}`;
       // A confirmed item folds its content away; its head, notes and buttons stay.
       const content = item.done && inner ? `<details class="fold"><summary>${escapeHtml(L.folded)}</summary>${inner}</details>` : inner;
-      item.html = `<article class="item${inner ? '' : ' small'}${item.kind ? ` k-${item.kind}` : ''} ${item.done ? 'is-done' : 'is-open'} st-${item.state}${body.removed ? ' is-removed' : ''}" id="${escapeHtml(anchor)}" tabindex="-1">
-<header class="item-head"><span class="id">${escapeHtml(item.label)}</span><h3>${body.tag}${inline(item.title)}</h3>${seal(item.state, L)}</header>
+      item.html = `<article class="item${inner ? '' : ' small'}${item.kind ? ` k-${item.kind}` : ''} ${item.done ? 'is-done' : 'is-open'}${mineState(item.state) ? ' is-mine' : ''} st-${item.state}${body.removed ? ' is-removed' : ''}" id="${escapeHtml(anchor)}" tabindex="-1">
+<header class="item-head"><span class="id">${escapeHtml(item.label)}</span><h3>${body.tag}${titleHtml}</h3>${seal(item.state, L)}</header>
 ${cautionsHtml(notes)}${remarks}${content}
 </article>`;
     }
@@ -1103,12 +1114,12 @@ export function specIndex({ root, L, list, href }) {
 // and focus, ochre is a caution. No status is told by colour alone.
 const CSS = `
 :root{--paper:#ffffff;--desk:#f1f2f4;--ink:#15171c;--ink2:#4b505b;--rule:#7b808b;--hair:#d9dce1;
---shu:#b5301a;--ai:#1b4f93;--ochre:#7d5200;--code:#f4f5f7;
+--shu:#b5301a;--ai:#1b4f93;--ochre:#7d5200;--code:#f4f5f7;--lab:7.5em;
 --ui:"Yu Gothic UI","Segoe UI","Meiryo","Hiragino Sans","Noto Sans JP","Noto Sans CJK JP",system-ui,sans-serif;
 --read:"BIZ UDPGothic","Yu Gothic UI","Meiryo","Hiragino Sans","Noto Sans JP","Noto Sans CJK JP",system-ui,sans-serif;
 --mono:"BIZ UDGothic","MS Gothic","Cascadia Mono",Consolas,"Osaka-Mono","SF Mono",Menlo,"Noto Sans Mono CJK JP",ui-monospace,monospace}
 @media (prefers-color-scheme:dark){:root{--paper:#17191d;--desk:#0f1114;--ink:#e9eaed;--ink2:#a6abb6;--rule:#6d7380;--hair:#30343d;
---shu:#ff8f73;--ai:#8fbaf7;--ochre:#e2b25c;--code:#1f2228}}
+--shu:#ff7a57;--ai:#8fbaf7;--ochre:#e2b25c;--code:#1f2228}}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.75 var(--read);overflow-wrap:anywhere}
@@ -1118,7 +1129,7 @@ code,.mono{font-family:var(--mono);font-size:.92em}
 img{max-width:100%;height:auto}
 hr{border:0;border-top:1px solid var(--hair)}
 blockquote{margin:8px 0;padding:2px 14px;border-left:3px solid var(--hair);color:var(--ink2)}
-.label{font:600 12px/1.4 var(--ui);color:var(--ink2);letter-spacing:.06em;white-space:nowrap}
+.label{font:600 13px/1.4 var(--ui);color:var(--ink2);letter-spacing:.06em;white-space:nowrap}
 .skip{position:absolute;left:-999px}.skip:focus{left:8px;top:8px;z-index:9;background:var(--paper);padding:6px 10px}
 .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .caution{color:var(--ochre);font-weight:600;font-size:14px;margin:6px 0 0}
@@ -1172,9 +1183,9 @@ main{padding:16px 40px 120px;max-width:1640px}}
 .filter label:has(input:checked){background:var(--ink);color:var(--paper);font-weight:600}
 .filter label:has(input:focus-visible){outline:3px solid var(--ai);outline-offset:2px;z-index:1}
 .filter .n{font-family:var(--mono);margin-left:4px}
-body:has(#f-open:checked) main .item.is-done,body:has(#f-open:checked) .toc li.is-done{display:none}
+body:has(#f-open:checked) main .item:not(.is-mine),body:has(#f-open:checked) .toc li:not(.is-mine){display:none}
 .all-clear{display:none;margin:0;padding:10px 0;border-top:1px solid var(--rule);color:var(--ink2);font-size:14px}
-body:has(#f-open:checked) .group:not(:has(.item.is-open)) .all-clear{display:block}
+body:has(#f-open:checked) .group:not(:has(.item.is-mine)) .all-clear{display:block}
 
 .toc{margin:16px 0 0;position:relative}
 .toc>summary,.keys summary{font:600 13px/1.4 var(--ui);cursor:pointer;padding:6px 0}
@@ -1190,7 +1201,7 @@ body:has(#f-open:checked) .group:not(:has(.item.is-open)) .all-clear{display:blo
 .toc .id{font:600 13px/1.45 var(--mono)}
 .toc .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .toc li.is-done .t{color:var(--ink2)}
-.toc li.is-open .t{font-weight:600}
+.toc li.is-mine .t{font-weight:600}
 .st{font:700 12px/15px var(--ui);width:18px;height:18px;text-align:center;border:1.5px dashed var(--rule);color:var(--ink2)}
 .is-done>a>.st{border:1.5px solid var(--shu);color:var(--shu)}
 .toc .plain a{grid-template-columns:minmax(0,1fr)}
@@ -1221,6 +1232,7 @@ body:has(#f-open:checked) .group:not(:has(.item.is-open)) .all-clear{display:blo
 .item.is-current .item-head .id{background:var(--ink);color:var(--paper)}
 .item-head h3{margin:0;font-size:20px;line-height:1.45;font-weight:700;min-width:0;overflow-wrap:anywhere}
 .item.small .item-head h3{font-size:16px;line-height:1.7;font-weight:400}
+.item-head h3 .orig{display:block;font:400 13px/1.5 var(--ui);color:var(--ink2)}
 @media (max-width:520px){.item-head{grid-template-columns:auto minmax(0,1fr)}.item-head .id{justify-self:start}.item-head .seal{justify-self:end}.item-head h3{grid-row:2;grid-column:1/-1}}
 .item>.caution{margin:8px 0 0}
 
@@ -1249,6 +1261,10 @@ body:has(#f-open:checked) .group:not(:has(.item.is-open)) .all-clear{display:blo
 .evidence>.label{display:block;margin-bottom:4px}
 .src{border:1px solid var(--rule)}
 .src+.src{margin-top:10px}
+.src>summary{list-style:none}
+.src>summary::-webkit-details-marker{display:none}
+.src>summary::before{content:"▸";font:700 13px/1.5 var(--ui);color:var(--ink2)}
+.src[open]>summary::before{content:"▾"}
 .src summary{display:flex;flex-wrap:wrap;gap:2px 12px;align-items:baseline;padding:6px 10px;cursor:pointer;font:13px/1.5 var(--mono);background:var(--code)}
 .src[open] summary{border-bottom:1px solid var(--rule)}
 .src summary .f{font-weight:700;overflow-wrap:anywhere;min-width:0}
@@ -1268,7 +1284,7 @@ body:has(#f-open:checked) .group:not(:has(.item.is-open)) .all-clear{display:blo
 @container (min-width:860px){.q-body{padding-left:calc(3.1em + 26px)}}
 .q-kind{display:inline-block;font:600 12px/1.4 var(--ui);border:1px solid var(--rule);padding:1px 7px;margin-right:8px}
 .q-text{margin:0 0 10px;max-width:46em;overflow-wrap:anywhere}
-.decision{display:grid;grid-template-columns:5.2em minmax(0,1fr);gap:10px;align-items:baseline;max-width:46em;border:1.5px solid var(--shu);padding:8px 12px}
+.decision{display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:10px;align-items:baseline;max-width:46em;border:1.5px solid var(--shu);padding:8px 12px}
 .decision p{margin:0;color:var(--shu);font-weight:700;overflow-wrap:anywhere}
 .decision.is-blank{border:1.5px dashed var(--rule)}
 .decision.is-blank p{color:var(--ink2);font-weight:400;font-size:14px}
@@ -1314,17 +1330,17 @@ ins{text-decoration:none;font-weight:700;border-bottom:3px double var(--ink)}
 .seal.st-fix b{border:2px solid var(--ochre);color:var(--ochre)}
 .seal.st-hold b{border:2px solid var(--ink2);color:var(--ink2)}
 .seal.st-fixed b{border:2px solid var(--ink);color:var(--ink)}
-.item.st-fix{box-shadow:inset 3px 0 0 var(--ochre);margin-left:-13px;padding-left:13px}
+.item.st-fixed{box-shadow:inset 3px 0 0 var(--ink);margin-left:-13px;padding-left:13px}
 .how{margin:10px 0 0;padding:10px 14px;border:1px solid var(--hair);background:var(--desk);max-width:60em;font-size:14px}
 .how-title{margin:0 0 4px;font:700 13px/1.4 var(--ui);letter-spacing:.04em}
 .how-check{margin:0 0 6px;padding-left:1.4em}.how-check li{margin:2px 0}
-.how-line{margin:2px 0 0;display:grid;grid-template-columns:7.5em minmax(0,1fr);gap:8px;align-items:baseline}
+.how-line{margin:2px 0 0;display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:8px;align-items:baseline}
 .how-fold{margin-top:8px;font-size:14px;max-width:60em}
 .how-fold>summary{cursor:pointer;color:var(--ink2);font:600 13px/1.6 var(--ui)}
 .how-fold[open]{padding:8px 12px;background:var(--desk);border:1px solid var(--hair)}
 .group-how{margin:8px 0 4px}.group-how .how{margin:0}
 .remarks{list-style:none;margin:10px 0 0;padding:0;max-width:60em;display:grid;gap:6px}
-.remarks li{display:grid;grid-template-columns:9.5em minmax(0,1fr);gap:10px;align-items:baseline;padding:6px 10px;border:1.5px solid var(--hair);font-size:15px;overflow-wrap:anywhere}
+.remarks li{display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:10px;align-items:baseline;padding:6px 10px;border:1.5px solid var(--hair);font-size:15px;overflow-wrap:anywhere}
 .remarks .rm-fix{border-color:var(--ochre)}.remarks .rm-fix .label{color:var(--ochre)}
 .remarks .rm-hold{border-style:dashed;border-color:var(--ink2)}
 .remarks .rm-fixed{border-color:var(--ink);background:var(--desk)}
@@ -1339,6 +1355,35 @@ details.fold>summary{cursor:pointer;color:var(--ink2);font:600 13px/1.6 var(--ui
 .doc-fold[open]>summary::before{content:"－"}
 .doc-fold>summary h2{margin:0;font:600 14px/1.4 var(--ui);letter-spacing:.04em;color:var(--ink2)}
 .doc-fold[open]>summary h2{color:var(--ink)}
+
+.item.is-done{padding:10px 0}
+.item.is-done .item-head h3{font-size:16px;line-height:1.6;font-weight:600;color:var(--ink2)}
+.item.is-done .item-head .id{font-size:13px;padding:1px 6px;margin-top:3px}
+.item.is-done .seal b{width:26px;height:26px;font-size:14px}
+.item.is-done details.fold{margin-top:0}
+@container (max-width:600px){.remarks li,.how-line,.decision{grid-template-columns:minmax(0,1fr);gap:0}}
+.facts dt,th{font-size:13px}
+h1,h2,h3,h4,.label,.how-title,summary,button,.seal,.legend,.remain-split,.toc .t,.next{word-break:auto-phrase}
+@container (min-width:860px){.item>.caution{padding-left:calc(3.1em + 26px)}}
+.table,.diagram{outline-offset:2px}
+@media (pointer:coarse){.cells a{width:24px;height:24px;line-height:21px}}
+@media (max-width:999px){html{scroll-padding-bottom:64px}}
+@media (prefers-color-scheme:dark){
+.toc li a[aria-current]{background:var(--hair);color:var(--ink);box-shadow:inset 3px 0 0 var(--ink)}
+.filter label:has(input:checked){background:var(--hair);color:var(--ink);box-shadow:inset 0 -3px 0 var(--ink)}}
+/* Narrow (the canvas beside the chat, a phone): the rail is a short header, not a screen of its own. */
+@media (max-width:999px){
+.rail{padding:10px 16px 8px}
+.rail .meta{display:none}
+.rail .kind,.rail h1{display:inline;font-size:13px}
+.rail h1{margin-left:8px}
+.left{margin-top:8px;padding-top:8px;border-top-width:1px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 16px;align-items:center}
+.remain{grid-row:1 / span 2}
+.remain b{font-size:28px}
+.remain-sub,.legend,.next{display:none}
+.filter{margin-top:8px;max-width:360px}
+.js .keys{display:none}}
+@media (hover:none){.js .keys{display:none}}
 
 .dock{display:none}
 @media (max-width:999px){.js .dock{position:fixed;left:0;right:0;bottom:0;z-index:5;display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:stretch;background:var(--paper);border-top:2px solid var(--ink);font-family:var(--ui)}
@@ -1357,7 +1402,7 @@ body{font-size:10.5pt}
 .filter,.toc,.keys,.dock,.next,.skip,.search,.nav,.no-match{display:none!important}
 .item[hidden],.group{display:block!important}
 main{padding:0;max-width:none}
-body:has(#f-open:checked) main .item.is-done{display:block}
+body:has(#f-open:checked) main .item:not(.is-mine){display:block}
 .claim{position:static;max-height:none;overflow:visible}
 .appendix-hint{border-top:2px solid #000}
 .item-head{break-after:avoid}.item.small,.item.k-q,.src,.scenario,.decision{break-inside:avoid}
@@ -1376,8 +1421,9 @@ const SCRIPT = String.raw`(() => {
   d.documentElement.classList.add('js');
   const store = (area, key, value) => { try { if (value === undefined) return window[area].getItem(key); window[area].setItem(key, value); } catch (e) { /* storage may be refused on file:// */ } return null; };
   const toc = d.querySelector('details.toc');
-  if (wide.matches) { if (toc) toc.open = true; } else d.querySelectorAll('details.src').forEach((x) => { x.open = false; });
-  addEventListener('beforeprint', () => d.querySelectorAll('details').forEach((x) => { x.open = true; }));
+  if (wide.matches) { if (toc) toc.open = true; }
+  if (!matchMedia('(min-width:700px)').matches) d.querySelectorAll('details.src').forEach((x) => { x.open = false; });
+  addEventListener('beforeprint', () => d.querySelectorAll('details:not(.fold):not(.doc-fold):not(.more)').forEach((x) => { x.open = true; }));
 
   const items = () => [...d.querySelectorAll('main .item')].filter((x) => x.offsetParent !== null);
   let current = null, pinned = null;
@@ -1385,7 +1431,9 @@ const SCRIPT = String.raw`(() => {
     if (el === current) return;
     current = el;
     d.querySelectorAll('.is-current').forEach((x) => x.classList.remove('is-current'));
-    d.querySelectorAll('[aria-current]').forEach((x) => x.removeAttribute('aria-current'));
+    d.querySelectorAll('.rail a[aria-current="true"]').forEach((x) => x.removeAttribute('aria-current'));
+    // The canvas puts the buttons of the item being read in its bar.
+    d.dispatchEvent(new CustomEvent('spec-relay-current', { detail: el ? el.id : null }));
     if (!el) return;
     el.classList.add('is-current');
     d.querySelectorAll('.rail a[href="#' + CSS.escape(el.id) + '"]').forEach((a) => {
@@ -1421,7 +1469,7 @@ const SCRIPT = String.raw`(() => {
   };
   const step = (dir, onlyOpen) => {
     const all = items(), at = all.indexOf(current);
-    const list = all.filter((x) => !onlyOpen || x.classList.contains('is-open'));
+    const list = all.filter((x) => !onlyOpen || x.classList.contains('is-mine'));
     const next = dir > 0 ? list.find((x) => all.indexOf(x) > at) : list.reverse().find((x) => all.indexOf(x) < at);
     go(next || null);
   };
@@ -1508,22 +1556,24 @@ export function page({ title, kind, meta, brief = '', groups = [], docs = [], L,
   const reviewed = !read && all.length > 0;
   const count = (list) => `${list.filter((x) => x.done).length} / ${list.length}`;
   const st = (x) => x.state ?? (x.done ? 'done' : 'open');
-  const state = (x) => `${x.done ? 'is-done' : 'is-open'} st-${st(x)}`;
+  const state = (x) => `${x.done ? 'is-done' : 'is-open'}${mineState(st(x)) ? ' is-mine' : ''} st-${st(x)}`;
+  // The reviewer's turn: items not confirmed and not waiting for the agent or on hold.
+  const mine = all.filter((x) => mineState(st(x)));
   const word = (x) => escapeHtml(L.states?.[st(x)] ?? (x.done ? L.confirmed : L.open));
   const split = { fix: open.filter((x) => st(x) === 'fix').length, hold: open.filter((x) => st(x) === 'hold').length, fixed: open.filter((x) => st(x) === 'fixed').length };
   const letter = (g) => g.items.find((i) => i.letter)?.letter ?? '·';
 
   const progress = reviewed ? `<div class="left">
-<p class="remain">${open.length ? L.remain(open.length) : L.allDone}</p>
+<p class="remain">${mine.length ? L.remain(mine.length) : open.length ? L.noneMine : L.allDone}</p>
 <p class="remain-sub">${escapeHtml(L.of(all.length, all.length - open.length))}${open.length ? `（${escapeHtml(L.left)}: ${groups.filter((g) => g.items.some((i) => !i.done)).map((g) => `${escapeHtml(g.title)} ${g.items.filter((i) => !i.done).length}`).join('・')}）` : ''}</p>
 ${split.fix + split.hold + split.fixed ? `<p class="remain-split">${escapeHtml(L.split(split))}</p>` : ''}
 <ol class="sheet" aria-label="${escapeHtml(L.sheet)}">${groups.map((g) => `<li class="g" aria-hidden="true">${escapeHtml(letter(g))}</li><li class="cells">${g.items.map((x) => `<a href="#${escapeHtml(x.anchor)}" class="${state(x)}" title="${escapeHtml(`${x.label} ${x.name}`)} — ${word(x)}">${['fix', 'hold', 'fixed'].includes(st(x)) ? `<span aria-hidden="true">${escapeHtml(L.seals[st(x)])}</span>` : ''}<span class="vh">${escapeHtml(x.label)} ${word(x)}</span></a>`).join('')}</li>`).join('')}</ol>
 <p class="legend"><span><i class="is-done" aria-hidden="true"></i>${escapeHtml(L.legendDone)}</span><span><i aria-hidden="true"></i>${escapeHtml(L.legendOpen)}</span>${split.fix ? `<span><i class="st-fix" aria-hidden="true">${escapeHtml(L.seals.fix)}</i>${escapeHtml(L.states.fix)}</span>` : ''}${split.hold ? `<span><i class="st-hold" aria-hidden="true">${escapeHtml(L.seals.hold)}</i>${escapeHtml(L.states.hold)}</span>` : ''}${split.fixed ? `<span><i class="st-fixed" aria-hidden="true">${escapeHtml(L.seals.fixed)}</i>${escapeHtml(L.states.fixed)}</span>` : ''}</p>
-${open.length ? `<a class="next" href="#${escapeHtml(open[0].anchor)}">${escapeHtml(L.firstOpen(open[0].label))}</a>` : ''}
+${mine.length ? `<a class="next" href="#${escapeHtml(mine[0].anchor)}">${escapeHtml(L.firstOpen(mine[0].label))}</a>` : ''}
 </div>
 <fieldset class="filter"><legend class="label">${escapeHtml(L.show)}</legend>
 <label><input type="radio" name="f" id="f-all" checked>${escapeHtml(L.all)}<span class="n">${all.length}</span></label>
-<label><input type="radio" name="f" id="f-open">${escapeHtml(L.onlyOpen)}<span class="n">${open.length}</span></label>
+<label><input type="radio" name="f" id="f-open">${escapeHtml(L.onlyOpen)}<span class="n">${mine.length}</span></label>
 </fieldset>` : '';
 
   const search = read && all.length ? `<div class="search" role="search"><label class="label" for="q">${escapeHtml(L.search)}</label><input id="q" type="search" placeholder="${escapeHtml(L.searchHint)}" autocomplete="off" aria-describedby="q-status"><p class="q-status" id="q-status" role="status" data-total="${all.length}" data-none="${escapeHtml(L.noMatch)}" data-shown="${escapeHtml(L.shown('{n}', all.length))}"></p></div>` : '';
@@ -1589,7 +1639,7 @@ ${body}
 <footer>${escapeHtml(note)}</footer>
 </main>
 </div>
-${reviewed ? `<div class="dock"><button type="button" class="prev" aria-label="${escapeHtml(L.prevOpen)}">↑</button><span class="count"><b>${open.length}</b>${escapeHtml(L.remainShort)}</span><button type="button" class="primary">${escapeHtml(L.nextOpen)}</button></div>` : ''}
+${reviewed ? `<div class="dock"><button type="button" class="prev" aria-label="${escapeHtml(L.prevOpen)}">↑</button><span class="count"><b>${mine.length}</b>${escapeHtml(L.remainShort)}</span><button type="button" class="primary">${escapeHtml(L.nextOpen)}</button></div>` : ''}
 <script>${SCRIPT}</script>
 </body>
 </html>

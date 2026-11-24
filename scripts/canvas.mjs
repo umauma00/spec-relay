@@ -41,22 +41,25 @@ const WORDS = {
     byCapability: '機能ごと', capability: '機能', spec: '仕様', problems: '問題', none: 'ありません',
     nav: '画面', progress: '進み具合', specs: '仕様の一覧', guide: 'コードガイド',
     answer: 'AI の回答', helpful: '役に立った（Q&A に保存する）', qaSaved: 'Q&A に保存しました。', qaFailed: '保存できませんでした',
-    ask: 'これを聞く', askPage: 'この画面について聞く', askTitle: 'チャットに質問を送る', askAbout: '対象',
+    ask: '質問する', askPage: 'この画面について質問する', zoomIn: '拡大', zoomOut: '縮小', askTitle: 'チャットに質問を送る', askAbout: '対象',
     askHint: 'チャットに「[canvas]」付きで届きます。質問であって、承認や判断にはなりません。',
     tick: '確認済みにする', untick: '確認を外す', decide: '判断を書く', decideTick: '判断を書いて確認済みにする',
     reviewer: 'レビュー担当', reviewerSet: 'レビュー担当の名前を書く', save: '保存する',
     decisionTitle: '判断を書く', reviewerTitle: 'レビュー担当の名前',
-    editHint: 'review.md に書き込みます。あなたが自分でファイルを直したのと同じ扱いです。変更を完了（アーカイブ）してよいかは、チャットで伝えてください。',
+    editHint: 'review.md に書き込みます（ファイルを自分で直したのと同じ扱いです）。',
     saving: '保存しています…', saved: 'review.md に保存しました。', changed: 'review.md がほかで変わっていたので、読み直しました。もう一度操作してください。', saveFailed: '保存できませんでした', emptyValue: '書いてから保存してください。',
     needDecision: '先に判断を書いてください。', placeholder: '「TBD」や「-」のような書きかけは判断になりません。判断を書いてください。',
     noFile: 'この画面の review.md が見つかりません。', bad: 'この操作はできません。', notUtf8: 'review.md が UTF-8 ではないため書き込めません。UTF-8 で保存し直してください。',
     busy: 'ほかのプログラムが review.md を使っていて書き込めませんでした。閉じてからもう一度押してください。', noLine: 'review.md にこの項目の行が見つかりません。',
-    howto: '正しければ「確認済みにする」、違えば「直してほしい」、今は決められなければ「保留」を押す（どれも review.md に書き込まれます）',
-    fix: '直してほしい', hold: '保留', withdraw: '取り下げる', fixTitle: '直してほしいこと', holdTitle: '保留の理由',
-    fixHint: 'review.md のこの項目の下に「- fix: …」として書き、確認を外します。AI に直してもらうには、左の「直してほしい項目を AI に伝える」を押すか、チャットで伝えてください。',
-    holdHint: 'review.md のこの項目の下に「- hold: …」として書きます。決まったら「確認済みにする」か「直してほしい」を押してください。',
-    sendFixes: (n) => `直してほしい項目を AI に伝える（${n} 件）`, fixesSent: 'チャットに送りました。AI が直すと、項目の下に直した内容が出ます。',
-    openFix: 'AI がまだ直していない依頼があります。取り下げてから確認済みにしてください。', noNote: '取り下げるものがありません。',
+    howto: '正しければ「確認済みにする」、違えば「修正を依頼」、今は決められなければ「保留にする」を押す（どれも review.md に書き込まれます）',
+    fix: '修正を依頼', hold: '保留にする', withdraw: '依頼を取り下げる', unhold: '保留を解除', fixTitle: '修正してほしいこと', holdTitle: '保留の理由',
+    fixPlaceholder: '例: questionnaire は points と統合したい', holdPlaceholder: '例: 業務の担当に確認してから決める', decisionPlaceholder: '新しいシステムでどうするか',
+    fixHint: 'review.md のこの項目の下に「- fix: …」として書き、確認を外します。AI に直してもらうには「修正依頼を AI に送る」を押すか、チャットで伝えてください。',
+    holdHint: 'review.md のこの項目の下に「- hold: …」として書きます。決まったら「保留を解除」してから、確認済みにするか修正を依頼してください。',
+    sendFixes: (n) => `修正依頼を AI に送る（${n} 件）`, fixesSent: 'チャットに送りました。AI が直すと、項目の下に直した内容が出ます。', fixesWaiting: '送りました — AI の対応待ち（{n} 件）',
+    openFix: 'AI がまだ対応していない修正依頼があります。「依頼を取り下げる」を押してから確認済みにしてください。', noNote: '取り下げるものがありません。',
+    did: { tick: '{id} を確認済みにしました。', untick: '{id} の確認を外しました。', fix: '{id} に修正依頼を書きました（AI にはまだ送っていません）。', hold: '{id} を保留にしました。', withdraw: '{id} の依頼を取り下げました。', unhold: '{id} の保留を解除しました。', decision: '{id} の判断を保存しました。' }, undo: '元に戻す',
+    yourTurn: '{n} 件 あなたの番', next: '次へ ↓', decideFirst: '判断を書く…', decideSave: '保存して確認済みにする', decideOnly: '保存だけする', redecide: '判断を直す',
     send: '送る', cancel: 'やめる', sending: '送っています…', sent: 'チャットに送りました。', failed: '送れませんでした', empty: '質問を書いてください。',
     notRepo: 'このフォルダには openspec/ がありません。spec-relay を導入したリポジトリでチャットを開いてください。',
     notFound: 'この画面はありません（変更や仕様が消えたか、名前が違います）。上の「進み具合」から選んでください。',
@@ -71,22 +74,25 @@ const WORDS = {
     byCapability: 'By capability', capability: 'Capability', spec: 'Spec', problems: 'Problems', none: 'None',
     nav: 'Pages', progress: 'Progress', specs: 'Specs', guide: 'Code guide',
     answer: "The agent's answer", helpful: 'Helpful (save to the Q&A)', qaSaved: 'Saved to the Q&A.', qaFailed: 'Could not save',
-    ask: 'Ask about this', askPage: 'Ask about this page', askTitle: 'Send a question to the chat', askAbout: 'About',
+    ask: 'Ask a question', askPage: 'Ask about this page', zoomIn: 'Zoom in', zoomOut: 'Zoom out', askTitle: 'Send a question to the chat', askAbout: 'About',
     askHint: 'It reaches the chat marked "[canvas]". It is a question, never an approval or a decision.',
     tick: 'Mark confirmed', untick: 'Unmark', decide: 'Write the decision', decideTick: 'Write the decision and confirm',
     reviewer: 'Reviewer', reviewerSet: 'Write the reviewer name', save: 'Save',
     decisionTitle: 'Write the decision', reviewerTitle: 'Reviewer name',
-    editHint: 'This writes to review.md, the same as editing the file yourself. Whether the change may be completed (archived) you tell in the chat.',
+    editHint: 'This writes to review.md (the same as editing the file yourself).',
     saving: 'Saving…', saved: 'Saved to review.md.', changed: 'review.md had changed elsewhere, so the page was reloaded. Try again.', saveFailed: 'Could not save', emptyValue: 'Write something first.',
     needDecision: 'Write the decision first.', placeholder: 'A placeholder such as "TBD" or "-" is not a decision. Write the decision.',
     noFile: 'This page has no review.md.', bad: 'This cannot be done.', notUtf8: 'review.md is not UTF-8, so it cannot be written. Save it again as UTF-8.',
     busy: 'Another program is using review.md, so it could not be written. Close it and try again.', noLine: 'review.md has no line for this item.',
-    howto: 'If it is right, press "Mark confirmed"; if it is wrong, "Needs a change"; if you cannot decide yet, "On hold" (each is written to review.md)',
-    fix: 'Needs a change', hold: 'On hold', withdraw: 'Withdraw', fixTitle: 'What should change', holdTitle: 'Why it is on hold',
-    fixHint: 'This writes "- fix: ..." under the item in review.md and unticks it. To have the agent correct it, press "Send the change requests to the agent" on the left, or say so in the chat.',
-    holdHint: 'This writes "- hold: ..." under the item in review.md. When you have decided, press "Mark confirmed" or "Needs a change".',
-    sendFixes: (n) => `Send the change requests to the agent (${n})`, fixesSent: 'Sent to the chat. When the agent has corrected it, what changed shows under the item.',
-    openFix: 'The agent has not answered a change request yet. Withdraw it before confirming.', noNote: 'Nothing to withdraw.',
+    howto: 'If it is right, press "Mark confirmed"; if it is wrong, "Request a change"; if you cannot decide yet, "Put on hold" (each is written to review.md)',
+    fix: 'Request a change', hold: 'Put on hold', withdraw: 'Withdraw the request', unhold: 'Take off hold', fixTitle: 'What should change', holdTitle: 'Why it is on hold',
+    fixPlaceholder: 'e.g. merge questionnaire into points', holdPlaceholder: 'e.g. ask the business owner first', decisionPlaceholder: 'What the new system does',
+    fixHint: 'This writes "- fix: ..." under the item in review.md and unmarks it. To have the agent correct it, press "Send the change requests to the agent", or say so in the chat.',
+    holdHint: 'This writes "- hold: ..." under the item in review.md. When you have decided, take it off hold, then confirm it or request a change.',
+    sendFixes: (n) => `Send the change requests to the agent (${n})`, fixesSent: 'Sent to the chat. When the agent has corrected it, what changed shows under the item.', fixesWaiting: 'Sent — waiting for the agent ({n})',
+    openFix: 'The agent has not answered a change request yet. Press "Withdraw the request" before confirming.', noNote: 'Nothing to withdraw.',
+    did: { tick: '{id} marked confirmed.', untick: '{id} unmarked.', fix: 'Change request written under {id} (not sent to the agent yet).', hold: '{id} put on hold.', withdraw: 'The request on {id} withdrawn.', unhold: '{id} taken off hold.', decision: 'The decision on {id} saved.' }, undo: 'Undo',
+    yourTurn: '{n} your turn', next: 'Next ↓', decideFirst: 'Write the decision…', decideSave: 'Save and confirm', decideOnly: 'Save only', redecide: 'Edit the decision',
     send: 'Send', cancel: 'Cancel', sending: 'Sending…', sent: 'Sent to the chat.', failed: 'Could not send', empty: 'Write a question first.',
     notRepo: 'This folder has no openspec/. Open the chat in a repository where spec-relay is set up.',
     notFound: 'There is no such page (the change or spec is gone, or the name is wrong). Pick one from Progress above.',
@@ -190,17 +196,42 @@ dialog.ask-box::backdrop{background:rgba(0,0,0,.35)}
 .canvas-answer .ask{margin-top:8px}
 .act{font:600 13px/1.2 var(--ui);padding:6px 12px;min-height:32px;margin:0 8px 6px 0;cursor:pointer;border:1.5px solid var(--ink);background:var(--paper);color:var(--ink)}
 .act-ok{background:var(--ink);color:var(--paper)}
-.act-ok:hover{background:var(--paper);color:var(--ink)}
+.act-ok:hover{background:#2c3039;border-color:#2c3039;color:var(--paper)}
+@media (prefers-color-scheme:dark){.act-ok:hover{background:#c9ccd2;border-color:#c9ccd2}}
 .act-fix{border-color:var(--ochre);color:var(--ochre)}
 .act-fix:hover{background:var(--ochre);color:var(--paper)}
-.act-hold{border-style:dashed;border-color:var(--ink2);color:var(--ink2)}
-.act-hold:hover{border-style:solid;color:var(--ink)}
-.act-quiet{border-color:var(--hair);color:var(--ink2);font-weight:400}
+.act-hold{border-color:var(--ink2);color:var(--ink)}
+.act-hold:hover{background:var(--desk)}
+.act-quiet{border-color:var(--rule);color:var(--ink2);font-weight:400}
 .act-quiet:hover{border-color:var(--ink);color:var(--ink)}
 .act-wide{width:100%;text-align:left;margin-right:0}
 .act[disabled]{opacity:.6;cursor:wait}
 .item.is-done .ask-row{margin-top:4px}
-@media print{.act{display:none!important}}
+.ask-row .ask:not(.mark){border-color:transparent;background:none;text-decoration:underline;text-underline-offset:.2em;padding-left:4px;padding-right:4px}
+.ask-row .ask:not(.mark):hover{background:none;color:var(--ink)}
+.item.is-done .ask-row .ask:not(.mark){display:none}
+.shot.is-zoomed{overflow:auto;max-height:80vh}.shot.is-zoomed img{max-width:none}
+.act.zoom{min-height:28px;padding:3px 10px;margin:0 8px 0 0}
+.act.is-sent{border-style:dashed;opacity:1;cursor:default}
+.canvas-toast{display:flex;gap:12px;align-items:center;justify-content:space-between}
+.canvas-toast button{font:600 13px/1.2 var(--ui);padding:6px 10px;min-height:32px;border:1.5px solid var(--paper);background:none;color:var(--paper);cursor:pointer;flex:none}
+.ask-box button.only{margin-right:auto}
+.ask-box textarea#edit-text{min-height:5em}
+body.has-actbar .dock{display:none!important}
+body.has-actbar main{padding-bottom:140px}
+body.has-actbar .canvas-toast{bottom:84px}
+.actbar{position:fixed;left:0;right:0;bottom:0;z-index:6;display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:8px 16px;background:var(--paper);border-top:2px solid var(--ink);font-family:var(--ui)}
+.actbar[hidden]{display:none}
+@media (min-width:1000px){.actbar{left:288px;padding:8px 40px}}
+.actbar-head{margin:0;display:flex;gap:8px;align-items:baseline;min-width:0;flex:1 1 220px;font-size:14px}
+.actbar-head .id{font:700 14px/1.3 var(--mono);padding:1px 6px;border:1.5px solid var(--ink);flex:none}
+.actbar-head .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.actbar-buttons{display:flex;flex-wrap:wrap}
+.actbar-buttons .act{margin:2px 8px 2px 0;min-height:40px;font-size:14px}
+.actbar-next{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:13px;color:var(--ink2)}
+.actbar-next .act{margin:0;min-height:40px}
+@media print{.act,.actbar{display:none!important}}
+@media (max-width:999px){.canvas-nav{display:inline-flex;margin:0 0 0 12px;font-size:13px}.ask-row.ask-page{display:inline-block;margin:6px 8px 0 0}.ask-row.ask-page .act-wide{width:auto}}
 .canvas-gone{position:sticky;top:0;z-index:8;margin:0;padding:8px 16px;background:var(--ochre);color:var(--paper);font:600 14px/1.4 var(--ui)}
 @media print{.canvas-nav,.ask,.ask-row,dialog.ask-box,.canvas-toast,.canvas-gone{display:none!important}}
 `;
@@ -211,11 +242,18 @@ const CANVAS_SCRIPT = String.raw`(() => {
   const cfg = JSON.parse(d.getElementById('canvas-config').textContent), W = cfg.words;
   const box = d.getElementById('ask-box'), text = d.getElementById('ask-text'), about = d.getElementById('ask-about'), msg = d.getElementById('ask-msg'), send = box.querySelector('.primary');
   const store = (key, value) => { try { if (value === undefined) return sessionStorage.getItem(key); if (value === null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, value); } catch (e) { /* refused */ } return null; };
-  const toast = (m) => { const t = d.createElement('p'); t.className = 'canvas-toast'; t.setAttribute('role', 'status'); t.textContent = m; d.body.appendChild(t); setTimeout(() => t.remove(), 4000); };
+  const toast = (m, action) => {
+    const t = d.createElement('p'); t.className = 'canvas-toast'; t.setAttribute('role', 'status');
+    const span = d.createElement('span'); span.textContent = m; t.appendChild(span);
+    if (action) { const b = d.createElement('button'); b.type = 'button'; b.textContent = action.label; b.addEventListener('click', () => { t.remove(); action.run(); }); t.appendChild(b); }
+    d.body.appendChild(t); setTimeout(() => t.remove(), action ? 8000 : 4000);
+  };
+  // An item's title as shown, without the English original under a translated one.
+  const headText = (item) => { const h = item.querySelector('.item-head h3'); if (!h) return ''; const c = h.cloneNode(true); c.querySelectorAll('.orig').forEach((x) => x.remove()); return c.textContent.trim(); };
   const shut = () => { if (box.close) box.close(); else box.removeAttribute('open'); };
   let target = null, pending = false;
   const open = (item) => {
-    target = item ? { label: (item.querySelector('.item-head .id') || {}).textContent || '', title: (item.querySelector('.item-head h3') || {}).textContent || '' } : null;
+    target = item ? { label: (item.querySelector('.item-head .id') || {}).textContent || '', title: headText(item) } : null;
     about.textContent = W.askAbout + ': ' + cfg.title + (target ? ' — ' + target.label + ' ' + target.title : '');
     text.value = ''; msg.textContent = '';
     if (box.showModal) box.showModal(); else box.setAttribute('open', '');
@@ -225,9 +263,16 @@ const CANVAS_SCRIPT = String.raw`(() => {
     const row = d.createElement('p'); row.className = 'ask-row';
     const b = d.createElement('button'); b.type = 'button'; b.className = 'ask'; b.textContent = W.ask;
     const id = (item.querySelector('.item-head .id') || {}).textContent || '';
-    b.setAttribute('aria-label', W.ask + ': ' + id + ' ' + ((item.querySelector('.item-head h3') || {}).textContent || ''));
+    b.setAttribute('aria-label', W.ask + ': ' + id + ' ' + headText(item));
     b.addEventListener('click', () => open(item));
     row.appendChild(b); item.appendChild(row);
+  });
+  // A screenshot cannot open in a page of its own here: it zooms in place.
+  d.querySelectorAll('main .shot figcaption a').forEach((a) => {
+    const fig = a.closest('.shot');
+    const b = d.createElement('button'); b.type = 'button'; b.className = 'act act-quiet zoom'; b.textContent = W.zoomIn; b.setAttribute('aria-pressed', 'false');
+    b.addEventListener('click', () => { const on = fig.classList.toggle('is-zoomed'); b.textContent = on ? W.zoomOut : W.zoomIn; b.setAttribute('aria-pressed', String(on)); });
+    a.replaceWith(b);
   });
   const pageAsk = d.getElementById('ask-page');
   if (pageAsk) pageAsk.addEventListener('click', () => open(null));
@@ -278,9 +323,11 @@ const CANVAS_SCRIPT = String.raw`(() => {
   const ebox = d.getElementById('edit-box');
   let writing = false;
   if (R && ebox) {
-    const etitle = d.getElementById('edit-title'), etext = d.getElementById('edit-text'), emsg = d.getElementById('edit-msg'), esave = ebox.querySelector('.primary');
+    const etitle = d.getElementById('edit-title'), etext = d.getElementById('edit-text'), ename = d.getElementById('edit-name'), emsg = d.getElementById('edit-msg'), esave = ebox.querySelector('.primary'), eonly = d.getElementById('edit-only');
     let hash = R.hash, job = null;
-    const reload = (m) => { store('spec-relay-canvas-toast', m); keepPlace(); location.reload(); };
+    const fill = (t, o) => String(t).replace(/\{(\w+)\}/g, (m, k) => (k in o ? o[k] : m));
+    // What was saved, and how to take it back, survive the reload in the toast.
+    const reload = (m, undo) => { store('spec-relay-canvas-toast', JSON.stringify({ m, undo: undo || null })); keepPlace(); location.reload(); };
     const post = async (action, id, value) => {
       const res = await fetch(base + '/review', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'review' }, body: JSON.stringify({ page: cfg.page, hash, action, id, value }) });
       let j = {};
@@ -291,7 +338,7 @@ const CANVAS_SCRIPT = String.raw`(() => {
       return true;
     };
     // A stale page reloads; what was typed in the dialog comes back with it.
-    const run = async (steps, report, draft) => {
+    const run = async (steps, report, draft, done) => {
       if (writing) return;
       writing = true;
       try {
@@ -302,64 +349,141 @@ const CANVAS_SCRIPT = String.raw`(() => {
             return;
           }
         }
-        reload(W.saved);
+        reload(done ? done.m : W.saved, done ? done.undo : null);
       } catch (err) { report(W.saveFailed + ': ' + err.message); }
       finally { writing = false; }
     };
+    const byId = (id) => R.items.find((it) => it.id === id);
+    const titleOf = (id) => { const el = d.getElementById(id); return el ? headText(el) : ''; };
+    // One action, with the words of the toast and the step that undoes it.
+    const act = (action, id) => {
+      const it = byId(id);
+      const undo = action === 'tick' ? [['untick', id]] : action === 'untick' ? [['tick', id]] : null;
+      const said = action === 'withdraw' && it && it.state === 'hold' ? W.did.unhold : W.did[action];
+      run([[action, id]], toast, null, { m: fill(said, { id }), undo });
+    };
     const ehint = d.getElementById('edit-hint'), hintDefault = ehint.textContent;
+    const field = () => (job && job.kind === 'reviewer' ? ename : etext);
     const edit = (kind, id, value, then) => {
       job = { kind, id, then };
-      etitle.textContent = kind === 'reviewer' ? W.reviewerTitle : (kind === 'fix' ? W.fixTitle : kind === 'hold' ? W.holdTitle : W.decisionTitle) + ' — ' + id;
+      const title = id ? titleOf(id) : '';
+      etitle.textContent = kind === 'reviewer' ? W.reviewerTitle : (kind === 'fix' ? W.fixTitle : kind === 'hold' ? W.holdTitle : W.decisionTitle) + ' — ' + id + (title ? ' ' + title : '');
       ehint.textContent = kind === 'fix' ? W.fixHint : kind === 'hold' ? W.holdHint : hintDefault;
-      etext.value = value || ''; emsg.textContent = '';
+      etext.hidden = kind === 'reviewer'; ename.hidden = kind !== 'reviewer';
+      etext.placeholder = kind === 'fix' ? W.fixPlaceholder : kind === 'hold' ? W.holdPlaceholder : W.decisionPlaceholder;
+      // A decision not written yet: save and confirm, or only save.
+      eonly.hidden = !(kind === 'decision' && then === 'tick');
+      esave.textContent = kind === 'decision' && then === 'tick' ? W.decideSave : cfg.words.save || esave.textContent;
+      field().value = value || ''; emsg.textContent = '';
       if (ebox.showModal) ebox.showModal(); else ebox.setAttribute('open', '');
-      etext.focus();
+      field().focus();
     };
     const eshut = () => { if (ebox.close) ebox.close(); else ebox.removeAttribute('open'); };
-    // One row of buttons per item, each kind with its own look: confirm (filled),
-    // needs a change (ochre), on hold (dashed), withdraw and unmark (quiet), ask (indigo).
+    // The buttons of one item, each kind with its own look: confirm (filled),
+    // request a change (ochre), hold (outlined), withdraw and unmark (quiet).
+    const buttonsFor = (it) => {
+      const out = [];
+      const button = (label, cls, onClick) => { const b = d.createElement('button'); b.type = 'button'; b.className = 'act ' + cls; b.textContent = label; b.setAttribute('aria-label', label + ': ' + it.id); b.addEventListener('click', onClick); out.push(b); return b; };
+      // An unanswered change request comes first: it can only be withdrawn (or answered by the agent).
+      if (it.state === 'fix') button(W.withdraw, 'act-quiet', () => act('withdraw', it.id));
+      else if (it.done) button(W.untick, 'act-quiet', () => act('untick', it.id));
+      else {
+        if (it.q && !it.decided) button(W.decideFirst, 'act-ok', () => edit('decision', it.id, '', 'tick'));
+        else button(W.tick, 'act-ok', () => act('tick', it.id));
+        button(W.fix, 'act-fix', () => edit('fix', it.id, ''));
+        if (it.state === 'hold') button(W.unhold, 'act-quiet', () => act('withdraw', it.id));
+        else button(W.hold, 'act-hold', () => edit('hold', it.id, ''));
+      }
+      if (it.q && it.decided) button(W.redecide, 'act-quiet', () => edit('decision', it.id, it.decision));
+      return out;
+    };
     R.items.forEach((it) => {
       const item = d.getElementById(it.id);
       const row = item && item.matches('main .item') ? item.querySelector('.ask-row') : null;
       if (!row) return;
-      const button = (label, cls, onClick) => { const b = d.createElement('button'); b.type = 'button'; b.className = 'act ' + cls; b.textContent = label; b.setAttribute('aria-label', label + ': ' + it.id); b.addEventListener('click', onClick); return b; };
       const first = row.firstChild;
-      const add = (b) => row.insertBefore(b, first);
-      // An unanswered change request comes first: it can only be withdrawn (or answered by the agent).
-      if (it.state === 'fix') add(button(W.withdraw, 'act-quiet', () => run([['withdraw', it.id]], toast)));
-      if (it.done) add(button(W.untick, 'act-quiet', () => run([['untick', it.id]], toast)));
-      else if (it.state !== 'fix') {
-        add(it.q && !it.decided ? button(W.decideTick, 'act-ok', () => edit('decision', it.id, '', 'tick')) : button(W.tick, 'act-ok', () => run([['tick', it.id]], toast)));
-        add(button(W.fix, 'act-fix', () => edit('fix', it.id, '')));
-        if (it.state === 'hold') add(button(W.withdraw, 'act-quiet', () => run([['withdraw', it.id]], toast)));
-        else add(button(W.hold, 'act-hold', () => edit('hold', it.id, '')));
-      }
-      if (it.q) add(button(W.decide, 'act-quiet', () => edit('decision', it.id, it.decision)));
+      buttonsFor(it).forEach((b) => row.insertBefore(b, first));
+    });
+    // A bar at the bottom with the buttons of the item being read: the buttons stay
+    // in one place however long the item is.
+    const mineCount = R.items.filter((it) => !it.done && (it.state === 'open' || it.state === 'fixed')).length;
+    const bar = d.createElement('div'); bar.className = 'actbar'; bar.setAttribute('role', 'region'); bar.setAttribute('aria-label', W.yourTurn.replace('{n}', String(mineCount)));
+    const barHead = d.createElement('p'); barHead.className = 'actbar-head';
+    const barButtons = d.createElement('div'); barButtons.className = 'actbar-buttons';
+    const barNext = d.createElement('div'); barNext.className = 'actbar-next';
+    const count = d.createElement('span'); count.className = 'count'; count.textContent = fill(W.yourTurn, { n: mineCount });
+    const nextB = d.createElement('button'); nextB.type = 'button'; nextB.className = 'act act-quiet'; nextB.textContent = W.next;
+    nextB.addEventListener('click', () => { const p = d.querySelector('.dock .primary'); if (p) p.click(); });
+    barNext.append(count, nextB);
+    bar.append(barHead, barButtons, barNext);
+    d.body.appendChild(bar);
+    d.body.classList.add('has-actbar');
+    let shown = null;
+    const show = (id) => {
+      const it = id ? byId(id) : null;
+      shown = it;
+      barHead.textContent = '';
+      barButtons.textContent = '';
+      bar.hidden = !it;
+      if (!it) return;
+      const tag = d.createElement('span'); tag.className = 'id'; tag.textContent = it.id;
+      const name = d.createElement('span'); name.className = 't'; name.textContent = titleOf(it.id);
+      barHead.append(tag, name);
+      buttonsFor(it).forEach((b) => barButtons.appendChild(b));
+    };
+    d.addEventListener('spec-relay-current', (e) => show(e.detail));
+    const cur = d.querySelector('main .item.is-current');
+    show(cur ? cur.id : null);
+    // x confirms, f requests a change, h holds the item in the bar (with the page's single-key switch on).
+    addEventListener('keydown', (e) => {
+      const on = d.getElementById('keys-on');
+      if (!on || !on.checked || !shown || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+      const t = e.target, tag = t && t.tagName;
+      if (tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable) || (tag === 'INPUT' && !/^(radio|checkbox)$/.test(t.type))) return;
+      if (ebox.open || box.open) return;
+      const it = shown;
+      if (e.key === 'x' && !it.done && it.state !== 'fix') { if (it.q && !it.decided) edit('decision', it.id, '', 'tick'); else act('tick', it.id); }
+      else if (e.key === 'f' && !it.done && it.state !== 'fix') edit('fix', it.id, '');
+      else if (e.key === 'h' && !it.done && it.state !== 'fix' && it.state !== 'hold') edit('hold', it.id, '');
+      else return;
+      e.preventDefault();
     });
     // The change requests the agent has not answered, sent to the chat in one message.
+    // Once sent, the button says so until a new request is written.
     const fixes = d.getElementById('send-fixes');
+    const fixKey = R.items.filter((it) => it.state === 'fix').map((it) => it.id).join(',');
+    const sentKey = 'spec-relay-canvas-sent:' + cfg.page;
+    const markSent = () => { fixes.disabled = true; fixes.classList.add('is-sent'); fixes.textContent = fill(W.fixesWaiting, { n: R.fixes }); };
+    if (fixes && store(sentKey) === fixKey) markSent();
     if (fixes) fixes.addEventListener('click', async () => {
       fixes.disabled = true;
       try {
         const res = await fetch(base + '/fixes', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'fixes' }, body: JSON.stringify({ page: cfg.page }) });
         if (!res.ok) throw new Error(String(res.status));
+        store(sentKey, fixKey);
+        markSent();
         toast(W.fixesSent);
-      } catch (err) { toast(W.failed + ' (' + err.message + ')'); }
-      finally { fixes.disabled = false; }
+      } catch (err) { fixes.disabled = false; toast(W.failed + ' (' + err.message + ')'); }
     });
     const who = d.getElementById('edit-reviewer');
     if (who) who.addEventListener('click', () => edit('reviewer', null, R.reviewer));
-    ebox.addEventListener('keydown', (e) => e.stopPropagation());
-    ebox.querySelector('.cancel').addEventListener('click', eshut);
-    ebox.querySelector('form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const value = etext.value.trim();
-      if (!value) { emsg.textContent = W.emptyValue; etext.focus(); return; }
-      esave.disabled = true; emsg.textContent = W.saving;
-      const steps = job.kind === 'reviewer' ? [['reviewer', null, value]] : job.kind === 'fix' || job.kind === 'hold' ? [[job.kind, job.id, value]] : [['decision', job.id, value], ...(job.then ? [[job.then, job.id]] : [])];
-      await run(steps, (m) => { emsg.textContent = m; }, { kind: job.kind, id: job.id, then: job.then || null, value });
-      esave.disabled = false;
+    ebox.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); ebox.querySelector('form').requestSubmit(); }
     });
+    ebox.querySelector('.cancel').addEventListener('click', eshut);
+    const save = async (then) => {
+      const value = field().value.replace(/\s+/g, ' ').trim();
+      if (!value) { emsg.textContent = W.emptyValue; field().focus(); return; }
+      esave.disabled = true; eonly.disabled = true; emsg.textContent = W.saving;
+      const kind = job.kind, id = job.id;
+      const steps = kind === 'reviewer' ? [['reviewer', null, value]] : kind === 'fix' || kind === 'hold' ? [[kind, id, value]] : [['decision', id, value], ...(then ? [[then, id]] : [])];
+      const said = kind === 'reviewer' ? null : { m: fill(kind === 'decision' ? (then ? W.did.tick : W.did.decision) : W.did[kind], { id }), undo: kind === 'fix' || kind === 'hold' ? [['withdraw', id]] : null };
+      await run(steps, (m) => { emsg.textContent = m; }, { kind, id, then: then || null, value }, said);
+      esave.disabled = false; eonly.disabled = false;
+    };
+    ebox.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); save(job.then); });
+    eonly.addEventListener('click', () => save(null));
     let draft = null;
     const kept = store('spec-relay-canvas-draft');
     if (kept) store('spec-relay-canvas-draft', null);
@@ -369,6 +493,14 @@ const CANVAS_SCRIPT = String.raw`(() => {
         edit(draft.kind, draft.id, draft.value, draft.then || undefined);
         emsg.textContent = W.changed;
       }
+    }
+    // The toast of the last write, with its undo.
+    const said = store('spec-relay-canvas-toast');
+    if (said) {
+      store('spec-relay-canvas-toast', null);
+      let t = null;
+      try { t = JSON.parse(said); } catch (e) { t = { m: said }; }
+      if (t && t.m) toast(t.m, t.undo ? { label: W.undo, run: () => run(t.undo, toast) } : null);
     }
   }
   // Links the canvas cannot show (images, source files, other sites) would leave it with no way back.
@@ -384,7 +516,7 @@ const CANVAS_SCRIPT = String.raw`(() => {
   d.addEventListener('auxclick', hold, true);
   // After a reload, put the focus back where it was, and say what was saved.
   const said = store('spec-relay-canvas-toast');
-  if (said) { store('spec-relay-canvas-toast', null); toast(said); }
+  if (said) { store('spec-relay-canvas-toast', null); let t = null; try { t = JSON.parse(said); } catch (e) { t = { m: said }; } if (t && t.m) toast(t.m); }
   const was = store('spec-relay-canvas-focus');
   if (was) { store('spec-relay-canvas-focus', null); const el = d.getElementById(was); if (el) el.focus({ preventScroll: true }); }
   // Before a reload, remember where the reader is: the item they acted on (or the
@@ -456,16 +588,18 @@ export function interactive(html, { lang, pagePath, title, version, seq, nonce, 
   const current = path.posix.basename(pagePath);
   const nav = `<nav class="canvas-nav" aria-label="${escapeHtml(W.nav)}"><a href="progress.html"${current === 'progress.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.progress)}</a><a href="specs.html"${current === 'specs.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.specs)}</a>${guide ? `<a href="guide.html"${current === 'guide.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.guide)}</a>` : ''}</nav>
 <p class="ask-row ask-page"><button type="button" class="ask" id="ask-page">${escapeHtml(W.askPage)}</button>${review ? ` <button type="button" class="ask mark" id="edit-reviewer">${escapeHtml(review.reviewer ? `${W.reviewer}: ${review.reviewer}` : W.reviewerSet)}</button>` : ''}</p>${review?.fixes ? `\n<p class="ask-row ask-page"><button type="button" class="act act-fix act-wide" id="send-fixes">${escapeHtml(W.sendFixes(review.fixes))}</button></p>` : ''}`;
-  const words = Object.fromEntries(['ask', 'askAbout', 'sending', 'sent', 'failed', 'empty', 'noLink', 'gone', ...(answers ? ['answer', 'helpful', 'qaSaved', 'qaFailed'] : []),
+  const words = Object.fromEntries(['ask', 'zoomIn', 'zoomOut', 'askAbout', 'sending', 'sent', 'failed', 'empty', 'noLink', 'gone', ...(answers ? ['answer', 'helpful', 'qaSaved', 'qaFailed'] : []),
     ...(review ? ['tick', 'untick', 'decide', 'decideTick', 'decisionTitle', 'reviewerTitle', 'saving', 'saved', 'changed', 'saveFailed', 'emptyValue', 'needDecision', 'notUtf8', 'busy', 'noLine', 'placeholder', 'noFile', 'bad',
-      'fix', 'hold', 'withdraw', 'fixTitle', 'holdTitle', 'fixHint', 'holdHint', 'fixesSent', 'openFix', 'noNote'] : [])].map((k) => [k, W[k]]));
+      'fix', 'hold', 'withdraw', 'unhold', 'fixTitle', 'holdTitle', 'fixHint', 'holdHint', 'fixesSent', 'fixesWaiting', 'openFix', 'noNote',
+      'fixPlaceholder', 'holdPlaceholder', 'decisionPlaceholder', 'did', 'undo', 'yourTurn', 'next', 'decideFirst', 'decideSave', 'decideOnly', 'redecide', 'reviewer', 'reviewerSet', 'save'] : [])].map((k) => [k, W[k]]));
   const config = JSON.stringify({ page: pagePath, title, version, seq, words, review, ...(answers ? { answers } : {}) }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const dialog = `<dialog class="ask-box" id="ask-box" aria-labelledby="ask-title" aria-describedby="ask-about"><form method="dialog"><h2 id="ask-title">${escapeHtml(W.askTitle)}</h2><p class="about" id="ask-about"></p>
 <textarea id="ask-text" maxlength="4000" aria-labelledby="ask-title" aria-describedby="ask-about ask-hint ask-msg"></textarea>
 <p class="hint" id="ask-hint">${escapeHtml(W.askHint)}</p><p class="msg" id="ask-msg" role="status"></p><div class="buttons"><button type="button" class="cancel">${escapeHtml(W.cancel)}</button><button type="submit" class="primary">${escapeHtml(W.send)}</button></div></form></dialog>
 ${review ? `<dialog class="ask-box" id="edit-box" aria-labelledby="edit-title"><form method="dialog"><h2 id="edit-title"></h2>
-<input type="text" id="edit-text" maxlength="500" autocomplete="off" aria-labelledby="edit-title" aria-describedby="edit-hint edit-msg">
-<p class="hint" id="edit-hint">${escapeHtml(W.editHint)}</p><p class="msg" id="edit-msg" role="status"></p><div class="buttons"><button type="button" class="cancel">${escapeHtml(W.cancel)}</button><button type="submit" class="primary">${escapeHtml(W.save)}</button></div></form></dialog>
+<textarea id="edit-text" rows="4" maxlength="500" aria-labelledby="edit-title" aria-describedby="edit-hint edit-msg"></textarea>
+<input type="text" id="edit-name" maxlength="500" autocomplete="off" aria-labelledby="edit-title" aria-describedby="edit-hint edit-msg" hidden>
+<p class="hint" id="edit-hint">${escapeHtml(W.editHint)}</p><p class="msg" id="edit-msg" role="status"></p><div class="buttons"><button type="button" class="cancel">${escapeHtml(W.cancel)}</button><button type="button" class="only" id="edit-only" hidden>${escapeHtml(W.decideOnly)}</button><button type="submit" class="primary">${escapeHtml(W.save)}</button></div></form></dialog>
 ` : ''}<script type="application/json" id="canvas-config">${config}</script>
 <script nonce="${nonce}">${CANVAS_SCRIPT}</script>`;
   return html

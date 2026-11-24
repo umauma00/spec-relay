@@ -26,12 +26,12 @@ const GUIDE = {
     },
     'spec-relay-extract': {
       R: {
-        check: ['要件の文とシナリオが、右の元コードの動きと同じか（条件、計算、エラーのとき）', '照合（AI の再確認）が confirmed でなければ、その理由'],
+        check: ['要件の文とシナリオが、右の元コードの動きと同じか（条件、計算、エラーのとき）', '照合（AI の再確認）が「一致」でなければ、その理由'],
         against: '右の元コードの行、既存のテスト、照合の結果',
         wrong: '違う動きや抜けている条件を書く。元コードのほうがバグだと思うときも、そう書く',
       },
       S: { check: ['画面の項目・操作・メッセージ・遷移が、実際の画面と同じか', 'スクリーンショットがあれば見比べる'], against: 'スクリーンショットと screens.md の記述' },
-      Q: { check: ['新しいシステムでどうするかを決めて、判断に書く'], against: '質問の本文と元コード', wrong: '質問そのものがおかしいときに書く。決められないときは「保留」にして、誰に聞くかを書く' },
+      Q: { check: ['新しいシステムでどうするかを決めて、判断に書く'], against: '質問の本文と元コード', wrong: '質問そのものがおかしいときは「修正を依頼」。決められないときは「保留にする」で、誰に聞くかを書く' },
       C: { check: ['目印（DB への書き込み、例外など）があるのに「動作なし」とした箇所が、本当に仕様に要らないか'], against: '抜けの確認（箇所台帳）' },
     },
     'spec-relay-amend': {
@@ -50,7 +50,7 @@ const GUIDE = {
       L: { check: ['残りものの分類（切替の前に直す／切替の後の課題／直さない）が妥当か'], against: '付録の leftovers.md', wrong: '分類を変えたいときは、変えたい分類と理由を書く' },
       H: { check: ['引き渡しの判定と、切替の前にすることが正しいか'], against: '付録の handover.md' },
     },
-    common: '「直してほしい」に、何がどう違うかを書く（AI が直して、直した内容を項目の下に書きます）。今は決められなければ「保留」に理由を書く',
+    common: '何がどう違うかを「修正を依頼」（review.md では - fix:）で書く。AI が直し、直した内容を項目の下に書きます。今は決められなければ「保留にする」（- hold:）で理由を書く',
     words: { check: '確認すること', against: '照らすもの', wrong: '違うとき', how: '確認のしかた' },
   },
   en: {
@@ -95,10 +95,48 @@ const GUIDE = {
       L: { check: ['Is the class of each leftover right (before the switch / after the switch / accepted)?'], against: 'leftovers.md in the appendix', wrong: 'Write the class it should have, and why' },
       H: { check: ['Are the verdict and what happens before the switch right?'], against: 'handover.md in the appendix' },
     },
-    common: 'Write what is wrong under "Needs a change" (the agent corrects it and writes what it changed under the item). When you cannot decide yet, put it on hold with the reason',
+    common: 'Say what is wrong with "Request a change" (- fix: in review.md); the agent corrects it and writes what it changed under the item. When you cannot decide yet, "Put on hold" (- hold:) with the reason',
     words: { check: 'Check', against: 'Compare with', wrong: 'When it is wrong', how: 'How to check' },
   },
 };
+
+// The kit's own item titles (from the schemas' review.md templates) in Japanese.
+// The file keeps the English title (the gate reads the ids only); the page shows
+// both, so a reader can find the line in review.md.
+const TITLES = {
+  'spec-relay-survey': {
+    'The relationships between contexts are right': 'コンテキストどうしのつながりが正しい',
+    'Every piece of shared data has the right owner': '共有データの所有者が正しい',
+    'The glossary conflicts are understood': '用語の衝突を理解した',
+    'The capability list and its order are right': 'capability の分け方と順番が正しい',
+    'The files marked carry may go to the new system unchanged': 'carry のファイルはそのまま新しいシステムへ移してよい',
+    'Every file marked excluded may be left out of the migration': 'excluded のファイルは移行しなくてよい',
+    'The missing definitions are understood': '読めなかった定義を理解した',
+  },
+  'spec-relay-amend': { 'The port updates in impact.md are right': 'impact.md の実装の直し方が正しい' },
+  'spec-relay-target': {
+    'The style': '方式', 'Data ownership': 'データの所有', 'The boundary check': '境界の確認',
+    'Runtime and frameworks': '実行環境とフレームワーク', 'Language mapping': '言語の対応', 'Coding conventions': 'コーディング規約', Commands: 'コマンド',
+    'Sign-in and recorded data': 'サインインと記録データ', 'Shared look, carried files and client-side scripts': '共通の見た目・持っていくファイル・画面側のスクリプト',
+    'The schema policy': 'スキーマの方針', 'The exceptions': '例外', 'The data access mapping': 'データアクセスの対応', 'The schema changes and the test database': 'スキーマ変更とテスト用データベース',
+  },
+  'spec-relay-finish': { 'The whole-system checks': '全体の確認', 'The verdict': '判定', 'Before the switch': '切替の前にすること' },
+};
+// "<name>: <fixed words>" titles: the name stays, the words are translated.
+const SUFFIXES = {
+  'spec-relay-survey': [[/[:：]\s*definitions and the logic in it\s*$/i, '：定義と中のロジック']],
+  'spec-relay-target': [[/[:：]\s*levels\s*$/i, '：確かめ方の水準'], [/[:：]\s*screens\s*$/i, '：画面']],
+};
+
+// The Japanese title of a kit item, or null (the title is shown as written).
+export function itemTitle(schema, title, code) {
+  if (code !== 'ja') return null;
+  const t = String(title ?? '').trim();
+  const whole = TITLES[schema]?.[t];
+  if (whole) return whole;
+  for (const [re, ja] of SUFFIXES[schema] ?? []) if (re.test(t)) return t.replace(re, ja);
+  return null;
+}
 
 const lang = (code) => (code === 'ja' ? 'ja' : 'en');
 

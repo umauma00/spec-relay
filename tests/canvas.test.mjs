@@ -91,7 +91,7 @@ test('the server serves the pages and images under its token, and nothing else',
     const base = `http://127.0.0.1:${server.port}/${server.token}`;
     const review = await fetchText(server.url('extract-auth-login'));
     assert.equal(review.status, 200);
-    assert.match(review.text, /class="item k-req is-open st-open" id="R2"/);
+    assert.match(review.text, /class="item k-req is-open is-mine st-open" id="R2"/);
     assert.match(review.text, /<img src="\.\.\/screens\/login\.png"/);
     assert.match(review.headers.get('content-security-policy'), /script-src 'nonce-[^']+'/);
     assert.equal((await fetchText(`${base}/r/openspec/spec-relay/screens/login.png`)).text, 'PNG');
@@ -139,7 +139,7 @@ test('the page of an active change writes review.md for the person, and only tha
     assert.equal(first.review.reviewer, null);
     assert.match((await fetchText(server.url('extract-auth-login'))).text, /id="edit-box"[\s\S]*id="edit-reviewer"|id="edit-reviewer"[\s\S]*id="edit-box"/);
     const reviewHtml = (await fetchText(server.url('extract-auth-login'))).text;
-    assert.match(reviewHtml, /<li>正しければ「確認済みにする」、違えば「直してほしい」/);
+    assert.match(reviewHtml, /<li>正しければ「確認済みにする」、違えば「修正を依頼」/);
     assert.doesNotMatch(reviewHtml, /にして作り直す|作り直してください/);
     assert.equal((await config('progress')).review, null, 'other pages write nothing');
     assert.equal((await config('2026-11-01-extract-old')).review, null, 'an archived change is a record');
@@ -369,7 +369,7 @@ test('the review page asks for a change or a hold, and sends the open change req
     assert.deepEqual(after.review.items.map((i) => [i.id, i.state]), [['R1', 'fix'], ['R2', 'hold']]);
     assert.equal(after.review.fixes, 1);
     const html = (await fetchText(server.url('extract-auth-login'))).text;
-    assert.match(html, /id="send-fixes">直してほしい項目を AI に伝える（1 件）<\/button>/);
+    assert.match(html, /id="send-fixes">修正依頼を AI に送る（1 件）<\/button>/);
     assert.match(html, /keepPlace/, 'the page keeps its place across reloads');
     assert.equal((await fixes({})).status, 403, 'only from its own page');
     assert.equal((await fixes()).status, 200);
