@@ -19,7 +19,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const OPENSPEC_VERSION = '2.0.0';
+export const OPENSPEC_VERSION = '2.1.1';
 // Where setup installs OpenSpec, relative to the repository being migrated.
 export const TOOLS_DIR = 'openspec/spec-relay/tools';
 const BIN = 'node_modules/@fission-ai/openspec/bin/openspec.js';
@@ -109,7 +109,15 @@ export function runOpenspec(args, options = {}, root = options.cwd ?? process.cw
   // OpenSpec does not see this folder as a project install, so its update
   // notice would tell people to `npm install -g` a newer version. The kit pins
   // the version; a newer one comes with a kit update.
-  const env = { ...(options.env ?? process.env), OPENSPEC_NO_UPDATE_CHECK: '1' };
+  // OPENSPEC_SKILLS_SCOPE: from 2.1.0, init puts the skills in the home folder
+  // (~/.agents/skills, for every project) unless told otherwise. The kit
+  // disables the gate-bypassing skills by stubbing them in the repository, so
+  // they must stay there; setup also passes --scope project and records
+  // skillsScope: project in openspec/config.yaml, which update reads.
+  // Windows names are case-insensitive, so another spelling is dropped first.
+  const env = Object.fromEntries(Object.entries(options.env ?? process.env)
+    .filter(([key]) => !['OPENSPEC_NO_UPDATE_CHECK', 'OPENSPEC_SKILLS_SCOPE'].includes(key.toUpperCase())));
+  Object.assign(env, { OPENSPEC_NO_UPDATE_CHECK: '1', OPENSPEC_SKILLS_SCOPE: 'project' });
   return runCommand(found.launch, args, { ...options, env });
 }
 

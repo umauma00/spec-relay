@@ -6,7 +6,7 @@ spec-relay は Windows を主な実行環境として扱います。GitHub Actio
 
 | 必要なもの | 入れ方の例 | 確認 |
 |---|---|---|
-| Node.js 22.12 以上（npm を含む） | `winget install OpenJS.NodeJS.LTS` | `node --version`、`npm.cmd --version` |
+| Node.js 22.20 以上（npm を含む） | `winget install OpenJS.NodeJS.LTS` | `node --version`、`npm.cmd --version` |
 | Git for Windows | `winget install Git.Git` | `git --version` |
 | OpenSpec CLI 2.0.0 | 入れる必要はありません。導入スクリプトが移行対象のリポジトリの中（`openspec\spec-relay\tools\`）に `npm ci` で入れます | `node "C:\path\to\spec-relay\scripts\openspec.mjs" --version`（導入後、リポジトリの中で） |
 | GitHub Copilot | CLI は `npm install -g @github/copilot`（1.0.109 以降）、または VS Code（1.143 以降、Copilot ハーネス）・Copilot app | `copilot --version` |

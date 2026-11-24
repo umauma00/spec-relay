@@ -27,7 +27,18 @@ export function quiet(fn) {
 // Keeps OpenSpec away from the developer's own settings: `openspec init` and
 // `openspec update` write a global profile (XDG_CONFIG_HOME wins on every
 // platform, also over %APPDATA% on Windows) and send telemetry unless told not to.
+// From 2.1.0 OpenSpec can also write skills to the home folder
+// (~/.agents/skills) and keeps a list of projects there (~/.local/share), so
+// the home folder is a temporary one too; npm keeps its usual cache.
 export function isolateOpenspec() {
+  process.env.npm_config_cache ??= process.platform === 'win32'
+    ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'npm-cache')
+    : path.join(os.homedir(), '.npm');
+  const home = tempDir('spec-relay-home-');
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  process.env.XDG_DATA_HOME = path.join(home, '.local', 'share');
+  process.env.XDG_STATE_HOME = path.join(home, '.local', 'state');
   process.env.XDG_CONFIG_HOME = tempDir('spec-relay-config-');
   process.env.OPENSPEC_TELEMETRY = '0';
   process.env.NO_COLOR = '1';

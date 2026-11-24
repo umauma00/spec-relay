@@ -45,7 +45,7 @@ Windows を主な実行環境として扱います（macOS・Linux でも動き�
 
 | 必要なもの | Windows での入れ方の例 |
 |---|---|
-| Node.js 22.12 以上と npm（OpenSpec の要件。npm は Node.js に含まれます） | `winget install OpenJS.NodeJS.LTS` |
+| Node.js 22.20 以上と npm（OpenSpec の要件。npm は Node.js に含まれます） | `winget install OpenJS.NodeJS.LTS` |
 | [OpenSpec CLI](https://github.com/Fission-AI/OpenSpec) 2.0.0（テストはこの版で実行） | 別に入れる必要はありません。導入スクリプトが移行対象のリポジトリの中（`openspec/spec-relay/tools/`）に、この版を `npm ci` で入れます（npm のレジストリにつながる必要があります）。グローバルに入っている `openspec` は、どの版でも使いません |
 | GitHub Copilot（CLI・VS Code・Copilot app のいずれか）。CLI は 1.0.109 以降、VS Code は 1.143 以降 | CLI は `npm install -g @github/copilot` |
 
@@ -74,7 +74,7 @@ node "C:\path\to\spec-relay\scripts\doctor.mjs" --target . --client cli
 
 | 対象 | 確かめること | 足りないとき |
 |---|---|---|
-| Node.js | 22.12 以上（古い Node.js でも、このメッセージは出ます） | FAIL |
+| Node.js | 22.20 以上（古い Node.js でも、このメッセージは出ます） | FAIL |
 | キット | スキーマ・スクリプト・エージェントがそろっているか | FAIL |
 | OpenSpec CLI | 導入前は npm があるか。導入後は、リポジトリの中の OpenSpec が入っていて動くか、版が 2.0.0 か（違えば FAIL。clone した直後で未導入のときは、導入スクリプトの再実行を案内） | FAIL |
 | OpenSpec の利用統計 | 送信が止まっているか（止め方を案内。キットは設定を変えません） | INFO |

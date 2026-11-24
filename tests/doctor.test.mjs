@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
   main, parseVersion, compareVersions, telemetryOff, toolchainFor, checkNode, checkOpenspec,
-  checkGit, checkTarget, checkClient, checkPowershell, TRIAL_RECORD, TRIAL_DIR, KIT_ROOT,
+  checkGit, checkTarget, checkClient, checkPowershell, TRIAL_RECORD, TRIAL_DIR, KIT_ROOT, OPENSPEC_TESTED,
 } from '../scripts/doctor.mjs';
 import { main as setup } from '../scripts/setup.mjs';
 import { findCommand } from '../scripts/openspec.mjs';
@@ -32,8 +32,10 @@ const tools = (answers = {}) => (name, args) => {
 
 function machine(dir, extra = {}) {
   return {
-    probeOpenspec: () => ({ ok: true, version: '2.0.0' }),
+    probeOpenspec: () => ({ ok: true, version: OPENSPEC_TESTED }),
     exec: tools(),
+    // An empty home folder: no personal OpenSpec skills.
+    home: tempDir('spec-relay-home-'),
     samePath: () => true,
     machine: 'test-machine',
     // No PowerShell processes per test on Windows CI.
@@ -77,9 +79,10 @@ test('versions compare numerically', () => {
 });
 
 test('an old Node.js gets one clear failure, before any other module loads', async () => {
-  assert.equal(checkNode({ ...en, nodeVersion: 'v22.11.0' }).level, 'fail');
-  // From 22.12 OpenSpec runs; some of its packages ask for newer Node.js lines.
-  for (const [version, level] of [['v22.12.0', 'warn'], ['v22.22.2', 'ok'], ['v23.11.0', 'warn'], ['v24.14.0', 'warn'], ['v24.15.0', 'ok'], ['v25.1.0', 'warn'], ['v26.0.0', 'ok']]) {
+  // OpenSpec 2.1 (and its skills package) need 22.20.0.
+  for (const version of ['v22.11.0', 'v22.12.0', 'v22.19.9']) assert.equal(checkNode({ ...en, nodeVersion: version }).level, 'fail', version);
+  // Its @inquirer packages ask for ^22.13.0 || >=23.5.0.
+  for (const [version, level] of [['v22.20.0', 'ok'], ['v22.23.5', 'ok'], ['v23.4.0', 'warn'], ['v23.5.0', 'ok'], ['v24.0.0', 'ok'], ['v25.1.0', 'ok'], ['v26.0.0', 'ok']]) {
     assert.equal(checkNode({ ...en, nodeVersion: version }).level, level, version);
   }
   const { code, json } = await doctor(['--target', tempDir(), '--json', '--lang', 'en'], { nodeVersion: 'v18.19.0' });
@@ -113,14 +116,14 @@ test('OpenSpec: npm before setup, the pinned version after it', () => {
   // Before setup only npm is needed; setup installs OpenSpec into the repository.
   const before = (answers) => checkOpenspec({ ...en, target: '.', setUp: false, exec: tools(answers), probeOpenspec: () => { throw new Error('not probed before setup'); } });
   assert.equal(before({}).level, 'ok');
-  assert.match(before({}).message, /installs OpenSpec 2\.0\.0 into this repository/);
+  assert.match(before({}).message, new RegExp(`installs OpenSpec ${OPENSPEC_TESTED.replace(/\./g, '\\.')} into this repository`));
   const noNpm = before({ 'npm --version': { found: false } });
   assert.equal(noNpm.level, 'fail');
   assert.match(noNpm.fix, /winget install OpenJS\.NodeJS\.LTS/);
   assert.equal(before({ 'npm --version': { found: true, status: 1, stdout: '' } }).level, 'fail');
 
   const after = (probe) => checkOpenspec({ ...en, target: '.', setUp: true, probeOpenspec: () => probe });
-  assert.equal(after({ ok: true, version: '2.0.0' }).level, 'ok');
+  assert.equal(after({ ok: true, version: OPENSPEC_TESTED }).level, 'ok');
   // Any other version is not what the kit pins: someone changed the package files.
   for (const version of ['1.17.0', '2.0.1', '3.0.0']) {
     const other = after({ ok: true, version });
@@ -245,6 +248,44 @@ test('after setup: schemas, restored workflows, source root, toolchain and the t
   assert.equal(byId(await run(), 'source-root').level, 'fail');
 
   assert.equal(byId(await run({ exec: tools({ 'npm --version': { found: false } }) }), 'toolchain').level, 'warn');
+});
+
+test('the skills stay in the repository: skillsScope, and OpenSpec skills in the home folder', async () => {
+  const dir = setUpRepo();
+  const file = path.join(dir, 'openspec/config.yaml');
+  const home = tempDir('spec-relay-home-');
+  const run = async () => (await doctor(['--target', dir, '--json', '--lang', 'en'], machine(dir, { home }))).json;
+  let json = await run();
+  assert.equal(byId(json, 'skills-scope'), undefined);
+  assert.equal(byId(json, 'personal-skills'), undefined);
+
+  // Set up with 0.21.0 or earlier: no skillsScope line.
+  const config = fs.readFileSync(file, 'utf8');
+  fs.writeFileSync(file, config.replace(/^skillsScope:.*\n/m, ''));
+  json = await run();
+  assert.equal(byId(json, 'skills-scope').level, 'fail');
+  assert.match(byId(json, 'skills-scope').fix, /setup\.mjs/);
+  assert.equal(json.ok, false);
+  fs.writeFileSync(file, config.replace(/^skillsScope:.*$/m, 'skillsScope: global'));
+  assert.match(byId(await run(), 'skills-scope').message, /is global/);
+  fs.writeFileSync(file, crlf(config.replace(/^skillsScope:.*$/m, "skillsScope: 'project' # kept")));
+  assert.equal(byId(await run(), 'skills-scope'), undefined);
+  fs.writeFileSync(file, config);
+
+  // `openspec init` in another project (2.1 default) left live skills in the home folder.
+  write(home, '.agents/skills/openspec-archive-change/SKILL.md', '---\nname: openspec-archive-change\nmetadata:\n  generatedBy: "2.1.1"\n---\nRun openspec archive.\n');
+  write(home, '.copilot/skills/openspec-apply-change/SKILL.md', '---\nname: openspec-apply-change\nmetadata:\n  generatedBy: "2.1.1"\n---\n');
+  write(home, '.agents/skills/my-own-skill/SKILL.md', '---\nname: my-own-skill\n---\n');
+  json = await run();
+  const personal = byId(json, 'personal-skills');
+  assert.equal(personal.level, 'warn');
+  assert.match(personal.message, /openspec-archive-change, openspec-apply-change/);
+  assert.doesNotMatch(personal.message, /my-own-skill/);
+  assert.match(personal.fix, /Hook enforcement/);
+  assert.equal(json.ok, true, 'a warning, not a failure');
+  // With the hooks on, the gate still stops an archive.
+  fs.writeFileSync(file, config.replace(/^(\s*Hook enforcement[^:\n]*:[ \t]*)off/m, '$1on'));
+  assert.equal(byId(await run(), 'personal-skills').level, 'info');
 });
 
 test('a config from 0.2.0 has no parallel settings', async () => {

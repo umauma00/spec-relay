@@ -6,7 +6,7 @@
 //      openspec/spec-relay/tools/ (package.json and package-lock.json from
 //      templates/openspec-tools/, then `npm ci`), so every person and machine on
 //      this repository runs the same version, whatever is installed globally
-//   4. runs `openspec init --tools github-copilot` with that CLI, which keeps the
+//   4. runs `openspec init --tools github-copilot --scope project` with that CLI, which keeps the
 //      config above (the artifact language lives in that config's context, so
 //      init gets no --language)
 //   5. replaces the generic OpenSpec apply/archive/sync skills init installs in
@@ -174,6 +174,22 @@ function listFiles(dir, base = dir) {
   });
 }
 
+// The skillsScope key of openspec/config.yaml (OpenSpec 2.1+): 'project',
+// another value, or null when it is not there.
+export function skillsScope(text) {
+  const match = text.replace(/^\uFEFF/, '').match(/^skillsScope:[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^\s#]*))[ \t]*(?:#.*)?$/m);
+  return match ? (match[1] ?? match[2] ?? match[3]) : null;
+}
+
+// The config with `skillsScope: project` after its schema line (or at the end),
+// in the file's own line endings.
+export function withProjectScope(text) {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const line = `skillsScope: project${eol}`;
+  if (/^schema:.*$/m.test(text)) return text.replace(/^(schema:[^\r\n]*)(\r?\n|$)/m, (_, schema, end) => `${schema}${end || eol}${line}`);
+  return `${text}${text === '' || text.endsWith('\n') ? '' : eol}${line}`;
+}
+
 export function renderConfig(opts) {
   const template = fs.readFileSync(path.join(KIT_ROOT, 'templates/openspec-config.yaml'), 'utf8');
   const values = {
@@ -229,8 +245,17 @@ export function legacyFiles(target) {
     if (/[\\/]prompts[\\/]opsx-/.test(file)) return true;
     if (!/[\\/]skills[\\/]openspec-/.test(file)) return false;
     const text = readText(path.join(file, 'SKILL.md'));
-    return /generatedBy:/.test(text) || text.includes(STUB_MARKER);
+    return generatedByOpenspec(text) || text.includes(STUB_MARKER);
   });
+}
+
+// A SKILL.md OpenSpec wrote: up to 2.0 its frontmatter says
+// `generatedBy: "<version>"`; from 2.1 that line is gone and only
+// `metadata: author: openspec` is left (OpenSpec's skill-generation.js).
+export function generatedByOpenspec(text) {
+  if (/generatedBy:/.test(text)) return true;
+  const front = text.replace(/^\uFEFF/, '').match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
+  return front !== undefined && /^[ \t]+author:[ \t]*(["']?)openspec\1[ \t]*$/m.test(front);
 }
 
 // Files `openspec init` would replace, delete or edit in a repository that is
@@ -254,21 +279,37 @@ function initConflicts(target) {
 }
 
 // The OpenSpec skills in a repository that bypass the review gate, recognised
-// by OpenSpec's generatedBy metadata; a stub this script wrote is skipped.
+// by OpenSpec's frontmatter (generatedByOpenspec); a stub this script wrote is skipped.
 // Every change is shown in the dry run first.
 export function bypassFiles(target) {
+  return openspecSkills(path.join(target, SKILLS_DIR));
+}
+
+function openspecSkills(dir) {
   const found = [];
   let names = [];
-  try { names = fs.readdirSync(path.join(target, SKILLS_DIR)); } catch { /* absent */ }
+  try { names = fs.readdirSync(dir); } catch { /* absent */ }
   for (const name of names.filter((n) => n.startsWith('openspec-') && BYPASS_NAME.test(n))) {
-    const file = path.join(target, SKILLS_DIR, name, 'SKILL.md');
+    const file = path.join(dir, name, 'SKILL.md');
     const text = readText(file);
-    if (/generatedBy:/.test(text) && !text.includes(STUB_MARKER)) found.push(file);
+    if (generatedByOpenspec(text) && !text.includes(STUB_MARKER)) found.push(file);
   }
   return found;
 }
 
-// Returns [{ action: 'create' | 'keep' | 'disable' | 'leftover' | 'conflict', path, content?, reason? }],
+// Personal skill folders Copilot reads in every repository (GitHub's "About
+// agent skills"). From 2.1.0, `openspec init` in any other project puts its
+// skills in ~/.agents/skills by default (and ~/.copilot/skills for Copilot),
+// where setup cannot disable them. Which of two skills with the same name
+// Copilot uses is not documented, so doctor warns about these.
+export const PERSONAL_SKILL_DIRS = ['.agents/skills', '.copilot/skills'];
+
+export function personalBypassFiles(home) {
+  if (!home) return [];
+  return PERSONAL_SKILL_DIRS.flatMap((rel) => openspecSkills(path.join(home, rel)));
+}
+
+// Returns [{ action: 'create' | 'keep' | 'update' | 'disable' | 'leftover' | 'conflict', path, content?, reason? }],
 // whether `openspec init` runs and whether OpenSpec is (re)installed.
 export function plan(opts) {
   const steps = [];
@@ -305,7 +346,15 @@ export function plan(opts) {
     const hooks = readText(configYaml).match(/^\s*Hook enforcement[^:\n]*:[ \t]*(\S+)/m)?.[1]?.toLowerCase() ?? 'off';
     const note = opts.hooksGiven && hooks !== opts.hooks
       ? `; --hooks ${opts.hooks} is not applied: change the "Hook enforcement" line in it yourself (it says ${hooks})` : '';
-    steps.push({ action: 'keep', path: configYaml, reason: `already managed by spec-relay; edit it to change values${note}` });
+    const text = fs.readFileSync(configYaml, 'utf8');
+    const scope = skillsScope(text);
+    if (scope === null) {
+      steps.push({ action: 'update', path: configYaml, content: withProjectScope(text), reason: `adds skillsScope: project (OpenSpec 2.1+ would otherwise offer to move the skills out of the repository)${note}` });
+    } else if (scope !== 'project') {
+      steps.push({ action: 'conflict', path: configYaml, reason: `skillsScope is ${scope}; it must be project, because setup can disable the gate-bypassing skills only in this repository` });
+    } else {
+      steps.push({ action: 'keep', path: configYaml, reason: `already managed by spec-relay; edit it to change values${note}` });
+    }
   } else if (exists(configYaml) && !pending) {
     steps.push({ action: 'conflict', path: configYaml, reason: 'an existing OpenSpec config; merge templates/openspec-config.yaml into it by hand' });
   } else {
@@ -362,7 +411,7 @@ const NPM_CI = ['ci', '--ignore-scripts', '--no-audit', '--no-fund', '--no-updat
 
 function npmProblem() {
   const result = runCommand(findNpm(), ['--version'], { timeout: 60000 });
-  if (result.notFound || result.error?.code === 'ENOENT') return 'npm was not found. It comes with Node.js 22.12 or later (Windows: winget install OpenJS.NodeJS.LTS); open a new terminal after installing it.';
+  if (result.notFound || result.error?.code === 'ENOENT') return 'npm was not found. It comes with Node.js 22.20 or later (Windows: winget install OpenJS.NodeJS.LTS); open a new terminal after installing it.';
   if (result.error || result.status !== 0) return `"npm --version" failed: ${(result.error?.message || result.stderr || '').trim().split(/\r?\n/)[0]}`;
   return null;
 }
@@ -376,7 +425,9 @@ function runInstall(opts) {
 
 function runInit(opts) {
   // The target is passed as init's path and as cwd, so nothing depends on a shell.
-  const args = ['init', '--tools', 'github-copilot', '--no-copilot-cloud', '--no-animation', '.'];
+  // --scope project: from OpenSpec 2.1.0 init otherwise installs the skills in
+  // the home folder, where the kit cannot disable apply, archive and sync.
+  const args = ['init', '--tools', 'github-copilot', '--scope', 'project', '--no-copilot-cloud', '--no-animation', '.'];
   const result = runOpenspec(args, { cwd: opts.target, stdio: 'inherit' });
   if (result.error || result.status !== 0) {
     throw new Error(`openspec init failed${result.error ? `: ${result.error.message}` : ` with exit code ${result.status}`}`);
@@ -394,7 +445,7 @@ export function main(argv) {
   steps.filter((s) => s.action !== 'disable' && s.action !== 'leftover').forEach(show);
   if (install) console.log(`run      npm ci in ${TOOLS_DIR} (installs OpenSpec ${PINNED_VERSION} into this repository)`);
   else if (!opts.skipInit) console.log(`keep     OpenSpec ${PINNED_VERSION} in ${TOOLS_DIR}`);
-  if (willInit) console.log('run      openspec init --tools github-copilot (adds OpenSpec skills under .agents/skills/)');
+  if (willInit) console.log('run      openspec init --tools github-copilot --scope project (adds OpenSpec skills under .agents/skills/)');
   else console.log(`skip     openspec init (${managed ? 'already set up; to refresh, run node <kit>/scripts/openspec.mjs update, then this setup again' : '--skip-init'})`);
   removals.forEach(show);
   if (willInit) console.log('disable  the apply, archive and sync skills openspec init adds (they bypass the review gate)');
@@ -439,6 +490,7 @@ export function main(argv) {
     for (const step of created.filter((s) => !s.tool)) write(step, step.config ? step.content.replace(/^.*\n/, `${PENDING_MARKER}\n`) : step.content);
     if (willInit) runInit(opts);
     if (config) write(config);
+    for (const step of steps.filter((s) => s.action === 'update')) write(step);
   } catch (error) {
     throw undo(error);
   }

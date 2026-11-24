@@ -126,7 +126,7 @@ stop halfway on something the machine or the host lacks.
    is quick and changes nothing). Run `node "<kit>/scripts/doctor.mjs"
    --target . --client <client> --json`, where `<client>` is `cli` in Copilot
    CLI, `vscode` in VS Code and `app` in the Copilot app. If the shell does not
-   know `node`, tell the person to install Node.js 22.12 or later (Windows:
+   know `node`, tell the person to install Node.js 22.20 or later (Windows:
    `winget install OpenJS.NodeJS.LTS`) and to open a new terminal or restart
    the app, and stop. Otherwise report every `fail` and `warn` in `checks`
    with its `fix`, in the person's language and in one message (the JSON is
