@@ -227,7 +227,7 @@ test('setup installs the pinned OpenSpec into the repository and runs init with 
   assert.ok(calls.every((call) => call.scope === 'project'));
   // init and update never ask where the skills go ("Switch to global" would move them out).
   assert.equal(init.interactive, '0');
-  assert.ok(calls.filter((call) => !['init', 'update'].includes(call.args[0])).every((call) => call.interactive === undefined));
+  assert.ok(calls.filter((call) => !['init', 'update'].includes(call.args[0])).every((call) => call.interactive === process.env.OPEN_SPEC_INTERACTIVE));
   assert.ok(!fs.existsSync(path.join(dir, 'openspec/config.yaml')));
   assert.ok(!fs.existsSync(path.join(dir, 'openspec/spec-relay/tools/package.json')));
   assert.ok(!fs.existsSync(path.join(dir, 'openspec/spec-relay/tools/node_modules')));

@@ -447,8 +447,8 @@ export function checkSetup(ctx) {
       id: 'repo-skills', level: 'fail',
       message: ctx.t('リポジトリの .agents/skills/ に OpenSpec のスキルがありません。ホームフォルダーへ移された（`openspec update` で「Switch to global」を選んだ、またはグローバルの `openspec` 2.1 以降をここで実行した）と考えられます。キットが無効にできるのはリポジトリの中のスキルだけです。',
         'there are no OpenSpec skills in the repository\'s .agents/skills/; they were probably moved to the home folder (an `openspec update` answered "Switch to global", or a global `openspec` 2.1+ ran here). The kit can disable skills only in the repository.'),
-      fix: ctx.t('リポジトリで `node "<キットのフォルダー>/scripts/openspec.mjs" init --tools github-copilot --scope project --no-copilot-cloud .` を実行してから、導入スクリプトをもう一度実行してください。ホームフォルダーに残ったスキルは、下の personal-skills のとおりに扱います。',
-        'In the repository run `node "<kit>/scripts/openspec.mjs" init --tools github-copilot --scope project --no-copilot-cloud .`, then run setup again. Handle the skills left in the home folder as personal-skills below says.'),
+      fix: ctx.t('リポジトリで `node "<キットのフォルダー>/scripts/openspec.mjs" init --tools github-copilot --scope project .` を実行してから、導入スクリプトをもう一度実行してください。ホームフォルダーに残ったスキルは、下の personal-skills のとおりに扱います。',
+        'In the repository run `node "<kit>/scripts/openspec.mjs" init --tools github-copilot --scope project .`, then run setup again. Handle the skills left in the home folder as personal-skills below says.'),
     });
   }
   const personal = ctx.personalBypassFiles ? ctx.personalBypassFiles(ctx.home) : [];

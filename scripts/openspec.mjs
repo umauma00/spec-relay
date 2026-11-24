@@ -132,7 +132,7 @@ export function runOpenspec(args, options = {}, root = options.cwd ?? process.cw
   // init and update are the commands that ask where the skills go (2.1+); in a
   // terminal a "Switch to global" answer would move them out of the repository,
   // where the kit cannot disable them, so they never ask (OpenSpec's isInteractive).
-  if (['init', 'update'].includes(args[0])) {
+  if (['init', 'update'].includes(args.find((arg) => !arg.startsWith('-')))) {
     for (const key of Object.keys(env)) if (key.toUpperCase() === 'OPEN_SPEC_INTERACTIVE') delete env[key];
     env.OPEN_SPEC_INTERACTIVE = '0';
   }
