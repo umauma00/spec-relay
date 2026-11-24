@@ -308,6 +308,12 @@ test('OpenSpec runs only from the repository, as node + openspec.js', () => {
   write(dir, 'openspec/spec-relay/tools/node_modules/@fission-ai/openspec/bin/openspec.js', "console.log(process.argv.slice(2).join(' '))\n");
   assert.deepEqual(findOpenspec(dir), { launch: { command: process.execPath, prefixArgs: [script] }, pinned: true, version: '2.0.0' });
   assert.equal(runOpenspec(['list', '--json'], { cwd: dir }).stdout.trim(), 'list --json');
+  // The kit turns OpenSpec's usage statistics off unless the person set the variable.
+  write(dir, 'openspec/spec-relay/tools/node_modules/@fission-ai/openspec/bin/openspec.js', "console.log(process.argv.slice(2).join(' ') + ' telemetry=' + process.env.OPENSPEC_TELEMETRY)\n");
+  const withEnv = (env) => runOpenspec(['list'], { cwd: dir, env }).stdout.trim();
+  assert.equal(withEnv({ PATH: process.env.PATH }), 'list telemetry=0');
+  assert.equal(withEnv({ PATH: process.env.PATH, OPENSPEC_TELEMETRY: '1' }), 'list telemetry=1');
+  write(dir, 'openspec/spec-relay/tools/node_modules/@fission-ai/openspec/bin/openspec.js', "console.log(process.argv.slice(2).join(' '))\n");
   // The command line form, from a subfolder, with a global openspec nowhere on PATH.
   fs.mkdirSync(path.join(dir, 'src/deep'), { recursive: true });
   const cli = spawnSync(process.execPath, [path.join(KIT_ROOT, 'scripts/openspec.mjs'), 'status', '--change', 'a b'], { cwd: path.join(dir, 'src/deep'), encoding: 'utf8', env: envWithPath(tempDir()) });

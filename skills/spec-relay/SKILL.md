@@ -137,8 +137,9 @@ stop halfway on something the machine or the host lacks.
      warnings that stay (a synchronised folder, for example): list their
      ids in one line and go on, unless one is new or changed. A `trial`
      warning needs no question: run the trial (step 6).
-   - An `info` needs no answer; mention it in a line (for `telemetry`, how to
-     turn it off) before setup, and not again later.
+   - An `info` needs no answer; mention it in a line before setup, and not
+     again later (for `telemetry`: the person's own OPENSPEC_TELEMETRY lets
+     OpenSpec send usage statistics, overriding the kit's default of 0).
    - Never install, update or change settings to fix a check on your own:
      ask first for installs (Node.js and npm, which setup uses to install OpenSpec),
      and leave the execution policy, git's global config and OpenSpec's
@@ -192,7 +193,7 @@ stop halfway on something the machine or the host lacks.
    done.
 8. The kit's hook (see When something stops) is off unless `openspec/config.yaml`
    says `Hook enforcement ...: on`. Tell the person once that they can turn it
-   on there themselves (README, "止まったとき"); never change that line yourself.
+   on there themselves (docs/TROUBLESHOOTING.md, "フック"); never change that line yourself.
 
 ## Working in parallel
 

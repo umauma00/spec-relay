@@ -201,7 +201,7 @@ export function checkOpenspec(ctx) {
       return {
         id: 'openspec', level: 'fail',
         message: ctx.t('このリポジトリには、キットが固定する OpenSpec（openspec/spec-relay/tools）がありません。0.6.0 以前のキットで導入したリポジトリです。', 'this repository has no pinned OpenSpec (openspec/spec-relay/tools); it was set up with kit 0.6.0 or older.'),
-        fix: ctx.t('README の「0.6.0 から更新するとき」の手順に従ってください。', 'Follow "0.6.0 から更新するとき" in the README.'),
+        fix: ctx.t('キットの docs/UPGRADING.md の「0.6.0 から更新するとき」の手順に従ってください。', 'Follow "0.6.0 から更新するとき" in docs/UPGRADING.md of the kit.'),
       };
     }
     return {
@@ -222,14 +222,20 @@ export function checkOpenspec(ctx) {
   };
 }
 
+// The kit runs OpenSpec with OPENSPEC_TELEMETRY=0 unless the person set the
+// variable themselves (openspec.mjs, openspecEnv); then OpenSpec's own rules apply.
 export function checkTelemetry(ctx) {
+  const own = ctx.platform === 'win32' ? setTo(ctx.env, 'OPENSPEC_TELEMETRY') !== undefined : ctx.env.OPENSPEC_TELEMETRY !== undefined;
+  if (!own) {
+    return { id: 'telemetry', level: 'ok', message: ctx.t('キットが起動する OpenSpec は利用統計を送りません（既定で OPENSPEC_TELEMETRY=0 を渡します）。', 'OpenSpec run by the kit sends no usage statistics (the kit passes OPENSPEC_TELEMETRY=0 by default).') };
+  }
   const off = telemetryOff(ctx.env, ctx.platform, ctx.readFile);
   if (off) return { id: 'telemetry', level: 'ok', message: ctx.t(`OpenSpec の利用統計の送信は止まっています（${off}）。`, `OpenSpec usage statistics are off (${off}).`) };
   return {
     id: 'telemetry', level: 'info',
-    message: ctx.t('OpenSpec は初期設定で匿名の利用統計（コマンド名と版）を送ります。コードや仕様の中身は送りません。', 'OpenSpec sends anonymous usage statistics (command name and version) by default; no code or spec content.'),
-    fix: ctx.t('止めるときは、移行対象のリポジトリで `node "<キットのフォルダー>/scripts/openspec.mjs" config set telemetry.enabled false` を実行します（この PC のすべてのプロジェクトに効きます）。環境変数 `OPENSPEC_TELEMETRY=0` でも止まります。キットはこの設定を変えません。',
-      'To turn it off, run `node "<kit>/scripts/openspec.mjs" config set telemetry.enabled false` in the repository being migrated (all projects on this machine), or set `OPENSPEC_TELEMETRY=0`. The kit never changes this setting.'),
+    message: ctx.t('環境変数 OPENSPEC_TELEMETRY が設定されているので、キットの既定（0）より優先され、OpenSpec が匿名の利用統計（コマンド名と版）を送ります。コードや仕様の中身は送りません。', 'OPENSPEC_TELEMETRY is set, so it overrides the kit default (0) and OpenSpec sends anonymous usage statistics (command name and version); no code or spec content.'),
+    fix: ctx.t('止めるときは、環境変数 OPENSPEC_TELEMETRY を消すか 0 にします。',
+      'To turn it off, remove OPENSPEC_TELEMETRY or set it to 0.'),
   };
 }
 
@@ -394,8 +400,8 @@ export function checkSetup(ctx) {
       id: 'schemas', level: 'fail',
       message: ctx.t(`openspec/schemas のスキーマが、このキット（${ctx.kitVersion}）の版と違います: ${differs.slice(0, 3).join(', ')}${differs.length > 3 ? ` ほか ${differs.length - 3} 件` : ''}`,
         `the schemas in openspec/schemas differ from this kit (${ctx.kitVersion}): ${differs.slice(0, 3).join(', ')}${differs.length > 3 ? ` and ${differs.length - 3} more` : ''}`),
-      fix: ctx.t('キットを更新したときは、README の「〜から更新するとき」の手順に従ってください。手で書き換えた場合は元に戻してください。違うスキーマのまま進めると、途中で成果物や確認が合わなくなります。',
-        'If you updated the kit, follow "Updating from ..." in the README. If someone edited them, restore them. With other schemas, artifacts and gates stop matching midway.'),
+      fix: ctx.t('キットを更新したときは、キットの docs/UPGRADING.md の「〜から更新するとき」の手順に従ってください。手で書き換えた場合は元に戻してください。違うスキーマのまま進めると、途中で成果物や確認が合わなくなります。',
+        'If you updated the kit, follow "〜から更新するとき" in docs/UPGRADING.md of the kit. If someone edited them, restore them. With other schemas, artifacts and gates stop matching midway.'),
     });
   } else {
     results.push({ id: 'schemas', level: 'ok', message: ctx.t(`スキーマはこのキットの版と同じです（${ctx.schemas.length} 個）。`, `the schemas match this kit (${ctx.schemas.length}).`) });
@@ -407,8 +413,8 @@ export function checkSetup(ctx) {
       id: 'legacy', level: 'fail',
       message: ctx.t(`OpenSpec 1.x（または spec-relay 0.6.0）のファイルが .github/ に残っています: ${list.join(', ')}`,
         `files from OpenSpec 1.x (or spec-relay 0.6.0) are still under .github/: ${list.join(', ')}`),
-      fix: ctx.t('README の「0.6.0 から更新するとき」の手順に従ってください。キットはこの場所のスキルを無効にしないので、OpenSpec 標準の apply・archive・sync が残っているとレビューを飛ばせます。元フォルダーが `.` のときは、調査の gate がこれらを元コードとして数えます。',
-        'Follow "0.6.0 から更新するとき" in the README. The kit no longer disables skills there, so generic apply, archive or sync left there skip the review; with the source root ".", the survey gate also counts these files as source code.'),
+      fix: ctx.t('キットの docs/UPGRADING.md の「0.6.0 から更新するとき」の手順に従ってください。キットはこの場所のスキルを無効にしないので、OpenSpec 標準の apply・archive・sync が残っているとレビューを飛ばせます。元フォルダーが `.` のときは、調査の gate がこれらを元コードとして数えます。',
+        'Follow "0.6.0 から更新するとき" in docs/UPGRADING.md of the kit. The kit no longer disables skills there, so generic apply, archive or sync left there skip the review; with the source root ".", the survey gate also counts these files as source code.'),
     });
   }
   const bypass = ctx.bypassFiles(ctx.target);
@@ -428,7 +434,7 @@ export function checkSetup(ctx) {
         ? ctx.t('openspec/config.yaml に `skillsScope: project` がありません（0.21.0 以前の導入）。OpenSpec 2.1 以降の `openspec update` は、スキルをホームフォルダーへ移すか尋ね、移すとキットが無効にしたスキルが元に戻ります。', 'openspec/config.yaml has no `skillsScope: project` (set up with 0.21.0 or earlier). From OpenSpec 2.1, `openspec update` offers to move the skills to the home folder, which brings back the skills the kit disabled.')
         : ctx.t(`openspec/config.yaml の skillsScope が ${scope} です。キットはリポジトリの中のスキルしか無効にできません。`, `skillsScope in openspec/config.yaml is ${scope}; the kit can disable skills only in this repository.`),
       fix: scope === null
-        ? ctx.t('導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。この1行を足します。', 'Run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`); it adds the line.')
+        ? ctx.t('docs/UPGRADING.md の「0.21.0 から更新するとき」に従って、導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。この1行を足します。', 'Follow "0.21.0 から更新するとき" in docs/UPGRADING.md and run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`); it adds the line.')
         : ctx.t('`skillsScope: project` に直してから、導入スクリプトをもう一度実行してください。', 'Change it to `skillsScope: project`, then run setup again.'),
     });
   }
@@ -442,8 +448,8 @@ export function checkSetup(ctx) {
         `OpenSpec's generic skills are in your home folder (put there by \`openspec init\` in another project, the default from OpenSpec 2.1): ${names.join(', ')}. Copilot reads them in every repository, and which of two skills with the same name it uses is not documented, so they may be used to archive without the review gate.`),
       fix: hooks
         ? ctx.t('フックが有効なので、gate を通らない archive は拒否されます。', 'Hook enforcement is on, so an archive that fails the gate is denied.')
-        : ctx.t(`ほかのプロジェクトで OpenSpec を使っていなければ、${PERSONAL_DIRS_JA} の openspec-* のフォルダーを消してください。使っているなら、openspec/config.yaml の「Hook enforcement」を on にして、gate を通らない archive をフックで止めてください（README の「フック」）。`,
-          `If you do not use OpenSpec in other projects, delete the openspec-* folders in ${PERSONAL_DIRS_EN}. If you do, set "Hook enforcement" in openspec/config.yaml to on, so the hook denies archives that fail the gate (README, hooks).`),
+        : ctx.t(`ほかのプロジェクトで OpenSpec を使っていなければ、${PERSONAL_DIRS_JA} の openspec-* のフォルダーを消してください。使っているなら、openspec/config.yaml の「Hook enforcement」を on にして、gate を通らない archive をフックで止めてください（docs/TROUBLESHOOTING.md の「フック」）。`,
+          `If you do not use OpenSpec in other projects, delete the openspec-* folders in ${PERSONAL_DIRS_EN}. If you do, set "Hook enforcement" in openspec/config.yaml to on, so the hook denies archives that fail the gate (docs/TROUBLESHOOTING.md, hooks).`),
     });
   }
   const sourceRoot = ctx.cleanValue(ctx.configValue(ctx.target, 'Source root', '.'));
@@ -459,7 +465,7 @@ export function checkSetup(ctx) {
     results.push({
       id: 'config', level: 'warn',
       message: ctx.t('openspec/config.yaml に並列化の設定がありません（0.2.0 以前の導入）。既定値（4・2・session）で動きます。', 'openspec/config.yaml has no parallel settings (set up with 0.2.0 or earlier); the defaults (4, 2, session) apply.'),
-      fix: ctx.t('README の「0.2.0 から更新するとき」の5行を context に足してください。', 'Add the five lines from "Updating from 0.2.0" in the README to its context.'),
+      fix: ctx.t('キットの docs/UPGRADING.md の「0.2.0 から更新するとき」の5行を context に足してください。', 'Add the five lines from "0.2.0 から更新するとき" in docs/UPGRADING.md of the kit to its context.'),
     });
   }
   const tool = toolchainFor(ctx.cleanValue(ctx.configValue(ctx.target, 'Target language', '')));

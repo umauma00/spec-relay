@@ -100,25 +100,35 @@ export function runCommand(launch, args, options = {}, hint = '') {
   return result;
 }
 
+// The environment the kit runs OpenSpec with. OpenSpec sends anonymous usage
+// statistics by default; the kit turns them off with OPENSPEC_TELEMETRY=0
+// unless the person set OPENSPEC_TELEMETRY themselves. OpenSpec does not see
+// the pinned folder as a project install, so its update notice would tell
+// people to `npm install -g` a newer version; the kit pins the version and a
+// newer one comes with a kit update. OPENSPEC_SKILLS_SCOPE=project: from 2.1.0,
+// init puts the skills in the home folder (~/.agents/skills, for every
+// project) unless told otherwise, and the kit can disable the gate-bypassing
+// skills only in the repository; setup also passes --scope project and records
+// skillsScope: project in openspec/config.yaml, which update reads. Names are
+// case-insensitive only on Windows, so there another spelling is dropped first.
+export function openspecEnv(env = process.env, platform = process.platform) {
+  const own = platform === 'win32'
+    ? Object.keys(env).some((k) => k.toUpperCase() === 'OPENSPEC_TELEMETRY' && env[k] !== undefined)
+    : env.OPENSPEC_TELEMETRY !== undefined;
+  const forced = ['OPENSPEC_NO_UPDATE_CHECK', 'OPENSPEC_SKILLS_SCOPE'];
+  const rest = platform === 'win32'
+    ? Object.fromEntries(Object.entries(env).filter(([k]) => !forced.includes(k.toUpperCase())))
+    : env;
+  return { ...rest, ...(own ? {} : { OPENSPEC_TELEMETRY: '0' }), OPENSPEC_NO_UPDATE_CHECK: '1', OPENSPEC_SKILLS_SCOPE: 'project' };
+}
+
 // Runs the OpenSpec pinned in the working directory (`options.cwd`, or
 // `root` when the two differ) and returns spawnSync's result, or
 // { notInstalled: true, reason } when it is not installed there.
 export function runOpenspec(args, options = {}, root = options.cwd ?? process.cwd()) {
   const found = findOpenspec(root);
   if (!found.launch) return { notInstalled: true, pinned: found.pinned, reason: found.reason, status: null, stdout: '', stderr: '' };
-  // OpenSpec does not see this folder as a project install, so its update
-  // notice would tell people to `npm install -g` a newer version. The kit pins
-  // the version; a newer one comes with a kit update.
-  // OPENSPEC_SKILLS_SCOPE: from 2.1.0, init puts the skills in the home folder
-  // (~/.agents/skills, for every project) unless told otherwise. The kit
-  // disables the gate-bypassing skills by stubbing them in the repository, so
-  // they must stay there; setup also passes --scope project and records
-  // skillsScope: project in openspec/config.yaml, which update reads.
-  // Windows names are case-insensitive, so another spelling is dropped first.
-  const env = Object.fromEntries(Object.entries(options.env ?? process.env)
-    .filter(([key]) => !['OPENSPEC_NO_UPDATE_CHECK', 'OPENSPEC_SKILLS_SCOPE'].includes(key.toUpperCase())));
-  Object.assign(env, { OPENSPEC_NO_UPDATE_CHECK: '1', OPENSPEC_SKILLS_SCOPE: 'project' });
-  return runCommand(found.launch, args, { ...options, env });
+  return runCommand(found.launch, args, { ...options, env: openspecEnv(options.env ?? process.env) });
 }
 
 // { ok, version } or { ok: false, notInstalled, pinned, reason } with a message a person can act on.

@@ -4,11 +4,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
-  main, parseVersion, compareVersions, telemetryOff, toolchainFor, checkNode, checkOpenspec,
+  main, parseVersion, compareVersions, telemetryOff, checkTelemetry, toolchainFor, checkNode, checkOpenspec,
   checkGit, checkTarget, checkClient, checkPowershell, TRIAL_RECORD, TRIAL_DIR, KIT_ROOT, OPENSPEC_TESTED,
 } from '../scripts/doctor.mjs';
 import { main as setup } from '../scripts/setup.mjs';
-import { findCommand } from '../scripts/openspec.mjs';
+import { findCommand, openspecEnv } from '../scripts/openspec.mjs';
 import { tempDir, write, quiet, isolateOpenspec, crlf } from './helpers.mjs';
 
 isolateOpenspec();
@@ -152,6 +152,29 @@ test('telemetry follows the same opt-outs as OpenSpec', () => {
   const config = (text) => (file) => (file.replace(/\\/g, '/').endsWith('Roaming/openspec/config.json') ? text : null);
   assert.equal(telemetryOff({ APPDATA: 'C:\\Users\\a\\AppData\\Roaming' }, 'win32', config('{"telemetry":{"enabled":false}}')), 'config');
   assert.equal(telemetryOff({ APPDATA: 'C:\\Users\\a\\AppData\\Roaming' }, 'win32', config('{"telemetry":{"noticeSeen":true}}')), null);
+});
+
+test('the kit runs OpenSpec with telemetry off unless the person set OPENSPEC_TELEMETRY', () => {
+  assert.equal(openspecEnv({ PATH: 'x' }).OPENSPEC_TELEMETRY, '0');
+  assert.equal(openspecEnv({ PATH: 'x' }).OPENSPEC_NO_UPDATE_CHECK, '1');
+  assert.equal(openspecEnv({ OPENSPEC_TELEMETRY: '1' }).OPENSPEC_TELEMETRY, '1');
+  // Windows names are case-insensitive: a person's own value is kept, not doubled.
+  const mixed = openspecEnv({ OpenSpec_Telemetry: '1' }, 'win32');
+  assert.equal(mixed.OpenSpec_Telemetry, '1');
+  assert.equal(mixed.OPENSPEC_TELEMETRY, undefined);
+  // Elsewhere OpenSpec reads only the upper-case name, so the kit default still applies.
+  assert.equal(openspecEnv({ openspec_telemetry: '1' }, 'linux').OPENSPEC_TELEMETRY, '0');
+  const none = () => null;
+  const check = (env) => checkTelemetry({ ...en, env, platform: 'linux', readFile: none });
+  assert.equal(check({}).level, 'ok');
+  assert.match(check({}).message, /by default/);
+  assert.equal(check({ OPENSPEC_TELEMETRY: '0' }).level, 'ok');
+  assert.equal(check({ OPENSPEC_TELEMETRY: '1' }).level, 'info');
+  assert.equal(check({ OPENSPEC_TELEMETRY: '1', DO_NOT_TRACK: '1' }).level, 'ok');
+  assert.match(check({ openspec_telemetry: '1' }).message, /by default/);
+  const win = (env) => checkTelemetry({ ...en, env, platform: 'win32', readFile: none });
+  assert.equal(win({ OpenSpec_Telemetry: '1' }).level, 'info');
+  assert.match(win({}).message, /by default/);
 });
 
 test('git: missing, refused, not a repository, a subfolder, long paths', () => {

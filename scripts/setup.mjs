@@ -237,7 +237,7 @@ function toolFiles(target, only) {
 
 // What OpenSpec 1.x (and spec-relay 0.6.0, which stubbed them) left under
 // .github/. This kit no longer disables anything there, so in a set-up
-// repository they are leftovers for the person to remove (README, "0.6.0").
+// repository they are leftovers for the person to remove (docs/UPGRADING.md in the kit, "0.6.0").
 // Skills count when OpenSpec generated them or this kit stubbed them, so a
 // skill of the person's own that happens to start with openspec- is left alone.
 export function legacyFiles(target) {
@@ -333,7 +333,7 @@ export function plan(opts) {
     const content = fs.readFileSync(path.join(KIT_ROOT, 'templates/openspec-tools', rel), 'utf8');
     if (!fs.existsSync(dest)) steps.push({ action: 'create', path: dest, content, tool: true });
     else if (sameFile(readText(dest), normalizeText(content), rel)) steps.push({ action: 'keep', path: dest });
-    else steps.push({ action: 'conflict', path: dest, reason: 'differs from the kit version, which pins the OpenSpec the kit is tested with; if it is the previous kit version, delete it and run setup again (README)' });
+    else steps.push({ action: 'conflict', path: dest, reason: 'differs from the kit version, which pins the OpenSpec the kit is tested with; if it is the previous kit version, delete it and run setup again (docs/UPGRADING.md in the kit)' });
   }
   for (const file of trackedModules(opts.target).slice(0, 3)) {
     steps.push({ action: 'conflict', path: path.join(opts.target, file), reason: 'git tracks files under the pinned OpenSpec\'s node_modules; setup runs OpenSpec from there, so remove them from the repository (git rm -r --cached) first' });
@@ -367,7 +367,7 @@ export function plan(opts) {
   // the OpenSpec this run installs.
   if (managed) {
     for (const file of legacyFiles(opts.target)) {
-      steps.push({ action: 'leftover', path: file, reason: 'left by OpenSpec 1.x or spec-relay 0.6.0; see "0.6.0 から更新するとき" in the README' });
+      steps.push({ action: 'leftover', path: file, reason: 'left by OpenSpec 1.x or spec-relay 0.6.0; see "0.6.0 から更新するとき" in docs/UPGRADING.md of the kit' });
     }
   }
   const install = !opts.skipInit && !installedOk(opts.target);
@@ -499,7 +499,7 @@ export function main(argv) {
     if (willInit) console.log(`disabled ${path.relative(opts.target, file)}`);
   }
   if (leftovers.length) {
-    console.error('\nNot finished: OpenSpec is installed, but the files listed as leftover are still under .github/. Follow "0.6.0 から更新するとき" in the README, then run setup again.');
+    console.error('\nNot finished: OpenSpec is installed, but the files listed as leftover are still under .github/. Follow "0.6.0 から更新するとき" in docs/UPGRADING.md of the kit, then run setup again.');
     return 2;
   }
   console.log('\nspec-relay is set up. Select the spec-relay orchestrator agent to start with the survey (step 1).');
