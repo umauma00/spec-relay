@@ -177,8 +177,8 @@ function listFiles(dir, base = dir) {
 // The skillsScope key of openspec/config.yaml (OpenSpec 2.1+): 'project',
 // another value, or null when it is not there.
 export function skillsScope(text) {
-  const match = text.replace(/^\uFEFF/, '').match(/^skillsScope:[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^\s#]*))[ \t]*(?:#.*)?$/m);
-  return match ? (match[1] ?? match[2] ?? match[3]) : null;
+  const match = text.replace(/^\uFEFF/, '').match(/^(["']?)skillsScope\1[ \t]*:[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|(\S*?))[ \t]*(?:[ \t]#.*)?$/m);
+  return match ? (match[2] ?? match[3] ?? match[4]) : null;
 }
 
 // The config with `skillsScope: project` after its schema line (or at the end),
@@ -281,6 +281,13 @@ function initConflicts(target) {
 // The OpenSpec skills in a repository that bypass the review gate, recognised
 // by OpenSpec's frontmatter (generatedByOpenspec); a stub this script wrote is skipped.
 // Every change is shown in the dry run first.
+// Every OpenSpec skill in the repository, stubbed or not.
+export function repoSkills(target) {
+  let names = [];
+  try { names = fs.readdirSync(path.join(target, SKILLS_DIR)); } catch { /* absent */ }
+  return names.filter((n) => n.startsWith('openspec-')).map((n) => path.join(target, SKILLS_DIR, n, 'SKILL.md')).filter((f) => exists(f));
+}
+
 export function bypassFiles(target) {
   return openspecSkills(path.join(target, SKILLS_DIR));
 }
@@ -299,8 +306,9 @@ function openspecSkills(dir) {
 
 // Personal skill folders Copilot reads in every repository (GitHub's "About
 // agent skills"). From 2.1.0, `openspec init` in any other project puts its
-// skills in ~/.agents/skills by default (and ~/.copilot/skills for Copilot),
-// where setup cannot disable them. Which of two skills with the same name
+// skills in ~/.agents/skills by default (an `openspec update` answered with
+// "Switch to global" too); ~/.copilot/skills is Copilot's own personal folder.
+// Setup cannot disable skills there. Which of two skills with the same name
 // Copilot uses is not documented, so doctor warns about these.
 export const PERSONAL_SKILL_DIRS = ['.agents/skills', '.copilot/skills'];
 
@@ -351,7 +359,7 @@ export function plan(opts) {
     if (scope === null) {
       steps.push({ action: 'update', path: configYaml, content: withProjectScope(text), reason: `adds skillsScope: project (OpenSpec 2.1+ would otherwise offer to move the skills out of the repository)${note}` });
     } else if (scope !== 'project') {
-      steps.push({ action: 'conflict', path: configYaml, reason: `skillsScope is ${scope}; it must be project, because setup can disable the gate-bypassing skills only in this repository` });
+      steps.push({ action: 'conflict', path: configYaml, reason: `skillsScope is ${scope || '(empty)'}; it must be project, because setup can disable the gate-bypassing skills only in this repository` });
     } else {
       steps.push({ action: 'keep', path: configYaml, reason: `already managed by spec-relay; edit it to change values${note}` });
     }

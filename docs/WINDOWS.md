@@ -57,4 +57,4 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "C#"
 - **ネットワーク上のフォルダー**：`\\server\share\...` や `\\wsl.localhost\...` でも OpenSpec は `node` で起動するので動きますが、npm が `npm.cmd` しか見つからない環境では、cmd.exe がこうした場所を作業フォルダーにできないため、導入スクリプトがその旨を表示して止まります。ファイルの操作も遅く、ロックで失敗しやすくなります。
 - **シンボリックリンク**：OpenSpec 2.x は Claude Code など一部のツール向けに、`.agents/skills/` のスキルへのリンクを作ります。キットは `--tools github-copilot --scope project` だけで導入し、Copilot は `.agents/skills/` を直接読むので、リンクは作られません（ほかのツール向けの OpenSpec のファイルがあると、導入スクリプトはその前に止まります）。2.1 では、Windows でリポジトリの中に入れるスキルは常にリンクではなくコピーになります。開発者モードや `git config core.symlinks true` は要りません（OpenSpec 2.1.1 のコードで確認。Windows の実機ではまだ試していません）。
 - **WSL**：WSL の中で使う場合は Linux として動きます。Windows 側のツールと WSL 側のファイルを混ぜないでください。
-- **OpenSpec 全体の設定**：OpenSpec は利用者ごとの設定を `%APPDATA%\openspec\` に持ちます。spec-relay はここを書き換えません。
+- **OpenSpec 全体の設定**：OpenSpec は利用者ごとの設定を `%APPDATA%\openspec\` に持ちます。spec-relay はここを書き換えません。ただし OpenSpec 2.1 の init と update は、実行したリポジトリの場所を `%LOCALAPPDATA%\openspec\projects.json` に記録し、update は `%USERPROFILE%\.agents\skills` に OpenSpec のスキルがあればそれも更新します（OpenSpec 自体の動作です）。

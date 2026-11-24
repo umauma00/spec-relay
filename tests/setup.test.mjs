@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { main, parseArgs, plan, renderConfig, CONFIG_MARKER, KIT_ROOT, STUB_MARKER } from '../scripts/setup.mjs';
+import { main, parseArgs, plan, renderConfig, skillsScope, CONFIG_MARKER, KIT_ROOT, STUB_MARKER } from '../scripts/setup.mjs';
 import { findOpenspec, runOpenspec, findNpm, runCommand, OPENSPEC_VERSION } from '../scripts/openspec.mjs';
 import { tempDir, write, quiet, isolateOpenspec, crlf } from './helpers.mjs';
 
@@ -92,6 +92,10 @@ test('a config from 0.21.0 or earlier gets skillsScope: project, in its own line
   const updated = fs.readFileSync(file, 'utf8');
   assert.equal(updated, `\uFEFF${old.replace('schema: spec-relay-extract\r\n', 'schema: spec-relay-extract\r\nskillsScope: project\r\n')}`);
   assert.equal(plan(parseArgs(['--target', dir, ...BASE])).steps.find((s) => s.path === file).action, 'keep');
+  // YAML forms a person may write by hand.
+  for (const [text, scope] of [['"skillsScope": project\n', 'project'], ["skillsScope : 'project' # kept\n", 'project'], ['skillsScope: project#x\n', 'project#x'], ['skillsScope:\n', ''], ['schema: x\n', null]]) {
+    assert.equal(skillsScope(text), scope, text);
+  }
   // Someone moved the skills out of the repository: setup stops.
   fs.writeFileSync(file, updated.replace('skillsScope: project', 'skillsScope: global'));
   assert.equal(plan(parseArgs(['--target', dir, ...BASE])).steps.find((s) => s.path === file).action, 'conflict');
@@ -177,7 +181,7 @@ function fakeNpm(version = OPENSPEC_VERSION) {
   const bin = tempDir('spec-relay-bin-');
   // Every call is logged to <bin>/calls.jsonl with the skills scope it got.
   const log = JSON.stringify(path.join(bin, 'calls.jsonl'));
-  const openspec = `require('fs').appendFileSync(${log}, JSON.stringify({ args: process.argv.slice(2), scope: process.env.OPENSPEC_SKILLS_SCOPE }) + '\\n');
+  const openspec = `require('fs').appendFileSync(${log}, JSON.stringify({ args: process.argv.slice(2), scope: process.env.OPENSPEC_SKILLS_SCOPE, interactive: process.env.OPEN_SPEC_INTERACTIVE }) + '\\n');
 if (process.argv[2] === '--version') { console.log(${JSON.stringify(version)}); } else { process.exitCode = 1; }\n`;
   // On Windows the kit prefers an npm.cmd that has node_modules/npm/bin/npm-cli.js
   // beside it (as a real npm install does), and also looks in node's own folder,
@@ -221,6 +225,9 @@ test('setup installs the pinned OpenSpec into the repository and runs init with 
   const init = calls.find((call) => call.args[0] === 'init');
   assert.deepEqual(init.args, ['init', '--tools', 'github-copilot', '--scope', 'project', '--no-copilot-cloud', '--no-animation', '.']);
   assert.ok(calls.every((call) => call.scope === 'project'));
+  // init and update never ask where the skills go ("Switch to global" would move them out).
+  assert.equal(init.interactive, '0');
+  assert.ok(calls.filter((call) => !['init', 'update'].includes(call.args[0])).every((call) => call.interactive === undefined));
   assert.ok(!fs.existsSync(path.join(dir, 'openspec/config.yaml')));
   assert.ok(!fs.existsSync(path.join(dir, 'openspec/spec-relay/tools/package.json')));
   assert.ok(!fs.existsSync(path.join(dir, 'openspec/spec-relay/tools/node_modules')));

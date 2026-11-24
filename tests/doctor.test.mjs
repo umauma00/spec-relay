@@ -295,6 +295,15 @@ test('the skills stay in the repository: skillsScope, and OpenSpec skills in the
   assert.equal(byId(await run(), 'skills-scope'), undefined);
   fs.writeFileSync(file, config);
 
+  // The pinned OpenSpec is installed but the repository has no OpenSpec skills:
+  // they were moved to the home folder.
+  write(dir, 'openspec/spec-relay/tools/node_modules/@fission-ai/openspec/package.json', '{"version":"2.1.1"}');
+  json = await run();
+  assert.equal(byId(json, 'repo-skills').level, 'fail');
+  assert.match(byId(json, 'repo-skills').fix, /init --tools github-copilot --scope project/);
+  write(dir, '.agents/skills/openspec-propose/SKILL.md', '---\nname: openspec-propose\n---\n<!-- spec-relay: disabled -->\n');
+  assert.equal(byId(await run(), 'repo-skills'), undefined);
+
   // `openspec init` in another project (2.1 default) left live skills in the home folder.
   write(home, '.agents/skills/openspec-archive-change/SKILL.md', '---\nname: openspec-archive-change\nmetadata:\n  generatedBy: "2.1.1"\n---\nRun openspec archive.\n');
   write(home, '.copilot/skills/openspec-apply-change/SKILL.md', '---\nname: openspec-apply-change\nmetadata:\n  generatedBy: "2.1.1"\n---\n');

@@ -432,10 +432,23 @@ export function checkSetup(ctx) {
       id: 'skills-scope', level: 'fail',
       message: scope === null
         ? ctx.t('openspec/config.yaml に `skillsScope: project` がありません（0.21.0 以前の導入）。OpenSpec 2.1 以降の `openspec update` は、スキルをホームフォルダーへ移すか尋ね、移すとキットが無効にしたスキルが元に戻ります。', 'openspec/config.yaml has no `skillsScope: project` (set up with 0.21.0 or earlier). From OpenSpec 2.1, `openspec update` offers to move the skills to the home folder, which brings back the skills the kit disabled.')
-        : ctx.t(`openspec/config.yaml の skillsScope が ${scope} です。キットはリポジトリの中のスキルしか無効にできません。`, `skillsScope in openspec/config.yaml is ${scope}; the kit can disable skills only in this repository.`),
+        : ctx.t(`openspec/config.yaml の skillsScope が ${scope || '（空）'} です。キットはリポジトリの中のスキルしか無効にできません。`, `skillsScope in openspec/config.yaml is ${scope || '(empty)'}; the kit can disable skills only in this repository.`),
       fix: scope === null
         ? ctx.t('docs/UPGRADING.md の「0.21.0 から更新するとき」に従って、導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。この1行を足します。', 'Follow "0.21.0 から更新するとき" in docs/UPGRADING.md and run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`); it adds the line.')
         : ctx.t('`skillsScope: project` に直してから、導入スクリプトをもう一度実行してください。', 'Change it to `skillsScope: project`, then run setup again.'),
+    });
+  }
+  // The skills left the repository (an `openspec update` answered "Switch to
+  // global", or a global `openspec` 2.1+ ran here): setup has nothing to stub.
+  // Only once the pinned OpenSpec is installed: before that, the openspec check already fails.
+  const installed = ctx.exists(path.join(ctx.target, 'openspec/spec-relay/tools/node_modules/@fission-ai/openspec/package.json'));
+  if (installed && ctx.repoSkills && ctx.repoSkills(ctx.target).length === 0) {
+    results.push({
+      id: 'repo-skills', level: 'fail',
+      message: ctx.t('リポジトリの .agents/skills/ に OpenSpec のスキルがありません。ホームフォルダーへ移された（`openspec update` で「Switch to global」を選んだ、またはグローバルの `openspec` 2.1 以降をここで実行した）と考えられます。キットが無効にできるのはリポジトリの中のスキルだけです。',
+        'there are no OpenSpec skills in the repository\'s .agents/skills/; they were probably moved to the home folder (an `openspec update` answered "Switch to global", or a global `openspec` 2.1+ ran here). The kit can disable skills only in the repository.'),
+      fix: ctx.t('リポジトリで `node "<キットのフォルダー>/scripts/openspec.mjs" init --tools github-copilot --scope project --no-copilot-cloud .` を実行してから、導入スクリプトをもう一度実行してください。ホームフォルダーに残ったスキルは、下の personal-skills のとおりに扱います。',
+        'In the repository run `node "<kit>/scripts/openspec.mjs" init --tools github-copilot --scope project --no-copilot-cloud .`, then run setup again. Handle the skills left in the home folder as personal-skills below says.'),
     });
   }
   const personal = ctx.personalBypassFiles ? ctx.personalBypassFiles(ctx.home) : [];
@@ -444,8 +457,8 @@ export function checkSetup(ctx) {
     const names = [...new Set(personal.map((f) => path.basename(path.dirname(f))))];
     results.push({
       id: 'personal-skills', level: hooks ? 'info' : 'warn',
-      message: ctx.t(`ホームフォルダーに OpenSpec 標準のスキルがあります（ほかのプロジェクトの \`openspec init\` が入れたもの。OpenSpec 2.1 以降の既定）: ${names.join(', ')}。Copilot はこれをどのリポジトリでも読みます。同じ名前のスキルのどちらを使うかは公開されていないので、レビューの確認を通らない archive に使われるおそれがあります。`,
-        `OpenSpec's generic skills are in your home folder (put there by \`openspec init\` in another project, the default from OpenSpec 2.1): ${names.join(', ')}. Copilot reads them in every repository, and which of two skills with the same name it uses is not documented, so they may be used to archive without the review gate.`),
+      message: ctx.t(`ホームフォルダーに OpenSpec 標準のスキルがあります（OpenSpec 2.1 以降の既定では、ほかのプロジェクトの \`openspec init\` がここに入れます）: ${names.join(', ')}。Copilot はこれをどのリポジトリでも読みます。同じ名前のスキルのどちらを使うかは公開されていないので、レビューの確認を通らない archive に使われるおそれがあります。`,
+        `OpenSpec's generic skills are in your home folder (from OpenSpec 2.1, \`openspec init\` in another project puts them there by default): ${names.join(', ')}. Copilot reads them in every repository, and which of two skills with the same name it uses is not documented, so they may be used to archive without the review gate.`),
       fix: hooks
         ? ctx.t('フックが有効なので、gate を通らない archive は拒否されます。', 'Hook enforcement is on, so an archive that fails the gate is denied.')
         : ctx.t(`ほかのプロジェクトで OpenSpec を使っていなければ、${PERSONAL_DIRS_JA} の openspec-* のフォルダーを消してください。使っているなら、openspec/config.yaml の「Hook enforcement」を on にして、gate を通らない archive をフックで止めてください（docs/TROUBLESHOOTING.md の「フック」）。`,
@@ -741,7 +754,7 @@ async function machineContext(opts, overrides = {}) {
     kitRoot: KIT_ROOT,
     kitVersion: (readJson(readFileOrNull(path.join(KIT_ROOT, 'package.json'))) || {}).version || '?',
     schemas: setup.SCHEMAS, configMarker: setup.CONFIG_MARKER, normalizeText: setup.normalizeText,
-    bypassFiles: setup.bypassFiles, legacyFiles: setup.legacyFiles, personalBypassFiles: setup.personalBypassFiles, skillsScope: setup.skillsScope, configValue: gate.configValue, cleanValue: gate.cleanValue,
+    bypassFiles: setup.bypassFiles, repoSkills: setup.repoSkills, legacyFiles: setup.legacyFiles, personalBypassFiles: setup.personalBypassFiles, skillsScope: setup.skillsScope, configValue: gate.configValue, cleanValue: gate.cleanValue,
     machine: machineId(),
     exists: (file) => fs.existsSync(file),
     isDir: (dir) => { try { return fs.statSync(dir).isDirectory(); } catch { return false; } },

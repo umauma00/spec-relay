@@ -31,9 +31,14 @@ export function quiet(fn) {
 // (~/.agents/skills) and keeps a list of projects there (~/.local/share), so
 // the home folder is a temporary one too; npm keeps its usual cache.
 export function isolateOpenspec() {
-  process.env.npm_config_cache ??= process.platform === 'win32'
+  const npmSetting = (name, value) => {
+    if (!Object.keys(process.env).some((key) => key.toLowerCase() === name)) process.env[name] = value;
+  };
+  npmSetting('npm_config_cache', process.platform === 'win32'
     ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'npm-cache')
-    : path.join(os.homedir(), '.npm');
+    : path.join(os.homedir(), '.npm'));
+  // The person's npm settings (registry, proxy, cafile) live in ~/.npmrc.
+  npmSetting('npm_config_userconfig', path.join(os.homedir(), '.npmrc'));
   const home = tempDir('spec-relay-home-');
   process.env.HOME = home;
   process.env.USERPROFILE = home;

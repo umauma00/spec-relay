@@ -128,7 +128,15 @@ export function openspecEnv(env = process.env, platform = process.platform) {
 export function runOpenspec(args, options = {}, root = options.cwd ?? process.cwd()) {
   const found = findOpenspec(root);
   if (!found.launch) return { notInstalled: true, pinned: found.pinned, reason: found.reason, status: null, stdout: '', stderr: '' };
-  return runCommand(found.launch, args, { ...options, env: openspecEnv(options.env ?? process.env) });
+  const env = openspecEnv(options.env ?? process.env);
+  // init and update are the commands that ask where the skills go (2.1+); in a
+  // terminal a "Switch to global" answer would move them out of the repository,
+  // where the kit cannot disable them, so they never ask (OpenSpec's isInteractive).
+  if (['init', 'update'].includes(args[0])) {
+    for (const key of Object.keys(env)) if (key.toUpperCase() === 'OPEN_SPEC_INTERACTIVE') delete env[key];
+    env.OPEN_SPEC_INTERACTIVE = '0';
+  }
+  return runCommand(found.launch, args, { ...options, env });
 }
 
 // { ok, version } or { ok: false, notInstalled, pinned, reason } with a message a person can act on.
