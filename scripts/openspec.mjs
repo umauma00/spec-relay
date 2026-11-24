@@ -105,9 +105,11 @@ export function runCommand(launch, args, options = {}, hint = '') {
 // unless the person set OPENSPEC_TELEMETRY themselves. OpenSpec does not see
 // the pinned folder as a project install, so its update notice would tell
 // people to `npm install -g` a newer version; the kit pins the version and a
-// newer one comes with a kit update.
-export function openspecEnv(env = process.env) {
-  const own = Object.keys(env).some((k) => k.toUpperCase() === 'OPENSPEC_TELEMETRY' && env[k] !== undefined);
+// newer one comes with a kit update. Names are case-insensitive only on Windows.
+export function openspecEnv(env = process.env, platform = process.platform) {
+  const own = platform === 'win32'
+    ? Object.keys(env).some((k) => k.toUpperCase() === 'OPENSPEC_TELEMETRY' && env[k] !== undefined)
+    : env.OPENSPEC_TELEMETRY !== undefined;
   return { ...env, ...(own ? {} : { OPENSPEC_TELEMETRY: '0' }), OPENSPEC_NO_UPDATE_CHECK: '1' };
 }
 

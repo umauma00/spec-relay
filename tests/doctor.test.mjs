@@ -156,9 +156,11 @@ test('the kit runs OpenSpec with telemetry off unless the person set OPENSPEC_TE
   assert.equal(openspecEnv({ PATH: 'x' }).OPENSPEC_NO_UPDATE_CHECK, '1');
   assert.equal(openspecEnv({ OPENSPEC_TELEMETRY: '1' }).OPENSPEC_TELEMETRY, '1');
   // Windows names are case-insensitive: a person's own value is kept, not doubled.
-  const mixed = openspecEnv({ OpenSpec_Telemetry: '1' });
+  const mixed = openspecEnv({ OpenSpec_Telemetry: '1' }, 'win32');
   assert.equal(mixed.OpenSpec_Telemetry, '1');
   assert.equal(mixed.OPENSPEC_TELEMETRY, undefined);
+  // Elsewhere OpenSpec reads only the upper-case name, so the kit default still applies.
+  assert.equal(openspecEnv({ openspec_telemetry: '1' }, 'linux').OPENSPEC_TELEMETRY, '0');
   const none = () => null;
   const check = (env) => checkTelemetry({ ...en, env, platform: 'linux', readFile: none });
   assert.equal(check({}).level, 'ok');
@@ -166,6 +168,10 @@ test('the kit runs OpenSpec with telemetry off unless the person set OPENSPEC_TE
   assert.equal(check({ OPENSPEC_TELEMETRY: '0' }).level, 'ok');
   assert.equal(check({ OPENSPEC_TELEMETRY: '1' }).level, 'info');
   assert.equal(check({ OPENSPEC_TELEMETRY: '1', DO_NOT_TRACK: '1' }).level, 'ok');
+  assert.match(check({ openspec_telemetry: '1' }).message, /by default/);
+  const win = (env) => checkTelemetry({ ...en, env, platform: 'win32', readFile: none });
+  assert.equal(win({ OpenSpec_Telemetry: '1' }).level, 'info');
+  assert.match(win({}).message, /by default/);
 });
 
 test('git: missing, refused, not a repository, a subfolder, long paths', () => {

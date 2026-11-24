@@ -224,7 +224,8 @@ export function checkOpenspec(ctx) {
 // The kit runs OpenSpec with OPENSPEC_TELEMETRY=0 unless the person set the
 // variable themselves (openspec.mjs, openspecEnv); then OpenSpec's own rules apply.
 export function checkTelemetry(ctx) {
-  if (setTo(ctx.env, 'OPENSPEC_TELEMETRY') === undefined) {
+  const own = ctx.platform === 'win32' ? setTo(ctx.env, 'OPENSPEC_TELEMETRY') !== undefined : ctx.env.OPENSPEC_TELEMETRY !== undefined;
+  if (!own) {
     return { id: 'telemetry', level: 'ok', message: ctx.t('キットが起動する OpenSpec は利用統計を送りません（既定で OPENSPEC_TELEMETRY=0 を渡します）。', 'OpenSpec run by the kit sends no usage statistics (the kit passes OPENSPEC_TELEMETRY=0 by default).') };
   }
   const off = telemetryOff(ctx.env, ctx.platform, ctx.readFile);

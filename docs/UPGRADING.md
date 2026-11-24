@@ -4,6 +4,10 @@
 
 導入スクリプトが `openspec/spec-relay/tools/` の package.json か package-lock.json を「衝突」と表示したときは、新しいキットが固定する OpenSpec の版が変わっています。その2つを消してから、導入スクリプトをもう一度実行してください。
 
+## 0.21.0 から更新するとき
+
+キットが起動する OpenSpec は、既定で利用統計を送らなくなりました（環境変数 `OPENSPEC_TELEMETRY=0` を渡します。自分で `OPENSPEC_TELEMETRY` を設定している場合はその値が優先です）。導入のやり直しは要りません。README の詳細は docs へ移しました（[README](../README.md#ドキュメント) の一覧）。
+
 ## 0.20.0 から更新するとき
 
 0.21.0 で、**すべてのシナリオに自動の確認**を付けるようになり、比べ方 B2（画面）と C（web の画面の見た目）をキットの `e2e.mjs` が Playwright で行うようになりました（[詳しく](E2E.md)）。移行先の設計・port・仕上げのスキーマの説明文が変わったので、`openspec/schemas/spec-relay-*` を削除してから導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。archive 済みの change はそのままです。
