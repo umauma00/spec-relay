@@ -110,6 +110,21 @@ export function baseUrl(text, allow = []) {
 
 // --- encodings ----------------------------------------------------------------
 
+// Windows-1252 as the WHATWG Encoding Standard reads it. Node.js 22.20 (ICU 77)
+// reads bytes 0x80-0x9F as C1 controls instead (fixed in later releases), so the
+// kit decodes this encoding itself. Its labels also cover latin1 and iso-8859-1.
+const CP1252_HIGH = '\u20ac\u0081\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u008d\u017d\u008f\u0090\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u009d\u017e\u0178';
+function decodeCp1252(bytes) {
+  let out = '';
+  for (const b of bytes) out += b >= 0x80 && b <= 0x9f ? CP1252_HIGH[b - 0x80] : String.fromCharCode(b);
+  return out;
+}
+// A TextDecoder, except that windows-1252 is read as above.
+function textDecoder(label, options) {
+  const decoder = new TextDecoder(label, options);
+  return decoder.encoding === 'windows-1252' ? { encoding: decoder.encoding, decode: decodeCp1252 } : decoder;
+}
+
 const MULTI = new Set(['shift_jis', 'euc-jp', 'iso-2022-jp', 'big5', 'euc-kr', 'gbk', 'gb18030', 'utf-16le', 'utf-16be', 'replacement', 'x-user-defined']);
 const encoders = new Map();
 
@@ -119,11 +134,11 @@ const encoders = new Map();
 // every byte sequence of the encoding once.
 export function encoderFor(label) {
   let name;
-  try { name = new TextDecoder(charsetName(label)).encoding; } catch { return null; }
+  try { name = textDecoder(charsetName(label)).encoding; } catch { return null; }
   if (name === 'utf-8') return (s) => Buffer.from(s, 'utf8');
   if (encoders.has(name)) return encoders.get(name);
   if (MULTI.has(name) && name !== 'shift_jis' && name !== 'euc-jp') return null;
-  const decoder = new TextDecoder(name, { fatal: true });
+  const decoder = textDecoder(name, { fatal: true });
   const table = new Map();
   const put = (bytes) => {
     let ch;
@@ -167,7 +182,7 @@ const charsetName = (label) => CHARSET_ALIASES.get(String(label).trim().toLowerC
 function decodeText(bytes, labels) {
   for (const label of labels) {
     if (!label) continue;
-    try { return new TextDecoder(charsetName(label)).decode(bytes); } catch { /* an unknown name: the next one */ }
+    try { return textDecoder(charsetName(label)).decode(bytes); } catch { /* an unknown name: the next one */ }
   }
   return new TextDecoder('utf-8').decode(bytes);
 }
@@ -192,12 +207,11 @@ const ENTITIES = new Map(Object.entries({
   larr: '←', rarr: '→', uarr: '↑', darr: '↓', harr: '↔', rArr: '⇒', lArr: '⇐', le: '≤', ge: '≥', ne: '≠', frac12: '½', frac14: '¼', frac34: '¾',
   sup2: '²', sup3: '³', micro: 'µ', iexcl: '¡', iquest: '¿', shy: '', zwnj: '', zwj: '', lrm: '', rlm: '',
 }));
-const CP1252 = new TextDecoder('windows-1252');
 const unescape = (s) => s.replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]*);/gi, (whole, name) => {
   if (name[0] !== '#') return ENTITIES.get(name) ?? ENTITIES.get(name.toLowerCase()) ?? whole;
   const code = name[1].toLowerCase() === 'x' ? parseInt(name.slice(2), 16) : Number(name.slice(1));
   // &#150; is a dash in every browser: 128-159 are read as Windows-1252.
-  if (code >= 0x80 && code <= 0x9f) return CP1252.decode(Uint8Array.of(code));
+  if (code >= 0x80 && code <= 0x9f) return decodeCp1252([code]);
   try { return String.fromCodePoint(code); } catch { return whole; }
 });
 const clean = (s) => unescape(s).replace(/\s+/g, ' ').trim();
