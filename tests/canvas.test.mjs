@@ -91,7 +91,7 @@ test('the server serves the pages and images under its token, and nothing else',
     const base = `http://127.0.0.1:${server.port}/${server.token}`;
     const review = await fetchText(server.url('extract-auth-login'));
     assert.equal(review.status, 200);
-    assert.match(review.text, /class="item k-req is-open" id="R2"/);
+    assert.match(review.text, /class="item k-req is-open is-mine st-open" id="R2"/);
     assert.match(review.text, /<img src="\.\.\/screens\/login\.png"/);
     assert.match(review.headers.get('content-security-policy'), /script-src 'nonce-[^']+'/);
     assert.equal((await fetchText(`${base}/r/openspec/spec-relay/screens/login.png`)).text, 'PNG');
@@ -139,7 +139,7 @@ test('the page of an active change writes review.md for the person, and only tha
     assert.equal(first.review.reviewer, null);
     assert.match((await fetchText(server.url('extract-auth-login'))).text, /id="edit-box"[\s\S]*id="edit-reviewer"|id="edit-reviewer"[\s\S]*id="edit-box"/);
     const reviewHtml = (await fetchText(server.url('extract-auth-login'))).text;
-    assert.match(reviewHtml, /<li>正しければ「確認済みにする」を押す/);
+    assert.match(reviewHtml, /<li>正しければ「確認済みにする」、違えば「修正を依頼」/);
     assert.doesNotMatch(reviewHtml, /にして作り直す|作り直してください/);
     assert.equal((await config('progress')).review, null, 'other pages write nothing');
     assert.equal((await config('2026-11-01-extract-old')).review, null, 'an archived change is a record');
@@ -344,4 +344,42 @@ export async function joinSession(config) { globalThis.__canvas = { config, sent
   } finally {
     for (const id of opened) await canvas.onClose({ instanceId: id });
   }
+});
+
+test('the review page asks for a change or a hold, and sends the open change requests to the chat at once', async () => {
+  const dir = repo();
+  write(dir, 'openspec/changes/extract-auth-login/review.md', 'Reviewer: Uma\n\n## 1. Requirements\n- [x] R1 Password\n- [ ] R2 Lockout\n');
+  const asked = [];
+  const server = await startServer({ root: dir, log: () => {}, ask: async (m) => asked.push(m) });
+  try {
+    const base = `http://127.0.0.1:${server.port}/${server.token}`;
+    const page = 'openspec/spec-relay/views/extract-auth-login.html';
+    const config = async () => JSON.parse((await fetchText(server.url('extract-auth-login'))).text.match(/<script type="application\/json" id="canvas-config">(.*?)<\/script>/)[1]);
+    const edit = async (body) => (await fetch(`${base}/review`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'review' }, body: JSON.stringify({ page, ...body }) })).json();
+    const fixes = (headers = { 'X-Spec-Relay': 'fixes' }) => fetch(`${base}/fixes`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ page }) });
+    const first = await config();
+    assert.equal(first.review.fixes, 0);
+    assert.equal((await fixes()).status, 409, 'nothing to send yet');
+    const fixed = await edit({ action: 'fix', id: 'R1', value: 'Lock after 5, not 3', hash: first.review.hash });
+    const held = await edit({ action: 'hold', id: 'R2', value: 'ask security', hash: fixed.hash });
+    assert.equal(held.ok, true);
+    const file = path.join(dir, 'openspec/changes/extract-auth-login/review.md');
+    assert.equal(fs.readFileSync(file, 'utf8'), 'Reviewer: Uma\n\n## 1. Requirements\n- [ ] R1 Password\n  - fix: Lock after 5, not 3\n- [ ] R2 Lockout\n  - hold: ask security\n');
+    const after = await config();
+    assert.deepEqual(after.review.items.map((i) => [i.id, i.state]), [['R1', 'fix'], ['R2', 'hold']]);
+    assert.equal(after.review.fixes, 1);
+    const html = (await fetchText(server.url('extract-auth-login'))).text;
+    assert.match(html, /id="send-fixes">修正依頼を AI に送る（1 件）<\/button>/);
+    assert.match(html, /keepPlace/, 'the page keeps its place across reloads');
+    assert.equal((await fixes({})).status, 403, 'only from its own page');
+    assert.equal((await fixes()).status, 200);
+    assert.equal(asked.length, 1);
+    assert.match(asked[0].prompt, /^\[canvas\] extract-auth-login のレビューで、直してほしい項目が 1 件あります。\n- R1: Lock after 5, not 3\n[\s\S]*"  - fixed: <what you changed>"[\s\S]*not an approval/);
+    const tick = await edit({ action: 'tick', id: 'R1', hash: held.hash });
+    assert.equal(tick.code, 'openFix');
+    const back = await edit({ action: 'withdraw', id: 'R1', hash: held.hash });
+    assert.equal(back.ok, true);
+    assert.equal(fs.readFileSync(file, 'utf8'), 'Reviewer: Uma\n\n## 1. Requirements\n- [ ] R1 Password\n- [ ] R2 Lockout\n  - hold: ask security\n');
+    assert.equal(fs.readFileSync(path.join(dir, 'openspec/spec-relay/local/canvas-log.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l).action).join(','), 'fix,hold,withdraw');
+  } finally { await server.close(); }
 });

@@ -125,5 +125,10 @@ apply:
     crosscheck verdict, and ask them to accept it or ask for a change.
     - Tick a box only after the reviewer explicitly accepts that item in this
       conversation, or when the reviewer ticked it themselves.
+    - A line `  - fix: ...` under an item is the reviewer asking for a change
+      (written in the file or with the canvas); `  - hold: ...` means they
+      cannot decide yet. Answer each fix by correcting the artifacts and
+      writing `  - fixed: <what you changed>` under it; keep the item
+      unticked. Never delete or reword the reviewer's notes.
     When every box is ticked and `gate.mjs review` passes, archive only after
     the reviewer says so. Archiving merges the delta into the baseline spec.

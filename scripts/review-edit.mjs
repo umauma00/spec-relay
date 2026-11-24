@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { CANVAS_LOG, PLACEHOLDER, plain } from './gate.mjs';
+import { CANVAS_LOG, PLACEHOLDER, REMARK, openFix, plain } from './gate.mjs';
 import { ignoreLocal } from './metrics.mjs';
 
 const CHECKBOX = /^(\s*(?:[-*+]|\d+[.)])\s+\[)(.?)(\]\s*)(.*)$/;
@@ -61,6 +61,41 @@ function findItem(lines, id) {
   return null;
 }
 
+// The lines that belong to the item on line `index`: the indented lines after it
+// (its notes), up to the next item, heading or unindented line. Returns the
+// note lines ({ index, kind }) as gate.mjs reads them and where a new note goes.
+function itemNotes(lines, index) {
+  const bare = masked(lines.join('\n')).split('\n');
+  // Whether a comment is still open at the end of each line: a note never goes inside one.
+  const open = [];
+  let inside = false;
+  for (const line of lines) {
+    let at = 0;
+    for (;;) {
+      const next = inside ? line.indexOf('-->', at) : line.indexOf('<!--', at);
+      if (next < 0) break;
+      inside = !inside;
+      at = next + (inside ? 4 : 3);
+    }
+    open.push(inside);
+  }
+  const notes = [];
+  let end = index;
+  for (let i = index + 1; i < lines.length; i += 1) {
+    const line = bare[i];
+    if (CHECKBOX.test(line) || FENCE.test(line) || /^#{1,6}\s/.test(line)) break;
+    const r = line.match(REMARK);
+    if (r) { notes.push({ index: i, kind: r[1].toLowerCase() }); if (!open[i]) end = i; continue; }
+    if (!lines[i].trim()) continue;
+    // Read as gate.mjs reads it: a comment (blank once comments are left out)
+    // does not end the item, other unindented text does.
+    if (line.trim() && !/^\s/.test(line)) break;
+    if (!open[i]) end = i;
+  }
+  return { notes, end };
+}
+
+
 // The line index of "Reviewer:" as gate.mjs reads it (outside comments), or -1.
 function reviewerLine(lines) {
   return masked(lines.join('\n')).split('\n').findIndex((l) => /^Reviewer:/.test(l));
@@ -73,7 +108,8 @@ export function reviewerOf(text) {
   return name && !PLACEHOLDER.test(name) ? name : null;
 }
 
-// The new text of review.md, or { problem, code }. `action` is tick, untick, decision or reviewer.
+// The new text of review.md, or { problem, code }. `action` is tick, untick,
+// decision, reviewer, fix, hold or withdraw.
 export function editReview(text, { action, id, value }) {
   const bom = text.startsWith('\uFEFF') ? '\uFEFF' : '';
   const doc = split(text.slice(bom.length));
@@ -108,8 +144,35 @@ export function editReview(text, { action, id, value }) {
   const item = findItem(lines, id);
   if (!item) return { problem: `no line for ${id} in review.md`, code: 'noLine' };
   const [, open, mark, close, rest] = item.m;
+  if (action === 'fix' || action === 'hold') {
+    // "This is wrong, change it" or "I cannot decide yet": a note under the item,
+    // and the item is open again. The note is one line of the person's words.
+    const note = oneLine(value, 500);
+    if (!note) return { problem: 'empty note', code: 'emptyValue' };
+    const { end } = itemNotes(lines, item.index);
+    const indent = `${open.match(/^\s*/)[0]}  `;
+    const eol = ends[item.index] ?? ends[0] ?? '\n';
+    lines[item.index] = `${open} ${close}${rest}`;
+    lines.splice(end + 1, 0, `${indent}- ${action}: ${note}`);
+    // Line i ends with ends[i]: the new line takes the line end of the line before it, which gets one.
+    if (end >= ends.length) ends.push(eol);
+    ends.splice(end + 1, 0, eol);
+    ends.length = Math.min(ends.length, lines.length - 1);
+    return done();
+  }
+  if (action === 'withdraw') {
+    // Takes back the person's last note (a fix the agent has not answered, or a hold).
+    const { notes } = itemNotes(lines, item.index);
+    const last = notes[notes.length - 1];
+    if (!last || last.kind === 'fixed') return { problem: `no note of yours to withdraw under ${id}`, code: 'noNote' };
+    lines.splice(last.index, 1);
+    ends.splice(last.index, 1);
+    ends.length = Math.min(ends.length, lines.length - 1);
+    return done();
+  }
   if (action === 'tick' || action === 'untick') {
     if (action === 'tick' && id.startsWith('Q') && !decisionOf(rest)) return { problem: 'write the decision first', code: 'needDecision' };
+    if (action === 'tick' && openFix(itemNotes(lines, item.index).notes)) return { problem: `${id} has a fix request the agent has not answered; withdraw it first`, code: 'openFix' };
     lines[item.index] = `${open}${action === 'tick' ? 'x' : ' '}${close}${rest}`;
     return done();
   }

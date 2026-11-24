@@ -20,10 +20,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkboxes, questionIds, tableRows, changeSchema, archivedChange } from './gate.mjs';
+import { checkboxes, questionIds, tableRows, changeSchema, archivedChange, REMARK, noteState } from './gate.mjs';
 import { guideView, guidePage, guideWords, modules as guideModules, moduleKey, GUIDE_CSS } from './guide.mjs';
 import { ledgerSummary } from './sites.mjs';
 import { leftoverRows } from './finish.mjs';
+import { itemGuide, itemTitle, guideWords as howWords } from './review-guide.mjs';
+import { surveyFacts, contextCard, surveyAid, inventorySummary, SURVEY_CSS } from './survey-view.mjs';
+import { docAid, DOC_AID_CSS } from './doc-aid.mjs';
 
 // ---------------------------------------------------------------- labels
 
@@ -37,23 +40,29 @@ const LABELS = {
     document: '文書', requirements: '要件', screens: '画面', questions: '質問', contexts: 'コンテキスト', other: 'その他',
     reviewer: 'レビュー担当', notNamed: '未記入', scope: '対象', purpose: '目的', appendix: '付録', toc: '目次', skip: '本文へ移動', railLabel: '目次と進み具合',
     confirmed: '確認済み', open: '未確認', sealDone: '済', sealOpen: '未',
-    remain: (n) => `<b>${n}</b>件が未確認`, allDone: '<b>0</b>すべて確認済み', remainShort: '件が未確認',
+    remain: (n) => `<b>${n}</b>件 あなたの番`, allDone: '<b>0</b>すべて確認済み', noneMine: '<b>0</b>あなたの番の項目はありません', remainShort: '件 あなたの番',
     of: (all, done) => `${all} 件中 ${done} 件を確認済み`, left: '残り', sheet: '項目ごとの状態',
-    legendDone: 'review.md でチェック済み', legendOpen: '未確認',
-    firstOpen: (id) => `最初の未確認 ${id} へ ↓`, show: '表示', all: 'すべて', onlyOpen: '未確認のみ', allClear: 'この区分に未確認の項目はありません。',
-    howto: ['項目を読む', '根拠と照らし合わせる', '正しければ review.md の行を <code>[x]</code> にして作り直す'],
+    legendDone: '確認済み', legendOpen: '未確認',
+    firstOpen: (id) => `次に見る ${id} へ ↓`, show: '表示', all: 'すべて', onlyOpen: 'あなたの番だけ', allClear: 'この区分に、あなたの番の項目はありません。',
+    howto: ['項目を読む', '「確認すること」に沿って根拠と照らし合わせる', '正しければ review.md の行を <code>[x]</code> に。違うときはその行のすぐ下に <code>- fix: 直してほしいこと</code>、決められないときは <code>- hold: 理由</code> を書き足して（行頭に空白 2 つ）、チャットで AI に伝える'],
+    states: { done: '確認済み', open: '未確認', fix: '修正依頼中', hold: '保留中', fixed: '再確認待ち' },
+    seals: { done: '済', open: '未', fix: '直', hold: '保', fixed: '再' },
+    remarks: { fix: 'あなた: 修正依頼', hold: 'あなた: 保留理由', fixed: 'AI: 直した内容' },
+    split: (n) => [n.fixed ? `うち再確認待ち ${n.fixed}` : '', n.fix + n.hold ? `ほかに ${[['AI の対応待ち', n.fix], ['保留中', n.hold]].filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join('・')}` : ''].filter(Boolean).join('。'),
+    folded: '内容を表示', appendixHint: '参照用の元の Markdown です。必要なときだけ開いてください。',
     scenario: 'シナリオ', evidence: '根拠（元コード）', source: '元コード', tests: '既存のテスト', crosscheck: '照合（AI の再確認）', lines: '行',
+    screenLabels: { entry: '入口', layout: 'レイアウト', look: '見た目', scripts: 'スクリプト', label: 'ラベル', kind: '種類', required: '必須', 'format and limits': '形式と制限', default: '初期値', editable: '編集可', 'look details': '見た目の詳細', item: '項目', 'element or control': '要素・コントロール', details: '詳細', actions: '操作', messages: 'メッセージ', transitions: '遷移' }, noneWord: 'なし', verdicts: { confirmed: '一致', mismatch: '不一致', unclear: '不明', question: '質問へ' },
     noTrace: 'trace.md に記載がありません', unreadable: 'ファイルを読めませんでした', truncated: '長いため先頭のみ表示', encoding: (e) => `文字コード ${e} を変換して表示`, dedent: (n) => `字下げを ${n} 文字詰めて表示`,
     decision: '判断', noDecision: (id) => `未記入 — review.md の ${id} の行に decision: を書きます`,
     leftoverKind: '種類', leftoverWhere: '場所', leftoverClass: '分類（案）', leftoverReason: '理由', noLeftover: '同じ id の行が leftovers.md にありません',
     leftoverKinds: { todo: '実装の積み残し TODO(port)', 'follow-up': '後回しの作業', risk: 'リスク', verification: '実行できなかった比較', flow: 'テストのないコンテキスト間の流れ' },
     leftoverClasses: { 'before-release': '切替の前に直す', 'after-release': '切替の後の課題', 'wont-fix': '直さない' },
     noReviewRow: 'review.md に項目がありません', noReq: '同じ名前の要件が仕様にありません', noScreen: '同じ名前の画面が screens.md にありません', noContext: '同じ id のコンテキストが context-map.md にありません', noQuestion: 'questions.md に本文がありません',
-    tickedNoDecision: 'チェック済みですが、判断が未記入です', decisionNoTick: '判断は書かれていますが、チェックされていません',
+    tickedNoDecision: '確認済みですが、判断が未記入です', decisionNoTick: '判断は書かれていますが、まだ確認済みにしていません',
     was: '旧', now: '新', noBaseline: '現在の仕様（openspec/specs）に同じ名前の要件がありません',
     screenshot: 'スクリーンショット', openImage: '原寸で開く', noImage: '画像ファイルがありません',
-    prevOpen: '前の未確認へ', nextOpen: '次の未確認 ↓',
-    keysOn: '1 文字キーで移動する', keysList: 'キーの一覧', keys: [['j', 'k', '次／前の項目'], ['n', 'p', '次／前の未確認'], ['o', '', '元コードを開閉'], ['u', '', '未確認のみ表示']],
+    prevOpen: '前のあなたの番へ', nextOpen: '次へ ↓',
+    keysOn: '1 文字キーを使う', keysList: 'キーの一覧', keys: [['j', 'k', '次／前の項目'], ['n', 'p', '次／前のあなたの番'], ['o', '', '元コードと折りたたみを開閉'], ['u', '', 'あなたの番だけ表示']],
     generated: '生成', archived: 'archive 済み',
     note: 'この画面は表示用です。正は Markdown のファイルで、判断は review.md に記録します。ファイルを直したら作り直してください。',
     ledger: '抜けの確認', ledgerTitle: '抜けの確認（箇所台帳）',
@@ -76,23 +85,28 @@ const LABELS = {
     document: 'Document', requirements: 'Requirements', screens: 'Screens', questions: 'Questions', contexts: 'Contexts', other: 'Other',
     reviewer: 'Reviewer', notNamed: 'not named', scope: 'Scope', purpose: 'Purpose', appendix: 'Appendix', toc: 'Contents', skip: 'Skip to content', railLabel: 'Contents and progress',
     confirmed: 'Confirmed', open: 'Open', sealDone: '✓', sealOpen: '–',
-    remain: (n) => `<b>${n}</b>open`, allDone: '<b>0</b>all confirmed', remainShort: 'open',
+    remain: (n) => `<b>${n}</b>for you to check`, allDone: '<b>0</b>all confirmed', noneMine: '<b>0</b>nothing for you now', remainShort: 'your turn',
     of: (all, done) => `${done} of ${all} confirmed`, left: 'left', sheet: 'State of each item',
-    legendDone: 'ticked in review.md', legendOpen: 'open',
-    firstOpen: (id) => `First open item ${id} ↓`, show: 'Show', all: 'All', onlyOpen: 'Open only', allClear: 'No open items in this group.',
-    howto: ['Read the item', 'Compare it with the evidence', 'If it is right, tick its line in review.md (<code>[x]</code>) and render again'],
-    scenario: 'Scenario', evidence: 'Evidence (source code)', source: 'Source', tests: 'Existing tests', crosscheck: 'Crosscheck (second look by the AI)', lines: '',
+    legendDone: 'confirmed', legendOpen: 'open',
+    firstOpen: (id) => `Next to look at: ${id} ↓`, show: 'Show', all: 'All', onlyOpen: 'Your turn only', allClear: 'Nothing in this group is your turn.',
+    howto: ['Read the item', 'Compare it with the evidence, following "Check"', 'If it is right, tick its line in review.md (<code>[x]</code>). If it is wrong, add a line <code>- fix: what should change</code> right under it; if you cannot decide yet, <code>- hold: why</code> (indented by two spaces), and tell the agent in the chat'],
+    states: { done: 'Confirmed', open: 'Open', fix: 'Change requested', hold: 'On hold', fixed: 'Changed, look again' },
+    seals: { done: '✓', open: '–', fix: '!', hold: 'H', fixed: 'R' },
+    remarks: { fix: 'You: change requested', hold: 'You: why on hold', fixed: 'Agent: what changed' },
+    split: (n) => [n.fixed ? `${n.fixed} of them to look again` : '', n.fix + n.hold ? `besides: ${[['waiting for the agent', n.fix], ['on hold', n.hold]].filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(', ')}` : ''].filter(Boolean).join('. '),
+    folded: 'Show the content', appendixHint: 'The Markdown behind the page, for reference. Open it when you need it.',
+    scenario: 'Scenario', evidence: 'Evidence (source code)', source: 'Source', tests: 'Existing tests', crosscheck: 'Crosscheck (second look by the AI)', lines: '', noneWord: 'none',
     noTrace: 'No entry in trace.md', unreadable: 'Could not read the file', truncated: 'long; only the beginning is shown', encoding: (e) => `decoded from ${e}`, dedent: (n) => `indentation reduced by ${n} characters`,
     decision: 'Decision', noDecision: (id) => `blank — write decision: on the ${id} line of review.md`,
     leftoverKind: 'Kind', leftoverWhere: 'Where', leftoverClass: 'Class (proposed)', leftoverReason: 'Reason', noLeftover: 'No row of this id in leftovers.md',
     leftoverKinds: { todo: 'TODO(port) left in the code', 'follow-up': 'Work moved to after the migration', risk: 'Risk', verification: 'Comparison that did not run', flow: 'Cross-context flow without a test' },
     leftoverClasses: { 'before-release': 'Fix before the switch', 'after-release': 'Known issue after the switch', 'wont-fix': 'Accepted as it is' },
     noReviewRow: 'No item in review.md', noReq: 'No requirement of this name in the specs', noScreen: 'No screen of this name in screens.md', noContext: 'No context of this id in context-map.md', noQuestion: 'No text in questions.md',
-    tickedNoDecision: 'Ticked, but the decision is blank', decisionNoTick: 'A decision is written, but the item is not ticked',
+    tickedNoDecision: 'Confirmed, but the decision is blank', decisionNoTick: 'A decision is written, but the item is not confirmed yet',
     was: 'Old', now: 'New', noBaseline: 'No requirement of this name in the current specs (openspec/specs)',
     screenshot: 'Screenshot', openImage: 'Open full size', noImage: 'Image file not found',
-    prevOpen: 'Previous open item', nextOpen: 'Next open ↓',
-    keysOn: 'Single-key shortcuts', keysList: 'Key list', keys: [['j', 'k', 'next / previous item'], ['n', 'p', 'next / previous open item'], ['o', '', 'fold or unfold the source'], ['u', '', 'open items only']],
+    prevOpen: 'Previous for you', nextOpen: 'Next ↓',
+    keysOn: 'Use single-key shortcuts', keysList: 'Key list', keys: [['j', 'k', 'next / previous item'], ['n', 'p', 'next / previous for you'], ['o', '', 'fold or unfold the source and folds'], ['u', '', 'your turn only']],
     generated: 'Generated', archived: 'archived',
     note: 'This page is a view. The Markdown files are the source of truth and decisions go into review.md. Render again after changing them.',
     ledger: 'Omission check', ledgerTitle: 'Omission check (site ledger)',
@@ -412,12 +426,14 @@ function snippet(root, ref, L) {
 
 const DIFF_CELLS = 1_000_000;
 
-// Character-level difference by longest common subsequence: a list of
-// [op, text] with op '=', '-' (only in a) or '+' (only in b). Null when the
-// texts are too long for the table; the caller then shows whole sentences.
+// Difference by longest common subsequence: a list of [op, text] with op '='
+// '-' (only in a) or '+' (only in b). Numbers and English words change as a whole
+// (48 to 24, not 2̲48̶); Japanese text by the character. Null when the texts are
+// too long for the table; the caller then shows whole sentences.
+const TOKEN = /\d+(?:[.,]\d+)*|[A-Za-z_][A-Za-z0-9_]*|\s+|./gsu;
 export function diffChars(a, b) {
-  const A = [...a];
-  const B = [...b];
+  const A = a.match(TOKEN) ?? [];
+  const B = b.match(TOKEN) ?? [];
   let head = 0;
   while (head < A.length && head < B.length && A[head] === B[head]) head += 1;
   let tail = 0;
@@ -468,26 +484,44 @@ export function parseReview(text) {
   const groups = [];
   let group = null;
   let fenced = false;
-  for (const line of (text ?? '').split(/\r?\n/)) {
-    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+  let last = null;
+  // Comments blanked line by line (keeping the line breaks), so an example in one is no note.
+  const bare = (text ?? '').replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\r\n]/g, ' ')).split(/\r?\n/);
+  for (const [n, line] of (text ?? '').split(/\r?\n/).entries()) {
+    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; last = null; continue; }
     if (fenced) continue;
     const h = line.match(/^##\s+(.*?)\s*#*\s*$/);
-    if (h) { group = { title: plainText(h[1]).replace(/^\d+[.)]\s*/, ''), items: [] }; groups.push(group); continue; }
+    if (h) { group = { title: plainText(h[1]).replace(/^\d+[.)]\s*/, ''), items: [] }; groups.push(group); last = null; continue; }
     const [box] = checkboxes(line);
-    if (!box) continue;
+    if (!box) {
+      // "  - fix: ..." / "  - hold: ..." / "  - fixed: ..." under an item: its notes.
+      const r = last?.id ? bare[n].match(REMARK) : null;
+      if (r) last.remarks.push({ kind: r[1].toLowerCase(), text: r[2].trim() });
+      else if (bare[n].trim() && !/^\s/.test(bare[n]) || /^#/.test(line)) last = null;
+      continue;
+    }
     if (!group) { group = { title: '', items: [] }; groups.push(group); }
     const m = box.plain.match(/^([A-Za-z])(\d+)\b\s*[.:)-]?\s*(.*)$/);
-    if (!m) { group.items.push({ id: '', letter: '', done: box.done, title: stripComments(box.body).trim(), decision: null, key: norm(box.plain), plain: box.plain }); continue; }
+    if (!m) { last = { id: '', letter: '', done: box.done, title: stripComments(box.body).trim(), decision: null, key: norm(box.plain), plain: box.plain, remarks: [] }; group.items.push(last); continue; }
     const rest = stripComments(box.body).replace(/^\W*[A-Za-z]\d+[\s*_\]`).:-]*/, '');
     const [title, decision] = rest.split(/\bdecision:/i);
-    group.items.push({
+    last = {
       id: `${m[1].toUpperCase()}${Number(m[2])}`, letter: m[1].toUpperCase(), done: box.done,
       title: title.trim().replace(/:$/, '').trim(), decision: decision === undefined ? null : decision.trim(),
-      key: norm(m[3].split(/\bdecision:/i)[0]).replace(/:$/, '').trim(), plain: box.plain,
-    });
+      key: norm(m[3].split(/\bdecision:/i)[0]).replace(/:$/, '').trim(), plain: box.plain, remarks: [],
+    };
+    group.items.push(last);
   }
+  for (const item of groups.flatMap((g) => g.items)) item.state = itemState(item);
   return groups;
 }
+
+// Where an item stands: done (ticked), fix (the reviewer asked for a change the
+// agent has not answered), fixed (the agent answered; the reviewer looks again),
+// hold (the reviewer cannot decide yet) or open.
+export const itemState = (item) => noteState(item.done, item.remarks);
+// The reviewer's turn: open, or fixed by the agent and waiting to be looked at again.
+const mineState = (state) => state === 'open' || state === 'fixed';
 
 // "### <Word>: <name>" blocks of a file, each with the lines up to the next
 // heading of the same or a higher level.
@@ -579,7 +613,22 @@ function findChange(root, name) {
   return found ? { dir: found, archived: true } : null;
 }
 
-const seal = (done, L) => `<span class="seal ${done ? 'is-done' : 'is-open'}"><b aria-hidden="true">${escapeHtml(done ? L.sealDone : L.sealOpen)}</b><span>${escapeHtml(done ? L.confirmed : L.open)}</span></span>`;
+const seal = (state, L) => `<span class="seal ${state === 'done' ? 'is-done' : 'is-open'} st-${state}"><b aria-hidden="true">${escapeHtml(L.seals[state])}</b><span>${escapeHtml(L.states[state])}</span></span>`;
+
+// What to check on an item, against what, and what to do when it is wrong (review-guide.mjs).
+function howHtml(g, code) {
+  const W = howWords(code);
+  return `<ol class="how-check">${g.check.map((c) => `<li>${escapeHtml(c)}</li>`).join('')}</ol>
+<p class="how-line"><span class="label">${escapeHtml(W.against)}</span><span>${escapeHtml(g.against)}</span></p>
+${g.wrong ? `<p class="how-line"><span class="label">${escapeHtml(W.wrong)}</span><span>${escapeHtml(g.wrong)}</span></p>` : ''}`;
+}
+export const howBox = (g, code) => `<div class="how"><p class="how-title">${escapeHtml(howWords(code).check)}</p>${howHtml(g, code)}</div>`;
+
+// The notes under an item in review.md: the reviewer's fix and hold, the agent's fixed.
+function remarksHtml(remarks, L) {
+  if (!remarks?.length) return '';
+  return `<ol class="remarks">${remarks.map((r) => `<li class="rm-${r.kind}"><span class="label">${escapeHtml(L.remarks[r.kind])}</span><span>${inline(r.text)}</span></li>`).join('')}</ol>`;
+}
 const cautionsHtml = (list) => list.map((c) => `<p class="caution">${escapeHtml(c)}</p>`).join('');
 const deltaTag = (kind, L) => (L.deltas[kind] ? `<span class="delta ${kind}">${escapeHtml(L.deltas[kind])}</span>` : '');
 const withoutId = (s) => norm(s).replace(/^[a-z]\d+\s*[.:)-]?\s*/, '');
@@ -587,7 +636,10 @@ const withoutId = (s) => norm(s).replace(/^[a-z]\d+\s*[.:)-]?\s*/, '');
 function crossLine(row, L) {
   if (!row) return '';
   const ok = /^confirmed\b/i.test(row.verdict);
-  return `<p class="tests"><span class="label">${escapeHtml(L.crosscheck)}</span><span><span${ok ? '' : ' class="caution"'}>${inline(row.verdict || '—')}</span>${row.evidence ? ` — ${inline(row.evidence)}` : ''}</span></p>`;
+  // The verdict word in the page's language, the word as written beside it.
+  const word = (row.verdict.match(/^(confirmed|mismatch|unclear|question)\b/i) ?? [])[1]?.toLowerCase();
+  const said = word && L.verdicts?.[word] ? `${escapeHtml(L.verdicts[word])}（${inline(row.verdict)}）` : inline(row.verdict || '—');
+  return `<p class="tests"><span class="label">${escapeHtml(L.crosscheck)}</span><span><span${ok ? '' : ' class="caution"'}>${said}</span>${row.evidence ? ` — ${inline(row.evidence)}` : ''}</span></p>`;
 }
 
 function scenariosHtml(req, old, c) {
@@ -633,7 +685,7 @@ ${scenariosHtml(req, old, c)}`;
     evidence += refs.map((ref) => snippet(root, ref, L)).join('\n');
     if (!refs.length && plainText(t.source)) evidence += `<p class="tests"><span class="label">${escapeHtml(L.source)}</span><span>${inline(t.source)}</span></p>`;
     const none = /^(none|なし|無し|-|—)?$/i.test(plainText(t.tests));
-    evidence += `<p class="tests"><span class="label">${escapeHtml(L.tests)}</span><span${none ? ' class="caution"' : ''}>${inline(t.tests || '—')}</span></p>`;
+    evidence += `<p class="tests"><span class="label">${escapeHtml(L.tests)}</span><span${none ? ' class="caution"' : ''}>${none ? escapeHtml(L.noneWord) : inline(t.tests)}</span></p>`;
   } else if (req.kind !== 'removed') evidence += `<p class="caution">${escapeHtml(L.noTrace)}</p>`;
   evidence += crossLine(c.cross.get(norm(req.name)), L);
   return { tag: c.amend || req.kind === 'modified' || req.kind === 'removed' ? deltaTag(req.kind, L) : '', removed: req.kind === 'removed', notes,
@@ -661,10 +713,31 @@ function screenshot(value, c) {
   return `<figure class="shot"><img src="${src}" alt="${escapeHtml(`${L.screenshot}: ${raw}`)}" loading="lazy"><figcaption><a href="${src}">${escapeHtml(L.openImage)}</a> <span class="mono">${escapeHtml(raw)}</span></figcaption></figure>`;
 }
 
+// The fixed English labels of screens.md (the template's) in the page's language.
+// The file keeps them; only the page shows the translation.
+function screenLabels(text, L) {
+  const map = L.screenLabels;
+  if (!map) return text;
+  const word = (w) => map[w.trim().toLowerCase()] ?? w;
+  return text.split('\n').map((line) => {
+    let m = line.match(/^(\s*[-*+]\s+\*\*)([^*]+)(\*\*.*)$/);
+    if (m) return `${m[1]}${word(m[2])}${m[3]}`;
+    m = line.match(/^\*\*([^*]+)\*\*\s*$/);
+    if (m) return `**${word(m[1])}**`;
+    // The first header row of a table: every cell a known label.
+    if (/^\s*\|/.test(line)) {
+      const cells = line.split('|');
+      const inner = cells.slice(1, -1).map((x) => x.trim()).filter(Boolean);
+      if (inner.length && inner.every((x) => map[x.toLowerCase()])) return cells.map((x) => (x.trim() ? ` ${word(x)} ` : x)).join('|');
+    }
+    return line;
+  }).join('\n');
+}
+
 function screenBody(it, c) {
   const shotLine = /^\s*[-*+]\s+\*\*Screenshot\*\*\s*:?\s*(.*)$/i;
   const value = it.data.body.map((l) => l.match(shotLine)).find(Boolean)?.[1] ?? '';
-  const rest = it.data.body.filter((l) => !shotLine.test(l)).join('\n');
+  const rest = screenLabels(it.data.body.filter((l) => !shotLine.test(l)).join('\n'), c.L);
   const shot = screenshot(value, c);
   return { tag: '', notes: [], html: `<div class="screen${shot ? '' : ' no-shot'}">${shot}<div class="doc">${markdown(rest, { headingOffset: 2 })}${crossLine(c.cross.get(norm(it.data.name)), c.L)}</div></div>` };
 }
@@ -687,10 +760,12 @@ function leftoverBody(it, c) {
   const { L } = c;
   const row = it.data;
   const facts = [[L.leftoverKind, L.leftoverKinds[row.kind] ?? row.kind], [L.leftoverWhere, row.where], [L.leftoverClass, L.leftoverClasses[row.klass] ?? row.klass], [L.leftoverReason, row.reason]];
-  return { tag: '', notes: [], html: `<div class="q-body"><p class="q-text">${inline(row.what)}</p><dl class="facts">${facts.filter(([, v]) => v).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${inline(v)}</dd>`).join('')}</dl></div>` };
+  const klass = L.leftoverClasses[row.klass] ?? row.klass;
+  const same = norm(plainText(row.what)) === norm(plainText(stripComments(it.title).replace(/\s+-\s*class\s*:.*$/i, '')));
+  return { tag: klass ? `<span class="klass k-${escapeHtml(String(row.klass).replace(/[^a-z-]/g, ''))}">${escapeHtml(klass)}</span>` : '', notes: [], html: `<div class="q-body">${same ? '' : `<p class="q-text">${inline(row.what)}</p>`}<dl class="facts">${facts.filter(([k, v]) => v && k !== L.leftoverClass).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${inline(v)}</dd>`).join('')}</dl></div>` };
 }
 
-function reviewView({ root, dir, schema, L, outDir }) {
+function reviewView({ root, dir, schema, L, outDir, lang = 'en' }) {
   const groups = parseReview(readText(path.join(dir, 'review.md')) ?? '');
   const review = stripComments(readText(path.join(dir, 'review.md')) ?? '');
   const reviewer = review.match(/^Reviewer:[ \t]*(.*)$/m)?.[1].trim() ?? '';
@@ -719,6 +794,10 @@ function reviewView({ root, dir, schema, L, outDir }) {
   const leftoversText = readText(path.join(dir, 'leftovers.md'));
   const leftovers = new Map(leftoverRows(leftoversText ?? '').map((row) => [row.id, row]));
   const c = { root, L, outDir, amend, baseline, cross, trace: parseTrace(readText(path.join(dir, 'trace.md'))) };
+  const survey = schema === 'spec-relay-survey' ? surveyFacts({
+    contexts, mapText, inventoryText: readText(path.join(dir, 'inventory.md')), capabilitiesText: readText(path.join(dir, 'capabilities.md')),
+    glossaryText: readText(path.join(dir, 'glossary.md')), databaseText: readText(path.join(dir, 'database.md')),
+  }) : null;
 
   // Tie each review row to the thing it names.
   const used = new Set();
@@ -763,7 +842,9 @@ function reviewView({ root, dir, schema, L, outDir }) {
   shown.forEach((group, n) => {
     group.id = `g${n + 1}`;
     group.title = L.groups[group.title.toLowerCase()] ?? (group.title || L.other);
+    group.how = '';
     for (const item of group.items) {
+      item.state ??= itemState(item);
       item.label ??= item.id || '—';
       let anchor = item.id || `x${unnamed += 1}`;
       for (let k = 2; ids.has(anchor); k += 1) anchor = `${item.id}-${k}`;
@@ -771,12 +852,34 @@ function reviewView({ root, dir, schema, L, outDir }) {
       item.anchor = anchor;
       const body = item.kind === 'req' ? requirementBody(item, c) : item.kind === 'screen' ? screenBody(item, c) : item.kind === 'q' ? questionBody(item, c)
         : item.kind === 'leftover' ? leftoverBody(item, c)
-        : item.kind === 'context' ? { tag: '', notes: [], html: `<div class="q-body"><div class="doc">${markdown(item.data.body.join('\n'), { headingOffset: 2 })}</div></div>` } : { tag: '', notes: [], html: '' };
+        : item.kind === 'context' ? { tag: '', notes: [], html: `<div class="q-body">${survey ? contextCard(survey, item.data, lang) : `<div class="doc">${markdown(item.data.body.join('\n'), { headingOffset: 2 })}</div>`}</div>` } : { tag: '', notes: [], html: '' };
+      // A survey's map items show the material they ask about (a diagram, a table, the files).
+      const aid = survey && !item.kind ? surveyAid(survey, item, lang) : !item.kind ? docAid(dir, schema, item, lang) : '';
+      if (aid) body.html = `<div class="q-body aid">${aid}</div>`;
+      // What to check: an item of its own gets its guidance inline; items of one
+      // letter share theirs at the top of the group, and keep a folded copy each.
+      const g = itemGuide(schema, item, lang);
+      // A document of this change named in the guidance links to its place in the appendix.
+      const linkDocs = (html) => html.replace(/([\w-]+)\.md/g, (m, name) => (m !== 'review.md' && !(m === 'screens.md' && screens.length) && fs.existsSync(path.join(dir, m)) ? `<a href="#doc-${name}-md">${m}</a>` : m));
+      let how = '';
+      if (g?.own) how = `<div class="q-body">${linkDocs(howBox(g, lang))}</div>`;
+      else if (g) {
+        if (!group.how) group.how = linkDocs(howBox(g, lang));
+        how = `<div class="q-body"><details class="how-fold"><summary>${escapeHtml(howWords(lang).how)}</summary>${linkDocs(howHtml(g, lang))}</details></div>`;
+      }
       const notes = [...item.notes, ...body.notes];
-      item.name = plainText(item.title) || plainText(item.data?.text ?? '') || item.label;
-      item.html = `<article class="item${body.html ? '' : ' small'}${item.kind ? ` k-${item.kind}` : ''} ${item.done ? 'is-done' : 'is-open'}${body.removed ? ' is-removed' : ''}" id="${escapeHtml(anchor)}" tabindex="-1">
-<header class="item-head"><span class="id">${escapeHtml(item.label)}</span><h3>${body.tag}${inline(item.title)}</h3>${seal(item.done, L)}</header>
-${cautionsHtml(notes)}${body.html}
+      // A finish leftover's "- class: x" is shown as its class, not as words of the title.
+      const shown = schema === 'spec-relay-finish' && item.letter === 'L' ? stripComments(item.title).replace(/\s+-\s*class\s*:.*$/i, '').trim() : item.title;
+      const ja = itemTitle(schema, plainText(item.title), lang);
+      const titleHtml = ja ? `${escapeHtml(ja)}<span class="orig">${inline(item.title)}</span>` : inline(shown);
+      item.name = ja || plainText(shown) || plainText(item.data?.text ?? '') || item.label;
+      const remarks = item.remarks?.length ? `<div class="q-body">${remarksHtml(item.remarks, L)}</div>` : '';
+      const inner = `${how}${body.html}`;
+      // A confirmed item folds its content away; its head, notes and buttons stay.
+      const content = item.done && inner ? `<details class="fold"><summary>${escapeHtml(L.folded)}</summary>${inner}</details>` : inner;
+      item.html = `<article class="item${inner ? '' : ' small'}${item.kind ? ` k-${item.kind}` : ''} ${item.done ? 'is-done' : 'is-open'}${mineState(item.state) ? ' is-mine' : ''} st-${item.state}${body.removed ? ' is-removed' : ''}" id="${escapeHtml(anchor)}" tabindex="-1">
+<header class="item-head"><span class="id">${escapeHtml(item.label)}</span><h3>${body.tag}${titleHtml}</h3>${seal(item.state, L)}</header>
+${cautionsHtml(notes)}${remarks}${content}
 </article>`;
     }
   });
@@ -797,6 +900,10 @@ ${purpose.trim() ? `<div class="purpose"><span class="label">${escapeHtml(L.purp
     if (rel === 'review.md' || (rel === 'screens.md' && screens.length)) continue;
     let text = readText(file) ?? '';
     if (rel === 'context-map.md' && contexts.length) text = withoutSection(text, /^##\s+Contexts\s*$/i);
+    if (rel === 'inventory.md' && survey) {
+      docs.push({ id: 'doc-inventory-md', title: rel.replace(/\.md$/, ''), html: inventorySummary(survey, text, lang) });
+      continue;
+    }
     if (rel === 'coverage.md' && ledger) {
       docs.push({ id: 'doc-coverage-md', title: L.ledgerTitle, html: ledgerHtml(ledger, text, L) });
       continue;
@@ -1034,12 +1141,12 @@ export function specIndex({ root, L, list, href }) {
 // and focus, ochre is a caution. No status is told by colour alone.
 const CSS = `
 :root{--paper:#ffffff;--desk:#f1f2f4;--ink:#15171c;--ink2:#4b505b;--rule:#7b808b;--hair:#d9dce1;
---shu:#b5301a;--ai:#1b4f93;--ochre:#7d5200;--code:#f4f5f7;
+--shu:#b5301a;--ai:#1b4f93;--ochre:#7d5200;--code:#f4f5f7;--lab:7.5em;
 --ui:"Yu Gothic UI","Segoe UI","Meiryo","Hiragino Sans","Noto Sans JP","Noto Sans CJK JP",system-ui,sans-serif;
 --read:"BIZ UDPGothic","Yu Gothic UI","Meiryo","Hiragino Sans","Noto Sans JP","Noto Sans CJK JP",system-ui,sans-serif;
 --mono:"BIZ UDGothic","MS Gothic","Cascadia Mono",Consolas,"Osaka-Mono","SF Mono",Menlo,"Noto Sans Mono CJK JP",ui-monospace,monospace}
 @media (prefers-color-scheme:dark){:root{--paper:#17191d;--desk:#0f1114;--ink:#e9eaed;--ink2:#a6abb6;--rule:#6d7380;--hair:#30343d;
---shu:#ff8f73;--ai:#8fbaf7;--ochre:#e2b25c;--code:#1f2228}}
+--shu:#ff7a57;--ai:#8fbaf7;--ochre:#e2b25c;--code:#1f2228}}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.75 var(--read);overflow-wrap:anywhere}
@@ -1049,7 +1156,7 @@ code,.mono{font-family:var(--mono);font-size:.92em}
 img{max-width:100%;height:auto}
 hr{border:0;border-top:1px solid var(--hair)}
 blockquote{margin:8px 0;padding:2px 14px;border-left:3px solid var(--hair);color:var(--ink2)}
-.label{font:600 12px/1.4 var(--ui);color:var(--ink2);letter-spacing:.06em;white-space:nowrap}
+.label{font:600 13px/1.4 var(--ui);color:var(--ink2);letter-spacing:.06em;white-space:nowrap}
 .skip{position:absolute;left:-999px}.skip:focus{left:8px;top:8px;z-index:9;background:var(--paper);padding:6px 10px}
 .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .caution{color:var(--ochre);font-weight:600;font-size:14px;margin:6px 0 0}
@@ -1064,6 +1171,10 @@ main{padding:8px 16px 96px;min-width:0}
 .rail>*{flex:none}
 .rail>.toc[open]{flex:1 1 auto;min-height:220px;overflow-y:auto;margin-right:-20px;padding-right:20px}
 main{padding:16px 40px 120px;max-width:1640px}}
+@media (min-width:1000px) and (max-height:820px){
+.remain-sub,.legend{display:none}
+.rail{padding-top:16px;padding-bottom:12px}
+.left{margin-top:10px;padding-top:8px}.filter{margin-top:10px}.toc{margin-top:8px}}
 
 .kind{margin:0;font:600 12px/1.4 var(--ui);letter-spacing:.06em;color:var(--ink2)}
 .rail h1{margin:2px 0 0;font:700 17px/1.4 var(--mono);overflow-wrap:anywhere}
@@ -1085,8 +1196,8 @@ main{padding:16px 40px 120px;max-width:1640px}}
 
 .sheet{margin:14px 0 0;padding:0;list-style:none;display:grid;grid-template-columns:1.6em minmax(0,1fr);gap:6px 4px;align-items:start}
 .sheet .g{font:600 12px/18px var(--mono);color:var(--ink2)}
-.cells{display:flex;flex-wrap:wrap;gap:3px}
-.cells a,.legend i{display:block;width:18px;height:18px;border:1.5px dashed var(--rule);text-decoration:none;font:700 12px/15px var(--ui);text-align:center;color:var(--paper)}
+.cells{display:flex;flex-wrap:wrap;gap:4px}
+.cells a,.legend i{display:block;width:20px;height:20px;border:1.5px dashed var(--rule);text-decoration:none;font:700 12px/15px var(--ui);text-align:center;color:var(--paper)}
 .cells a.is-done,.legend i.is-done{border:1.5px solid var(--shu);background:var(--shu)}
 .cells a:hover{border-color:var(--ink)}
 .cells a[aria-current]{outline:2px solid var(--ink);outline-offset:2px}
@@ -1103,9 +1214,9 @@ main{padding:16px 40px 120px;max-width:1640px}}
 .filter label:has(input:checked){background:var(--ink);color:var(--paper);font-weight:600}
 .filter label:has(input:focus-visible){outline:3px solid var(--ai);outline-offset:2px;z-index:1}
 .filter .n{font-family:var(--mono);margin-left:4px}
-body:has(#f-open:checked) main .item.is-done,body:has(#f-open:checked) .toc li.is-done{display:none}
+body:has(#f-open:checked) main .item:not(.is-mine),body:has(#f-open:checked) .toc li:not(.is-mine){display:none}
 .all-clear{display:none;margin:0;padding:10px 0;border-top:1px solid var(--rule);color:var(--ink2);font-size:14px}
-body:has(#f-open:checked) .group:not(:has(.item.is-open)) .all-clear{display:block}
+body:has(#f-open:checked) .group:not(:has(.item.is-mine)) .all-clear{display:block}
 
 .toc{margin:16px 0 0;position:relative}
 .toc>summary,.keys summary{font:600 13px/1.4 var(--ui);cursor:pointer;padding:6px 0}
@@ -1121,7 +1232,7 @@ body:has(#f-open:checked) .group:not(:has(.item.is-open)) .all-clear{display:blo
 .toc .id{font:600 13px/1.45 var(--mono)}
 .toc .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .toc li.is-done .t{color:var(--ink2)}
-.toc li.is-open .t{font-weight:600}
+.toc li.is-mine .t{font-weight:600}
 .st{font:700 12px/15px var(--ui);width:18px;height:18px;text-align:center;border:1.5px dashed var(--rule);color:var(--ink2)}
 .is-done>a>.st{border:1.5px solid var(--shu);color:var(--shu)}
 .toc .plain a{grid-template-columns:minmax(0,1fr)}
@@ -1152,6 +1263,7 @@ body:has(#f-open:checked) .group:not(:has(.item.is-open)) .all-clear{display:blo
 .item.is-current .item-head .id{background:var(--ink);color:var(--paper)}
 .item-head h3{margin:0;font-size:20px;line-height:1.45;font-weight:700;min-width:0;overflow-wrap:anywhere}
 .item.small .item-head h3{font-size:16px;line-height:1.7;font-weight:400}
+.item-head h3 .orig{display:block;font:400 13px/1.5 var(--ui);color:var(--ink2)}
 @media (max-width:520px){.item-head{grid-template-columns:auto minmax(0,1fr)}.item-head .id{justify-self:start}.item-head .seal{justify-self:end}.item-head h3{grid-row:2;grid-column:1/-1}}
 .item>.caution{margin:8px 0 0}
 
@@ -1162,7 +1274,7 @@ body:has(#f-open:checked) .group:not(:has(.item.is-open)) .all-clear{display:blo
 .pair{margin-top:12px;display:grid;grid-template-columns:minmax(0,1fr);gap:18px 40px}
 .claim,.evidence{min-width:0}
 @container (min-width:860px){.pair{grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);padding-left:calc(3.1em + 26px)}
-.claim{position:sticky;top:12px;align-self:start;max-height:calc(100vh - 24px);overflow-y:auto}}
+.claim{position:sticky;top:12px;align-self:start;max-height:calc(100vh - 24px - var(--bar,0px));overflow-y:auto}}
 .statement{font-size:17px;max-width:38em;overflow-wrap:anywhere}
 .statement p{margin:0 0 .5em}
 .statement.gone,.gone h4>span:last-child,.gone dd,.gone>p,.gone>ul,.gone>ol{color:var(--ink2);text-decoration:line-through}
@@ -1180,6 +1292,10 @@ body:has(#f-open:checked) .group:not(:has(.item.is-open)) .all-clear{display:blo
 .evidence>.label{display:block;margin-bottom:4px}
 .src{border:1px solid var(--rule)}
 .src+.src{margin-top:10px}
+.src>summary{list-style:none}
+.src>summary::-webkit-details-marker{display:none}
+.src>summary::before{content:"▸";font:700 13px/1.5 var(--ui);color:var(--ink2)}
+.src[open]>summary::before{content:"▾"}
 .src summary{display:flex;flex-wrap:wrap;gap:2px 12px;align-items:baseline;padding:6px 10px;cursor:pointer;font:13px/1.5 var(--mono);background:var(--code)}
 .src[open] summary{border-bottom:1px solid var(--rule)}
 .src summary .f{font-weight:700;overflow-wrap:anywhere;min-width:0}
@@ -1190,6 +1306,12 @@ body:has(#f-open:checked) .group:not(:has(.item.is-open)) .all-clear{display:blo
 .code .l{display:block;padding-right:12px}
 .code .l:hover{background:var(--code)}
 .code .ln{display:inline-block;width:3.6em;padding-right:10px;margin-right:12px;text-align:right;color:var(--ink2);border-right:1px solid var(--hair);user-select:none}
+/* Long lines wrap under their own text, the line number column stays clear. */
+.code{white-space:pre-wrap;overflow-wrap:anywhere}
+.code code{min-width:0}
+.code .l{padding-left:calc(3.6em + 23px + 2ch);text-indent:calc(-3.6em - 23px - 2ch);background:linear-gradient(var(--hair),var(--hair)) calc(3.6em + 10px) 0/1px 100% no-repeat}
+.code .l:hover{background-color:var(--code)}
+.code .ln{text-indent:0;border-right:0;margin-right:13px}
 .src-note{margin:0;padding:4px 10px;border-top:1px solid var(--hair);font:400 12px/1.5 var(--ui);color:var(--ink2)}
 .src-note.caution{color:var(--ochre);font-weight:600}
 .tests{margin:8px 0 0;font-size:14px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:baseline;overflow-wrap:anywhere}
@@ -1199,7 +1321,7 @@ body:has(#f-open:checked) .group:not(:has(.item.is-open)) .all-clear{display:blo
 @container (min-width:860px){.q-body{padding-left:calc(3.1em + 26px)}}
 .q-kind{display:inline-block;font:600 12px/1.4 var(--ui);border:1px solid var(--rule);padding:1px 7px;margin-right:8px}
 .q-text{margin:0 0 10px;max-width:46em;overflow-wrap:anywhere}
-.decision{display:grid;grid-template-columns:5.2em minmax(0,1fr);gap:10px;align-items:baseline;max-width:46em;border:1.5px solid var(--shu);padding:8px 12px}
+.decision{display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:10px;align-items:baseline;max-width:46em;border:1.5px solid var(--shu);padding:8px 12px}
 .decision p{margin:0;color:var(--shu);font-weight:700;overflow-wrap:anywhere}
 .decision.is-blank{border:1.5px dashed var(--rule)}
 .decision.is-blank p{color:var(--ink2);font-weight:400;font-size:14px}
@@ -1222,6 +1344,10 @@ li.done .box{border:1.5px solid var(--ink)}
 .delta{display:inline-block;font:700 12px/1.4 var(--ui);padding:1px 7px;border:1.5px solid var(--ink);margin-right:8px;white-space:nowrap;vertical-align:.15em}
 .delta.added{border-style:double;border-width:3px}
 .delta.removed{border-style:dashed}
+.klass{display:inline-block;font:700 13px/1.4 var(--ui);padding:1px 8px;border:1.5px solid var(--ink);margin-right:8px;white-space:nowrap;vertical-align:.12em}
+.klass.k-before-release{border-color:var(--ochre);color:var(--ochre)}
+.klass.k-wont-fix{border-style:dashed;color:var(--ink2)}
+del+ins{margin-left:.35em}
 .was,.now{display:grid;grid-template-columns:2.4em minmax(0,1fr);gap:8px;margin:0;padding:6px 0;max-width:40em;font-size:17px;overflow-wrap:anywhere;align-items:baseline}
 .was{color:var(--ink2)}
 del{text-decoration:line-through;text-decoration-thickness:2px;color:var(--ink2);background:var(--code)}
@@ -1229,10 +1355,78 @@ ins{text-decoration:none;font-weight:700;border-bottom:3px double var(--ink)}
 .item.is-removed .pair{background:repeating-linear-gradient(135deg,transparent 0 9px,var(--hair) 9px 10px)}
 
 .screen{display:grid;grid-template-columns:minmax(0,1fr);gap:14px 28px;margin-top:10px}
-@container (min-width:860px){.screen{grid-template-columns:minmax(0,420px) minmax(0,1fr);padding-left:calc(3.1em + 26px)}.screen.no-shot{grid-template-columns:minmax(0,1fr)}}
+@container (min-width:860px){.screen{padding-left:calc(3.1em + 26px)}}
+@container (min-width:1000px){.screen{grid-template-columns:minmax(0,420px) minmax(0,1fr)}.screen.no-shot{grid-template-columns:minmax(0,1fr)}}
+.screen .shot{max-width:640px}
 .shot{margin:0;min-width:0;align-self:start}
 .shot img{display:block;border:1px solid var(--rule)}
 .shot figcaption{font-size:13px;margin-top:4px;overflow-wrap:anywhere}
+
+.remain-split{margin:4px 0 0;font-size:13px;color:var(--ink2)}
+.cells a.st-fix,.legend i.st-fix{border:1.5px solid var(--ochre);background:var(--paper);color:var(--ochre)}
+.cells a.st-hold,.legend i.st-hold{border:1.5px solid var(--ink2);background:var(--paper);color:var(--ink2)}
+.cells a.st-fixed,.legend i.st-fixed{border:1.5px solid var(--ink);background:var(--paper);color:var(--ink)}
+.legend i.st-fix,.legend i.st-hold,.legend i.st-fixed{width:14px;height:14px;font:700 10px/11px var(--ui);text-align:center;font-style:normal}
+.toc li.st-fix .st{border:1.5px solid var(--ochre);color:var(--ochre)}
+.toc li.st-hold .st{border:1.5px solid var(--ink2)}
+.toc li.st-fixed .st{border:1.5px solid var(--ink);color:var(--ink)}
+.seal.st-fix b{border:2px solid var(--ochre);color:var(--ochre)}
+.seal.st-hold b{border:2px solid var(--ink2);color:var(--ink2)}
+.seal.st-fixed b{border:2px solid var(--ink);color:var(--ink)}
+.item.st-fixed{box-shadow:inset 3px 0 0 var(--ink);margin-left:-13px;padding-left:13px}
+.how{margin:10px 0 0;padding:10px 14px;border:1px solid var(--hair);background:var(--desk);max-width:60em;font-size:14px}
+.how-title{margin:0 0 4px;font:700 13px/1.4 var(--ui);letter-spacing:.04em}
+.how-check{margin:0 0 6px;padding-left:1.4em}.how-check li{margin:2px 0}
+.how-line{margin:2px 0 0;display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:8px;align-items:baseline}
+.how-fold{margin-top:8px;font-size:14px;max-width:60em}
+.how-fold>summary{cursor:pointer;color:var(--ink2);font:600 13px/1.6 var(--ui)}
+.how-fold[open]{padding:8px 12px;background:var(--desk);border:1px solid var(--hair)}
+.group-how{margin:8px 0 4px}.group-how .how{margin:0}
+.remarks{list-style:none;margin:10px 0 0;padding:0;max-width:60em;display:grid;gap:6px}
+.remarks li{display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:10px;align-items:baseline;padding:6px 10px;border:1.5px solid var(--hair);font-size:15px;overflow-wrap:anywhere}
+.remarks .rm-fix{border-color:var(--ochre)}.remarks .rm-fix .label{color:var(--ochre)}
+.remarks .rm-hold{border-style:dashed;border-color:var(--ink2)}
+.remarks .rm-fixed{border-color:var(--ink);background:var(--desk)}
+details.fold{margin-top:8px}
+details.fold>summary{cursor:pointer;color:var(--ink2);font:600 13px/1.6 var(--ui);padding:2px 0}
+@container (min-width:860px){details.fold>summary{padding-left:calc(3.1em + 26px)}}
+.appendix-hint{margin:8px 0 12px;padding-top:10px;border-top:3px solid var(--ink);font-size:14px;color:var(--ink2)}
+.group.appendix{margin:0 0 6px}
+.doc-fold>summary{cursor:pointer;list-style:none;display:flex;align-items:baseline;gap:8px;padding:8px 0;border-top:1px solid var(--rule)}
+.doc-fold>summary::-webkit-details-marker{display:none}
+.doc-fold>summary::before{content:"＋";font:700 14px/1 var(--mono);color:var(--ink2)}
+.doc-fold[open]>summary::before{content:"－"}
+.doc-fold>summary h2{margin:0;font:600 14px/1.4 var(--ui);letter-spacing:.04em;color:var(--ink2)}
+.doc-fold[open]>summary h2{color:var(--ink)}
+
+.item.is-done{padding:10px 0}
+.item.is-done .item-head h3{font-size:16px;line-height:1.6;font-weight:600;color:var(--ink2)}
+.item.is-done .item-head .id{font-size:13px;padding:1px 6px;margin-top:3px}
+.item.is-done .seal b{width:26px;height:26px;font-size:14px}
+.item.is-done details.fold{margin-top:0}
+@container (max-width:600px){.remarks li,.how-line,.decision{grid-template-columns:minmax(0,1fr);gap:0}}
+.facts dt,th{font-size:13px}
+h1,h2,h3,h4,.label,.how-title,summary,button,.seal,.legend,.remain-split,.toc .t,.next{word-break:auto-phrase}
+@container (min-width:860px){.item>.caution{padding-left:calc(3.1em + 26px)}}
+.table,.diagram{outline-offset:2px}
+@media (pointer:coarse){.cells a{width:24px;height:24px;line-height:21px}}
+@media (max-width:999px){html{scroll-padding-bottom:64px}}
+@media (prefers-color-scheme:dark){
+.toc li a[aria-current]{background:var(--hair);color:var(--ink);box-shadow:inset 3px 0 0 var(--ink)}
+.filter label:has(input:checked){background:var(--hair);color:var(--ink);box-shadow:inset 0 -3px 0 var(--ink)}}
+/* Narrow (the canvas beside the chat, a phone): the rail is a short header, not a screen of its own. */
+@media (max-width:999px){
+.rail{padding:10px 16px 8px}
+.rail .meta{display:none}
+.rail .kind,.rail h1{display:inline;font-size:13px}
+.rail h1{margin-left:8px}
+.left{margin-top:8px;padding-top:8px;border-top-width:1px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 16px;align-items:center}
+.remain{grid-row:1 / span 2}
+.remain b{font-size:28px}
+.remain-sub,.legend,.next{display:none}
+.filter{margin-top:8px;max-width:360px}
+.js .keys{display:none}}
+@media (hover:none){.js .keys{display:none}}
 
 .dock{display:none}
 @media (max-width:999px){.js .dock{position:fixed;left:0;right:0;bottom:0;z-index:5;display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:stretch;background:var(--paper);border-top:2px solid var(--ink);font-family:var(--ui)}
@@ -1251,8 +1445,9 @@ body{font-size:10.5pt}
 .filter,.toc,.keys,.dock,.next,.skip,.search,.nav,.no-match{display:none!important}
 .item[hidden],.group{display:block!important}
 main{padding:0;max-width:none}
-body:has(#f-open:checked) main .item.is-done{display:block}
+body:has(#f-open:checked) main .item:not(.is-mine){display:block}
 .claim{position:static;max-height:none;overflow:visible}
+.appendix-hint{border-top:2px solid #000}
 .item-head{break-after:avoid}.item.small,.item.k-q,.src,.scenario,.decision{break-inside:avoid}
 .group>h2{break-after:avoid}
 .item.is-current .item-head .id{background:none;color:#000}.cells a[aria-current]{outline:0}
@@ -1269,8 +1464,9 @@ const SCRIPT = String.raw`(() => {
   d.documentElement.classList.add('js');
   const store = (area, key, value) => { try { if (value === undefined) return window[area].getItem(key); window[area].setItem(key, value); } catch (e) { /* storage may be refused on file:// */ } return null; };
   const toc = d.querySelector('details.toc');
-  if (wide.matches) { if (toc) toc.open = true; } else d.querySelectorAll('details.src').forEach((x) => { x.open = false; });
-  addEventListener('beforeprint', () => d.querySelectorAll('details').forEach((x) => { x.open = true; }));
+  if (wide.matches) { if (toc) toc.open = true; }
+  if (!matchMedia('(min-width:700px)').matches) d.querySelectorAll('details.src').forEach((x) => { x.open = false; });
+  addEventListener('beforeprint', () => d.querySelectorAll('details:not(.fold):not(.doc-fold):not(.more)').forEach((x) => { x.open = true; }));
 
   const items = () => [...d.querySelectorAll('main .item')].filter((x) => x.offsetParent !== null);
   let current = null, pinned = null;
@@ -1278,7 +1474,9 @@ const SCRIPT = String.raw`(() => {
     if (el === current) return;
     current = el;
     d.querySelectorAll('.is-current').forEach((x) => x.classList.remove('is-current'));
-    d.querySelectorAll('[aria-current]').forEach((x) => x.removeAttribute('aria-current'));
+    d.querySelectorAll('.rail a[aria-current="true"]').forEach((x) => x.removeAttribute('aria-current'));
+    // The canvas puts the buttons of the item being read in its bar.
+    d.dispatchEvent(new CustomEvent('spec-relay-current', { detail: el ? el.id : null }));
     if (!el) return;
     el.classList.add('is-current');
     d.querySelectorAll('.rail a[href="#' + CSS.escape(el.id) + '"]').forEach((a) => {
@@ -1294,13 +1492,25 @@ const SCRIPT = String.raw`(() => {
   const sync = () => {
     if (pinned !== null) { if (Math.abs(scrollY - pinned) < 2) return; pinned = null; }
     const list = items();
-    let hit = list[0] || null;
-    for (const el of list) { if (el.getBoundingClientRect().top <= innerHeight * 0.3) hit = el; else break; }
+    const line = innerHeight * 0.3;
+    let hit = null;
+    // The first item not yet scrolled past, when its head shows or it still fills the reading band;
+    // none while the reader is above the first item or below the last one (the appendix).
+    for (const el of list) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom < 48) continue;
+      if (r.top >= -4 || r.bottom > line) { if (r.top < innerHeight * 0.7) hit = el; break; }
+      hit = el; // its tail is still at the top: kept unless the next item is within reach
+    }
     mark(hit);
   };
   let tick = false;
   addEventListener('scroll', () => { if (!tick) { tick = true; requestAnimationFrame(() => { tick = false; sync(); }); } }, { passive: true });
   addEventListener('resize', () => { pinned = null; sync(); });
+  // Pressing or focusing something inside an item makes it the current one.
+  const own = (e) => { const it = e.target && e.target.closest ? e.target.closest('main .item') : null; if (it && it.offsetParent !== null) { mark(it); pinned = scrollY; } };
+  d.addEventListener('pointerdown', own, true);
+  d.addEventListener('focusin', own);
   const fOpen = d.getElementById('f-open'), fAll = d.getElementById('f-all');
   let filter = null;
   const go = (el) => {
@@ -1314,10 +1524,15 @@ const SCRIPT = String.raw`(() => {
   };
   const step = (dir, onlyOpen) => {
     const all = items(), at = all.indexOf(current);
-    const list = all.filter((x) => !onlyOpen || x.classList.contains('is-open'));
+    const list = all.filter((x) => !onlyOpen || x.classList.contains('is-mine'));
     const next = dir > 0 ? list.find((x) => all.indexOf(x) > at) : list.reverse().find((x) => all.indexOf(x) < at);
     go(next || null);
   };
+  // A link to a folded appendix document opens it.
+  const unfold = (hash) => { let el = null; try { el = d.getElementById(decodeURIComponent(hash.slice(1))); } catch (e) { /* bad escape */ } const f = el && el.querySelector(':scope > details.doc-fold'); if (f) f.open = true; };
+  d.addEventListener('click', (e) => { const a = e.target.closest ? e.target.closest('a[href^="#"]') : null; if (a) unfold(a.getAttribute('href')); }, true);
+  if (location.hash) unfold(location.hash);
+  addEventListener('hashchange', () => unfold(location.hash));
   const itemOf = (hash) => { let el = null; try { el = d.getElementById(decodeURIComponent(hash.slice(1))); } catch (e) { /* bad escape */ } return el && el.classList.contains('item') ? el : null; };
   d.addEventListener('click', (e) => {
     const a = e.target.closest ? e.target.closest('a[href^="#"]') : null;
@@ -1347,7 +1562,7 @@ const SCRIPT = String.raw`(() => {
     else if (k === 'k') step(-1, false);
     else if (k === 'n') step(1, true);
     else if (k === 'p') step(-1, true);
-    else if (k === 'o' && current) current.querySelectorAll('details.src').forEach((x) => { x.open = !x.open; });
+    else if (k === 'o' && current) { const all = [...current.querySelectorAll('details.src, details.fold')]; const open = !all.every((x) => x.open); all.forEach((x) => { x.open = open; }); }
     else if (k === 'u' && fOpen && fAll) { (fOpen.checked ? fAll : fOpen).checked = true; remember(); }
     else return;
     e.preventDefault();
@@ -1395,20 +1610,25 @@ export function page({ title, kind, meta, brief = '', groups = [], docs = [], L,
   const read = mode === 'read';
   const reviewed = !read && all.length > 0;
   const count = (list) => `${list.filter((x) => x.done).length} / ${list.length}`;
-  const state = (x) => (x.done ? 'is-done' : 'is-open');
-  const word = (x) => escapeHtml(x.done ? L.confirmed : L.open);
+  const st = (x) => x.state ?? (x.done ? 'done' : 'open');
+  const state = (x) => `${x.done ? 'is-done' : 'is-open'}${mineState(st(x)) ? ' is-mine' : ''} st-${st(x)}`;
+  // The reviewer's turn: items not confirmed and not waiting for the agent or on hold.
+  const mine = all.filter((x) => mineState(st(x)));
+  const word = (x) => escapeHtml(L.states?.[st(x)] ?? (x.done ? L.confirmed : L.open));
+  const split = { fix: open.filter((x) => st(x) === 'fix').length, hold: open.filter((x) => st(x) === 'hold').length, fixed: open.filter((x) => st(x) === 'fixed').length };
   const letter = (g) => g.items.find((i) => i.letter)?.letter ?? '·';
 
   const progress = reviewed ? `<div class="left">
-<p class="remain">${open.length ? L.remain(open.length) : L.allDone}</p>
-<p class="remain-sub">${escapeHtml(L.of(all.length, all.length - open.length))}${open.length ? `（${escapeHtml(L.left)}: ${groups.filter((g) => g.items.some((i) => !i.done)).map((g) => `${escapeHtml(g.title)} ${g.items.filter((i) => !i.done).length}`).join('・')}）` : ''}</p>
-<ol class="sheet" aria-label="${escapeHtml(L.sheet)}">${groups.map((g) => `<li class="g" aria-hidden="true">${escapeHtml(letter(g))}</li><li class="cells">${g.items.map((x) => `<a href="#${escapeHtml(x.anchor)}" class="${state(x)}" title="${escapeHtml(`${x.label} ${x.name}`)} — ${word(x)}"><span class="vh">${escapeHtml(x.label)} ${word(x)}</span></a>`).join('')}</li>`).join('')}</ol>
-<p class="legend"><span><i class="is-done" aria-hidden="true"></i>${escapeHtml(L.legendDone)}</span><span><i aria-hidden="true"></i>${escapeHtml(L.legendOpen)}</span></p>
-${open.length ? `<a class="next" href="#${escapeHtml(open[0].anchor)}">${escapeHtml(L.firstOpen(open[0].label))}</a>` : ''}
+<p class="remain">${mine.length ? L.remain(mine.length) : open.length ? L.noneMine : L.allDone}</p>
+<p class="remain-sub">${escapeHtml(L.of(all.length, all.length - open.length))}</p>
+<ol class="sheet" aria-label="${escapeHtml(L.sheet)}">${groups.map((g) => `<li class="g" aria-hidden="true">${escapeHtml(letter(g))}</li><li class="cells">${g.items.map((x) => `<a href="#${escapeHtml(x.anchor)}" class="${state(x)}" title="${escapeHtml(`${x.label} ${x.name}`)} — ${word(x)}">${['fix', 'hold', 'fixed'].includes(st(x)) ? `<span aria-hidden="true">${escapeHtml(L.seals[st(x)])}</span>` : ''}<span class="vh">${escapeHtml(x.label)} ${word(x)}</span></a>`).join('')}</li>`).join('')}</ol>
+${split.fix + split.hold + split.fixed ? `<p class="remain-split">${escapeHtml(L.split(split))}</p>` : ''}
+<p class="legend"><span><i class="is-done" aria-hidden="true"></i>${escapeHtml(L.legendDone)}</span><span><i aria-hidden="true"></i>${escapeHtml(L.legendOpen)}</span>${split.fix ? `<span><i class="st-fix" aria-hidden="true">${escapeHtml(L.seals.fix)}</i>${escapeHtml(L.states.fix)}</span>` : ''}${split.hold ? `<span><i class="st-hold" aria-hidden="true">${escapeHtml(L.seals.hold)}</i>${escapeHtml(L.states.hold)}</span>` : ''}${split.fixed ? `<span><i class="st-fixed" aria-hidden="true">${escapeHtml(L.seals.fixed)}</i>${escapeHtml(L.states.fixed)}</span>` : ''}</p>
+${mine.length ? `<a class="next" href="#${escapeHtml(mine[0].anchor)}">${escapeHtml(L.firstOpen(mine[0].label))}</a>` : ''}
 </div>
 <fieldset class="filter"><legend class="label">${escapeHtml(L.show)}</legend>
 <label><input type="radio" name="f" id="f-all" checked>${escapeHtml(L.all)}<span class="n">${all.length}</span></label>
-<label><input type="radio" name="f" id="f-open">${escapeHtml(L.onlyOpen)}<span class="n">${open.length}</span></label>
+<label><input type="radio" name="f" id="f-open">${escapeHtml(L.onlyOpen)}<span class="n">${mine.length}</span></label>
 </fieldset>` : '';
 
   const search = read && all.length ? `<div class="search" role="search"><label class="label" for="q">${escapeHtml(L.search)}</label><input id="q" type="search" placeholder="${escapeHtml(L.searchHint)}" autocomplete="off" aria-describedby="q-status"><p class="q-status" id="q-status" role="status" data-total="${all.length}" data-none="${escapeHtml(L.noMatch)}" data-shown="${escapeHtml(L.shown('{n}', all.length))}"></p></div>` : '';
@@ -1418,7 +1638,7 @@ ${open.length ? `<a class="next" href="#${escapeHtml(open[0].anchor)}">${escapeH
 ${groups.map((g) => `<h2><a href="#${g.id}">${escapeHtml(g.title)}</a><span class="n">${tally(g)}</span></h2>
 <ol>${g.items.map((x) => (read
     ? `<li data-for="${escapeHtml(x.anchor)}"><a href="#${escapeHtml(x.anchor)}"><span class="id">${escapeHtml(x.label)}</span><span class="t">${escapeHtml(x.name)}</span></a></li>`
-    : `<li class="${state(x)}"><a href="#${escapeHtml(x.anchor)}"><span class="id">${escapeHtml(x.label)}</span><span class="t">${escapeHtml(x.name)}</span><span class="st" aria-hidden="true">${escapeHtml(x.done ? L.sealDone : L.sealOpen)}</span><span class="vh">${word(x)}</span></a></li>`)).join('')}</ol>`).join('\n')}
+    : `<li class="${state(x)}"><a href="#${escapeHtml(x.anchor)}"><span class="id">${escapeHtml(x.label)}</span><span class="t">${escapeHtml(x.name)}</span><span class="st" aria-hidden="true">${escapeHtml(L.seals?.[st(x)] ?? (x.done ? L.sealDone : L.sealOpen))}</span><span class="vh">${word(x)}</span></a></li>`)).join('')}</ol>`).join('\n')}
 ${docs.length ? `${reviewed ? `<h2><span>${escapeHtml(L.appendix)}</span></h2>` : ''}
 <ol>${docs.map((s) => `<li class="plain"><a href="#${escapeHtml(s.id)}"><span class="t">${escapeHtml(s.title)}</span></a></li>`).join('')}</ol>` : ''}
 </nav></details>`;
@@ -1430,12 +1650,19 @@ ${docs.length ? `${reviewed ? `<h2><span>${escapeHtml(L.appendix)}</span></h2>` 
     brief,
     read && all.length ? `<p class="no-match" id="no-match" hidden>${escapeHtml(L.noMatch)}</p>` : '',
     ...groups.map((g) => `<section class="group"><h2 id="${g.id}">${escapeHtml(g.title)}<span class="n">${read ? g.items.length : `${escapeHtml(L.confirmed)} ${count(g.items)}`}</span></h2>
+${g.how ? `<div class="group-how">${g.how}</div>` : ''}
 ${g.items.map((x) => x.html).join('\n')}
 ${read ? '' : `<p class="all-clear">${escapeHtml(L.allClear)}</p>`}
 </section>`),
-    ...docs.map((s) => `<section class="group" id="${escapeHtml(s.id)}"><h2>${reviewed ? `${escapeHtml(L.appendix)} — ` : ''}${escapeHtml(s.title)}</h2>
+    // On a review page the appendix is reference material: each document folded, opened when needed.
+    ...(reviewed && docs.length ? [`<p class="appendix-hint"><span class="label">${escapeHtml(L.appendix)}</span> ${escapeHtml(L.appendixHint)}</p>`] : []),
+    ...docs.map((s) => (reviewed
+      ? `<section class="group appendix" id="${escapeHtml(s.id)}"><details class="doc-fold"><summary><h2>${escapeHtml(s.title)}</h2></summary>
 ${s.html}
-</section>`),
+</details></section>`
+      : `<section class="group" id="${escapeHtml(s.id)}"><h2>${escapeHtml(s.title)}</h2>
+${s.html}
+</section>`)),
   ].filter(Boolean).join('\n');
 
   return `<!doctype html>
@@ -1447,7 +1674,7 @@ ${s.html}
 <meta name="color-scheme" content="light dark">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data: file:">
 <title>${escapeHtml(title)}</title>
-<style>${CSS}</style>
+<style>${CSS}${SURVEY_CSS}${DOC_AID_CSS}</style>
 </head>
 <body>
 <a class="skip" href="#main">${escapeHtml(L.skip)}</a>
@@ -1467,7 +1694,7 @@ ${body}
 <footer>${escapeHtml(note)}</footer>
 </main>
 </div>
-${reviewed ? `<div class="dock"><button type="button" class="prev" aria-label="${escapeHtml(L.prevOpen)}">↑</button><span class="count"><b>${open.length}</b>${escapeHtml(L.remainShort)}</span><button type="button" class="primary">${escapeHtml(L.nextOpen)}</button></div>` : ''}
+${reviewed ? `<div class="dock"><button type="button" class="prev" aria-label="${escapeHtml(L.prevOpen)}">↑</button><span class="count"><b>${mine.length}</b>${escapeHtml(L.remainShort)}</span><button type="button" class="primary">${escapeHtml(L.nextOpen)}</button></div>` : ''}
 <script>${SCRIPT}</script>
 </body>
 </html>
@@ -1551,7 +1778,7 @@ function buildView({ root = process.cwd(), change, spec, file, guide, lang, now 
     const schema = readText(path.join(found.dir, '.openspec.yaml')) === null ? '' : changeSchema(found.dir);
     const reviewed = fs.existsSync(path.join(found.dir, 'review.md'));
     const html = withImages(root, found.dir, resolved, (outDir) => {
-      const shown = reviewed ? reviewView({ root, dir: found.dir, schema: schema || 'spec-relay-extract', L, outDir }) : genericChangeView(found.dir);
+      const shown = reviewed ? reviewView({ root, dir: found.dir, schema: schema || 'spec-relay-extract', L, outDir, lang: code }) : genericChangeView(found.dir);
       const meta = [schema, found.archived ? L.archived : '', stamp].filter(Boolean).join(' · ');
       return page({ title: change, kind: L.kinds[schema || (reviewed ? 'spec-relay-extract' : '')] ?? L.document, meta, ...shown, L, lang: code, nav });
     });

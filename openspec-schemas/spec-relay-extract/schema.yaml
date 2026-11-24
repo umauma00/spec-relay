@@ -359,6 +359,11 @@ apply:
     reviewer to accept it, ask for a change, or record a decision.
     - Tick a box only after the reviewer explicitly accepts that item in this
       conversation, or when the reviewer ticked it themselves.
+    - A line `  - fix: ...` under an item is the reviewer asking for a change
+      (written in the file or with the canvas); `  - hold: ...` means they
+      cannot decide yet. Answer each fix by correcting the artifacts and
+      writing `  - fixed: <what you changed>` under it; keep the item
+      unticked. Never delete or reword the reviewer's notes.
     - When the reviewer asks for a change, edit specs/screens/trace/questions
       first, have the checker check the changed rows again, untick every item
       you changed, render again, and ask again.

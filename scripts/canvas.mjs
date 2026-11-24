@@ -28,7 +28,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { view, page, labels, escapeHtml, markdown, parseReview, capabilities, timeStamp } from './render.mjs';
 import { status, checklist, stepLabel, stepName, STEPS } from './status.mjs';
-import { language, changeSchema, archivedChange } from './gate.mjs';
+import { language, changeSchema, archivedChange, reviewRemarks } from './gate.mjs';
 import { writeReview, sha256, utf8Text, reviewerOf, decisionOf } from './review-edit.mjs';
 import { GUIDE, guidePage, modules as guideModules, saveQa, locate } from './guide.mjs';
 
@@ -41,17 +41,25 @@ const WORDS = {
     byCapability: '機能ごと', capability: '機能', spec: '仕様', problems: '問題', none: 'ありません',
     nav: '画面', progress: '進み具合', specs: '仕様の一覧', guide: 'コードガイド',
     answer: 'AI の回答', helpful: '役に立った（Q&A に保存する）', qaSaved: 'Q&A に保存しました。', qaFailed: '保存できませんでした',
-    ask: 'これを聞く', askPage: 'この画面について聞く', askTitle: 'チャットに質問を送る', askAbout: '対象',
+    ask: '質問する', askPage: 'この画面について質問する', zoomIn: '拡大', zoomOut: '縮小', askTitle: 'チャットに質問を送る', askAbout: '対象',
     askHint: 'チャットに「[canvas]」付きで届きます。質問であって、承認や判断にはなりません。',
     tick: '確認済みにする', untick: '確認を外す', decide: '判断を書く', decideTick: '判断を書いて確認済みにする',
     reviewer: 'レビュー担当', reviewerSet: 'レビュー担当の名前を書く', save: '保存する',
     decisionTitle: '判断を書く', reviewerTitle: 'レビュー担当の名前',
-    editHint: 'review.md に書き込みます。あなたが自分でファイルを直したのと同じ扱いです。変更を完了（アーカイブ）してよいかは、チャットで伝えてください。',
+    editHint: 'review.md に書き込みます（ファイルを自分で直したのと同じ扱いです）。',
     saving: '保存しています…', saved: 'review.md に保存しました。', changed: 'review.md がほかで変わっていたので、読み直しました。もう一度操作してください。', saveFailed: '保存できませんでした', emptyValue: '書いてから保存してください。',
     needDecision: '先に判断を書いてください。', placeholder: '「TBD」や「-」のような書きかけは判断になりません。判断を書いてください。',
     noFile: 'この画面の review.md が見つかりません。', bad: 'この操作はできません。', notUtf8: 'review.md が UTF-8 ではないため書き込めません。UTF-8 で保存し直してください。',
     busy: 'ほかのプログラムが review.md を使っていて書き込めませんでした。閉じてからもう一度押してください。', noLine: 'review.md にこの項目の行が見つかりません。',
-    howto: '正しければ「確認済みにする」を押す（review.md に書き込まれます）',
+    howto: '正しければ「確認済みにする」、違えば「修正を依頼」、今は決められなければ「保留にする」を押す（どれも review.md に書き込まれます）',
+    fix: '修正を依頼', hold: '保留にする', withdraw: '依頼を取り下げる', unhold: '保留を解除', fixTitle: '修正してほしいこと', holdTitle: '保留の理由',
+    fixPlaceholder: '例: 期限は 24 時間ではなく 48 時間', holdPlaceholder: '例: 業務の担当に確認してから決める', decisionPlaceholder: '新しいシステムでどうするか',
+    fixHint: 'review.md のこの項目の下に「- fix: …」の1行として書き（改行は空白になります）、確認を外します。AI に直してもらうには「修正依頼を AI に送る」を押すか、チャットで伝えてください。',
+    holdHint: 'review.md のこの項目の下に「- hold: …」の1行として書きます（改行は空白になります）。決まったら「保留を解除」してから、確認済みにするか修正を依頼してください。',
+    sendFixes: (n) => `修正依頼を AI に送る（${n} 件）`, fixesSent: 'チャットに送りました。AI が直すと、項目の下に直した内容が出ます。', fixesWaiting: '送りました — AI の対応待ち（{n} 件）',
+    openFix: 'AI がまだ対応していない修正依頼があります。「依頼を取り下げる」を押してから確認済みにしてください。', noNote: '取り下げるものがありません。',
+    did: { tick: '{id} を確認済みにしました。', untick: '{id} の確認を外しました。', fix: '{id} に修正依頼を書きました（AI にはまだ送っていません）。', hold: '{id} を保留にしました。', withdraw: '{id} の依頼を取り下げました。', unhold: '{id} の保留を解除しました。', decision: '{id} の判断を保存しました。' }, undo: '元に戻す', undone: '元に戻しました。', keysWrite: [['x', '確認済みにする（下のバーの項目）'], ['f', '修正を依頼（下のバーの項目）'], ['h', '保留にする（下のバーの項目）']], noDecisionHere: '未記入 —「判断を書く…」で書きます',
+    yourTurn: '{n} 件 あなたの番', next: '次へ ↓', decideFirst: '判断を書く…', decideSave: '保存して確認済みにする', decideOnly: '保存だけする', redecide: '判断を直す',
     send: '送る', cancel: 'やめる', sending: '送っています…', sent: 'チャットに送りました。', failed: '送れませんでした', empty: '質問を書いてください。',
     notRepo: 'このフォルダには openspec/ がありません。spec-relay を導入したリポジトリでチャットを開いてください。',
     notFound: 'この画面はありません（変更や仕様が消えたか、名前が違います）。上の「進み具合」から選んでください。',
@@ -66,17 +74,25 @@ const WORDS = {
     byCapability: 'By capability', capability: 'Capability', spec: 'Spec', problems: 'Problems', none: 'None',
     nav: 'Pages', progress: 'Progress', specs: 'Specs', guide: 'Code guide',
     answer: "The agent's answer", helpful: 'Helpful (save to the Q&A)', qaSaved: 'Saved to the Q&A.', qaFailed: 'Could not save',
-    ask: 'Ask about this', askPage: 'Ask about this page', askTitle: 'Send a question to the chat', askAbout: 'About',
+    ask: 'Ask a question', askPage: 'Ask about this page', zoomIn: 'Zoom in', zoomOut: 'Zoom out', askTitle: 'Send a question to the chat', askAbout: 'About',
     askHint: 'It reaches the chat marked "[canvas]". It is a question, never an approval or a decision.',
     tick: 'Mark confirmed', untick: 'Unmark', decide: 'Write the decision', decideTick: 'Write the decision and confirm',
     reviewer: 'Reviewer', reviewerSet: 'Write the reviewer name', save: 'Save',
     decisionTitle: 'Write the decision', reviewerTitle: 'Reviewer name',
-    editHint: 'This writes to review.md, the same as editing the file yourself. Whether the change may be completed (archived) you tell in the chat.',
+    editHint: 'This writes to review.md (the same as editing the file yourself).',
     saving: 'Saving…', saved: 'Saved to review.md.', changed: 'review.md had changed elsewhere, so the page was reloaded. Try again.', saveFailed: 'Could not save', emptyValue: 'Write something first.',
     needDecision: 'Write the decision first.', placeholder: 'A placeholder such as "TBD" or "-" is not a decision. Write the decision.',
     noFile: 'This page has no review.md.', bad: 'This cannot be done.', notUtf8: 'review.md is not UTF-8, so it cannot be written. Save it again as UTF-8.',
     busy: 'Another program is using review.md, so it could not be written. Close it and try again.', noLine: 'review.md has no line for this item.',
-    howto: 'If it is right, press "Mark confirmed" (it is written to review.md)',
+    howto: 'If it is right, press "Mark confirmed"; if it is wrong, "Request a change"; if you cannot decide yet, "Put on hold" (each is written to review.md)',
+    fix: 'Request a change', hold: 'Put on hold', withdraw: 'Withdraw the request', unhold: 'Take off hold', fixTitle: 'What should change', holdTitle: 'Why it is on hold',
+    fixPlaceholder: 'e.g. the limit is 48 hours, not 24', holdPlaceholder: 'e.g. ask the business owner first', decisionPlaceholder: 'What the new system does',
+    fixHint: 'This writes one line "- fix: ..." (line breaks become spaces) under the item in review.md and unmarks it. To have the agent correct it, press "Send the change requests to the agent", or say so in the chat.',
+    holdHint: 'This writes one line "- hold: ..." (line breaks become spaces) under the item in review.md. When you have decided, take it off hold, then confirm it or request a change.',
+    sendFixes: (n) => `Send the change requests to the agent (${n})`, fixesSent: 'Sent to the chat. When the agent has corrected it, what changed shows under the item.', fixesWaiting: 'Sent — waiting for the agent ({n})',
+    openFix: 'The agent has not answered a change request yet. Press "Withdraw the request" before confirming.', noNote: 'Nothing to withdraw.',
+    did: { tick: '{id} marked confirmed.', untick: '{id} unmarked.', fix: 'Change request written under {id} (not sent to the agent yet).', hold: '{id} put on hold.', withdraw: 'The request on {id} withdrawn.', unhold: '{id} taken off hold.', decision: 'The decision on {id} saved.' }, undo: 'Undo', undone: 'Undone.', keysWrite: [['x', 'mark confirmed (the item in the bar)'], ['f', 'request a change (the item in the bar)'], ['h', 'put on hold (the item in the bar)']], noDecisionHere: 'blank — write it with "Write the decision…"',
+    yourTurn: '{n} your turn', next: 'Next ↓', decideFirst: 'Write the decision…', decideSave: 'Save and confirm', decideOnly: 'Save only', redecide: 'Edit the decision',
     send: 'Send', cancel: 'Cancel', sending: 'Sending…', sent: 'Sent to the chat.', failed: 'Could not send', empty: 'Write a question first.',
     notRepo: 'This folder has no openspec/. Open the chat in a repository where spec-relay is set up.',
     notFound: 'There is no such page (the change or spec is gone, or the name is wrong). Pick one from Progress above.',
@@ -175,9 +191,56 @@ dialog.ask-box::backdrop{background:rgba(0,0,0,.35)}
 .ask.mark:hover{background:var(--ink);color:var(--paper)}
 .ask-row .ask{margin-bottom:6px}
 .ask-box input[type=text]{display:block;width:100%;padding:8px;border:1.5px solid var(--ink);background:var(--paper);color:var(--ink);font:15px/1.6 var(--read)}
+.ask-box textarea[hidden],.ask-box input[type=text][hidden]{display:none}
 .canvas-answer{margin:10px 0 0;padding:10px 12px;border:1.5px solid var(--ai)}
 .canvas-answer .q{font-weight:700;margin:4px 0}
 .canvas-answer .ask{margin-top:8px}
+.act{font:600 13px/1.2 var(--ui);padding:6px 12px;min-height:32px;margin:0 8px 6px 0;cursor:pointer;border:1.5px solid var(--ink);background:var(--paper);color:var(--ink)}
+.act-ok{background:var(--ink);color:var(--paper)}
+.act-ok:hover{background:#2c3039;border-color:#2c3039;color:var(--paper)}
+@media (prefers-color-scheme:dark){.act-ok:hover{background:#c9ccd2;border-color:#c9ccd2}}
+.act-fix{border-color:var(--ochre);color:var(--ochre)}
+.act-fix:hover{background:var(--ochre);color:var(--paper)}
+.act-hold{border-color:var(--ink2);color:var(--ink)}
+.act-hold:hover{background:var(--desk)}
+.act-quiet{border-color:var(--rule);color:var(--ink2);font-weight:400}
+.act-quiet:hover{border-color:var(--ink);color:var(--ink)}
+.act-wide{width:100%;text-align:left;margin-right:0}
+.act[disabled]{opacity:.6;cursor:wait}
+.item.is-done .ask-row{margin-top:4px}
+.ask-row .ask:not(.mark){border-color:transparent;background:none;text-decoration:underline;text-underline-offset:.2em;padding-left:4px;padding-right:4px}
+.ask-row .ask:not(.mark):hover{background:none;color:var(--ink)}
+.item.is-done .ask-row .ask:not(.mark){display:none}
+.shot.is-zoomed{overflow:auto;max-height:80vh}.shot.is-zoomed img{max-width:none}
+.act.zoom{min-height:28px;padding:3px 10px;margin:0 8px 0 0}
+.screen:has(.shot.is-zoomed){grid-template-columns:minmax(0,1fr)}
+.act.is-sent:hover{background:var(--paper);color:var(--ochre)}
+.item{position:relative}
+body.has-actbar .item.is-current::before{content:"";position:absolute;left:-11px;top:10px;bottom:10px;width:4px;background:var(--ink)}
+html{scroll-padding-bottom:calc(var(--bar,0px) + 12px)}
+.actbar-state{font:600 13px/1.2 var(--ui);color:var(--ink2);margin-right:8px}
+@media (max-width:999px){.js body.has-actbar .keys{display:flex;flex-wrap:wrap;gap:4px 16px;margin:6px 0 0;padding:6px 0 0}}
+@media (forced-colors:active){.filter label:has(input:checked){outline:3px solid Highlight;outline-offset:-5px}.item.is-current .item-head .id{outline:2px solid Highlight;outline-offset:2px}.act-ok{border-width:3px}}
+.act.is-sent{border-style:dashed;opacity:1;cursor:default}
+.canvas-toast{display:flex;gap:12px;align-items:center;justify-content:space-between}
+.canvas-toast button{font:600 13px/1.2 var(--ui);padding:6px 10px;min-height:32px;border:1.5px solid var(--paper);background:none;color:var(--paper);cursor:pointer;flex:none}
+.ask-box button.only{margin-right:auto}
+.ask-box textarea#edit-text{min-height:5em}
+body.has-actbar .dock{display:none!important}
+body.has-actbar main{padding-bottom:calc(100vh - 160px)}
+body.has-actbar .canvas-toast{bottom:calc(var(--bar,72px) + 12px)}
+.actbar{position:fixed;left:0;right:0;bottom:0;z-index:6;display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:8px 16px;background:var(--paper);border-top:2px solid var(--ink);font-family:var(--ui)}
+.actbar[hidden]{display:none}
+@media (min-width:1000px){.actbar{left:288px;padding:8px 40px}}
+.actbar-head{margin:0;display:flex;gap:8px;align-items:baseline;min-width:0;flex:1 1 220px;font-size:14px}
+.actbar-head .id{font:700 14px/1.3 var(--mono);padding:1px 6px;border:1.5px solid var(--ink);flex:none}
+.actbar-head .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.actbar-buttons{display:flex;flex-wrap:wrap}
+.actbar-buttons .act{margin:2px 8px 2px 0;min-height:40px;font-size:14px}
+.actbar-next{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:13px;color:var(--ink2)}
+.actbar-next .act{margin:0;min-height:40px}
+@media print{.act,.actbar{display:none!important}}
+@media (max-width:999px){.canvas-nav{display:inline-flex;margin:0 0 0 12px;font-size:13px}.ask-row.ask-page{display:inline-block;margin:6px 8px 0 0}.ask-row.ask-page .act-wide{width:auto}}
 .canvas-gone{position:sticky;top:0;z-index:8;margin:0;padding:8px 16px;background:var(--ochre);color:var(--paper);font:600 14px/1.4 var(--ui)}
 @media print{.canvas-nav,.ask,.ask-row,dialog.ask-box,.canvas-toast,.canvas-gone{display:none!important}}
 `;
@@ -188,11 +251,18 @@ const CANVAS_SCRIPT = String.raw`(() => {
   const cfg = JSON.parse(d.getElementById('canvas-config').textContent), W = cfg.words;
   const box = d.getElementById('ask-box'), text = d.getElementById('ask-text'), about = d.getElementById('ask-about'), msg = d.getElementById('ask-msg'), send = box.querySelector('.primary');
   const store = (key, value) => { try { if (value === undefined) return sessionStorage.getItem(key); if (value === null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, value); } catch (e) { /* refused */ } return null; };
-  const toast = (m) => { const t = d.createElement('p'); t.className = 'canvas-toast'; t.setAttribute('role', 'status'); t.textContent = m; d.body.appendChild(t); setTimeout(() => t.remove(), 4000); };
+  const toast = (m, action) => {
+    const t = d.createElement('p'); t.className = 'canvas-toast'; t.setAttribute('role', 'status');
+    const span = d.createElement('span'); span.textContent = m; t.appendChild(span);
+    if (action) { const b = d.createElement('button'); b.type = 'button'; b.textContent = action.label; b.addEventListener('click', () => { t.remove(); action.run(); }); t.appendChild(b); }
+    d.body.appendChild(t); setTimeout(() => t.remove(), action ? 8000 : 4000);
+  };
+  // An item's title as shown, without the English original under a translated one.
+  const headText = (item) => { const h = item.querySelector('.item-head h3'); if (!h) return ''; const c = h.cloneNode(true); c.querySelectorAll('.orig, .delta, .klass').forEach((x) => x.remove()); return c.textContent.trim(); };
   const shut = () => { if (box.close) box.close(); else box.removeAttribute('open'); };
   let target = null, pending = false;
   const open = (item) => {
-    target = item ? { label: (item.querySelector('.item-head .id') || {}).textContent || '', title: (item.querySelector('.item-head h3') || {}).textContent || '' } : null;
+    target = item ? { label: (item.querySelector('.item-head .id') || {}).textContent || '', title: headText(item) } : null;
     about.textContent = W.askAbout + ': ' + cfg.title + (target ? ' — ' + target.label + ' ' + target.title : '');
     text.value = ''; msg.textContent = '';
     if (box.showModal) box.showModal(); else box.setAttribute('open', '');
@@ -202,9 +272,19 @@ const CANVAS_SCRIPT = String.raw`(() => {
     const row = d.createElement('p'); row.className = 'ask-row';
     const b = d.createElement('button'); b.type = 'button'; b.className = 'ask'; b.textContent = W.ask;
     const id = (item.querySelector('.item-head .id') || {}).textContent || '';
-    b.setAttribute('aria-label', W.ask + ': ' + id + ' ' + ((item.querySelector('.item-head h3') || {}).textContent || ''));
+    b.setAttribute('aria-label', W.ask + ': ' + id + ' ' + headText(item));
     b.addEventListener('click', () => open(item));
-    row.appendChild(b); item.appendChild(row);
+    row.appendChild(b);
+    // A confirmed item keeps its buttons inside its fold.
+    const fold = item.classList.contains('is-done') ? item.querySelector(':scope > details.fold') : null;
+    (fold || item).appendChild(row);
+  });
+  // A screenshot cannot open in a page of its own here: it zooms in place.
+  d.querySelectorAll('main .shot figcaption a').forEach((a) => {
+    const fig = a.closest('.shot');
+    const b = d.createElement('button'); b.type = 'button'; b.className = 'act act-quiet zoom'; b.textContent = W.zoomIn; b.setAttribute('aria-pressed', 'false');
+    b.addEventListener('click', () => { const on = fig.classList.toggle('is-zoomed'); b.textContent = on ? W.zoomOut : W.zoomIn; b.setAttribute('aria-pressed', String(on)); });
+    a.replaceWith(b);
   });
   const pageAsk = d.getElementById('ask-page');
   if (pageAsk) pageAsk.addEventListener('click', () => open(null));
@@ -255,9 +335,11 @@ const CANVAS_SCRIPT = String.raw`(() => {
   const ebox = d.getElementById('edit-box');
   let writing = false;
   if (R && ebox) {
-    const etitle = d.getElementById('edit-title'), etext = d.getElementById('edit-text'), emsg = d.getElementById('edit-msg'), esave = ebox.querySelector('.primary');
+    const etitle = d.getElementById('edit-title'), etext = d.getElementById('edit-text'), ename = d.getElementById('edit-name'), emsg = d.getElementById('edit-msg'), esave = ebox.querySelector('.primary'), eonly = d.getElementById('edit-only');
     let hash = R.hash, job = null;
-    const reload = (m) => { store('spec-relay-canvas-toast', m); keepFocus(); location.reload(); };
+    const fill = (t, o) => String(t).replace(/\{(\w+)\}/g, (m, k) => (k in o ? o[k] : m));
+    // What was saved, and how to take it back, survive the reload in the toast.
+    const reload = (m, undo, id) => { store('spec-relay-canvas-toast', JSON.stringify({ m, undo: undo || null })); keepPlace(id); location.reload(); };
     const post = async (action, id, value) => {
       const res = await fetch(base + '/review', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'review' }, body: JSON.stringify({ page: cfg.page, hash, action, id, value }) });
       let j = {};
@@ -268,7 +350,7 @@ const CANVAS_SCRIPT = String.raw`(() => {
       return true;
     };
     // A stale page reloads; what was typed in the dialog comes back with it.
-    const run = async (steps, report, draft) => {
+    const run = async (steps, report, draft, done) => {
       if (writing) return;
       writing = true;
       try {
@@ -279,43 +361,151 @@ const CANVAS_SCRIPT = String.raw`(() => {
             return;
           }
         }
-        reload(W.saved);
+        reload(done ? done.m : W.saved, done ? done.undo : null, steps[0] && steps[0][1]);
       } catch (err) { report(W.saveFailed + ': ' + err.message); }
       finally { writing = false; }
     };
+    const byId = (id) => R.items.find((it) => it.id === id);
+    const titleOf = (id) => { const el = d.getElementById(id); return el ? headText(el) : ''; };
+    // One action, with the words of the toast and the step that undoes it.
+    const act = (action, id) => {
+      const it = byId(id);
+      const undo = action === 'tick' ? [['untick', id]] : action === 'untick' ? [['tick', id]] : null;
+      const said = action === 'withdraw' && it && it.state === 'hold' ? W.did.unhold : W.did[action];
+      run([[action, id]], toast, null, { m: fill(said, { id }), undo });
+    };
+    const ehint = d.getElementById('edit-hint'), hintDefault = ehint.textContent;
+    const field = () => (job && job.kind === 'reviewer' ? ename : etext);
     const edit = (kind, id, value, then) => {
       job = { kind, id, then };
-      etitle.textContent = kind === 'reviewer' ? W.reviewerTitle : W.decisionTitle + ' — ' + id;
-      etext.value = value || ''; emsg.textContent = '';
+      const title = id ? titleOf(id) : '';
+      etitle.textContent = kind === 'reviewer' ? W.reviewerTitle : (kind === 'fix' ? W.fixTitle : kind === 'hold' ? W.holdTitle : W.decisionTitle) + ' — ' + id + (title ? ' ' + title : '');
+      ehint.textContent = kind === 'fix' ? W.fixHint : kind === 'hold' ? W.holdHint : hintDefault;
+      etext.hidden = kind === 'reviewer'; ename.hidden = kind !== 'reviewer';
+      etext.placeholder = kind === 'fix' ? W.fixPlaceholder : kind === 'hold' ? W.holdPlaceholder : W.decisionPlaceholder;
+      // A decision not written yet: save and confirm, or only save.
+      eonly.hidden = !(kind === 'decision' && then === 'tick');
+      esave.textContent = kind === 'decision' && then === 'tick' ? W.decideSave : cfg.words.save || esave.textContent;
+      field().value = value || ''; emsg.textContent = '';
       if (ebox.showModal) ebox.showModal(); else ebox.setAttribute('open', '');
-      etext.focus();
+      field().focus();
     };
     const eshut = () => { if (ebox.close) ebox.close(); else ebox.removeAttribute('open'); };
+    // The buttons of one item, each kind with its own look: confirm (filled),
+    // request a change (ochre), hold (outlined), withdraw and unmark (quiet).
+    const buttonsFor = (it) => {
+      const out = [];
+      const button = (label, cls, onClick) => { const b = d.createElement('button'); b.type = 'button'; b.className = 'act ' + cls; b.textContent = label; b.setAttribute('aria-label', label + ': ' + it.id); b.addEventListener('click', onClick); out.push(b); return b; };
+      // An unanswered change request comes first: it can only be withdrawn (or answered by the agent).
+      if (it.state === 'fix') button(W.withdraw, 'act-quiet', () => act('withdraw', it.id));
+      else if (it.done) button(W.untick, 'act-quiet', () => act('untick', it.id));
+      else {
+        if (it.q && !it.decided) button(W.decideFirst, 'act-ok', () => edit('decision', it.id, '', 'tick'));
+        else button(W.tick, 'act-ok', () => act('tick', it.id));
+        button(W.fix, 'act-fix', () => edit('fix', it.id, ''));
+        if (it.state === 'hold') button(W.unhold, 'act-quiet', () => act('withdraw', it.id));
+        else button(W.hold, 'act-hold', () => edit('hold', it.id, ''));
+      }
+      if (it.q && it.decided) button(W.redecide, 'act-quiet', () => edit('decision', it.id, it.decision));
+      return out;
+    };
     R.items.forEach((it) => {
       const item = d.getElementById(it.id);
       const row = item && item.matches('main .item') ? item.querySelector('.ask-row') : null;
       if (!row) return;
-      const button = (label, onClick) => { const b = d.createElement('button'); b.type = 'button'; b.className = 'ask mark'; b.textContent = label; b.setAttribute('aria-label', label + ': ' + it.id); b.addEventListener('click', onClick); return b; };
       const first = row.firstChild;
-      const mark = it.done ? button(W.untick, () => run([['untick', it.id]], toast))
-        : it.q && !it.decided ? button(W.decideTick, () => edit('decision', it.id, '', 'tick'))
-        : button(W.tick, () => run([['tick', it.id]], toast));
-      row.insertBefore(mark, first);
-      if (it.q) row.insertBefore(button(W.decide, () => edit('decision', it.id, it.decision)), first);
+      buttonsFor(it).forEach((b) => row.insertBefore(b, first));
+    });
+    // A bar at the bottom with the buttons of the item being read: the buttons stay
+    // in one place however long the item is.
+    const mineCount = R.items.filter((it) => !it.done && (it.state === 'open' || it.state === 'fixed')).length;
+    const bar = d.createElement('div'); bar.className = 'actbar'; bar.setAttribute('role', 'region'); bar.setAttribute('aria-label', W.yourTurn.replace('{n}', String(mineCount)));
+    const barHead = d.createElement('p'); barHead.className = 'actbar-head';
+    const barButtons = d.createElement('div'); barButtons.className = 'actbar-buttons';
+    const barNext = d.createElement('div'); barNext.className = 'actbar-next';
+    const count = d.createElement('span'); count.className = 'count'; count.textContent = fill(W.yourTurn, { n: mineCount });
+    const nextB = d.createElement('button'); nextB.type = 'button'; nextB.className = 'act act-quiet'; nextB.textContent = W.next;
+    nextB.addEventListener('click', () => { const p = d.querySelector('.dock .primary'); if (p) p.click(); });
+    barNext.append(count, nextB);
+    bar.append(barHead, barButtons, barNext);
+    d.body.appendChild(bar);
+    d.body.classList.add('has-actbar');
+    const barSize = () => d.documentElement.style.setProperty('--bar', bar.offsetHeight + 'px');
+    barSize();
+    if (window.ResizeObserver) new ResizeObserver(barSize).observe(bar);
+    // The keys that write are listed with the others.
+    const keyList = d.querySelector('.keys ul');
+    if (keyList) (W.keysWrite || []).forEach(([k, text]) => { const li = d.createElement('li'); const kb = d.createElement('kbd'); kb.textContent = k; li.append(kb, text); keyList.appendChild(li); });
+    let shown = null;
+    const show = (id) => {
+      const it = id ? byId(id) : null;
+      shown = it;
+      barHead.textContent = '';
+      barButtons.textContent = '';
+      if (!it) return;
+      const tag = d.createElement('span'); tag.className = 'id'; tag.textContent = it.id;
+      const name = d.createElement('span'); name.className = 't'; name.textContent = titleOf(it.id);
+      barHead.append(tag, name);
+      if (it.done) { const st = d.createElement('span'); st.className = 'actbar-state'; st.textContent = (cfg.states && cfg.states.done) || ''; barButtons.appendChild(st); }
+      else buttonsFor(it).forEach((b) => barButtons.appendChild(b));
+      const q = d.createElement('button'); q.type = 'button'; q.className = 'ask'; q.textContent = W.ask; q.setAttribute('aria-label', W.ask + ': ' + it.id);
+      q.addEventListener('click', () => { const el = d.getElementById(it.id); if (el) open(el); });
+      barButtons.appendChild(q);
+    };
+    d.addEventListener('spec-relay-current', (e) => show(e.detail));
+    const cur = d.querySelector('main .item.is-current');
+    show(cur ? cur.id : null);
+    // x confirms, f requests a change, h holds the item in the bar (with the page's single-key switch on).
+    addEventListener('keydown', (e) => {
+      const on = d.getElementById('keys-on');
+      if (!on || !on.checked || !shown || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+      const t = e.target, tag = t && t.tagName;
+      if (tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable) || (tag === 'INPUT' && !/^(radio|checkbox)$/.test(t.type))) return;
+      if (ebox.open || box.open) return;
+      const it = shown;
+      if (e.key === 'x' && !it.done && it.state !== 'fix') { if (it.q && !it.decided) edit('decision', it.id, '', 'tick'); else act('tick', it.id); }
+      else if (e.key === 'f' && !it.done && it.state !== 'fix') edit('fix', it.id, '');
+      else if (e.key === 'h' && !it.done && it.state !== 'fix' && it.state !== 'hold') edit('hold', it.id, '');
+      else return;
+      e.preventDefault();
+    });
+    // The change requests the agent has not answered, sent to the chat in one message.
+    // Once sent, the button says so until a new request is written.
+    const fixes = d.getElementById('send-fixes');
+    const fixKey = R.items.filter((it) => it.state === 'fix').map((it) => it.id).join(',');
+    const sentKey = 'spec-relay-canvas-sent:' + cfg.page;
+    const markSent = () => { fixes.disabled = true; fixes.classList.add('is-sent'); fixes.textContent = fill(W.fixesWaiting, { n: R.fixes }); };
+    if (fixes && store(sentKey) === fixKey) markSent();
+    if (fixes) fixes.addEventListener('click', async () => {
+      fixes.disabled = true;
+      try {
+        const res = await fetch(base + '/fixes', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'fixes' }, body: JSON.stringify({ page: cfg.page }) });
+        if (!res.ok) throw new Error(String(res.status));
+        store(sentKey, fixKey);
+        markSent();
+        toast(W.fixesSent);
+      } catch (err) { fixes.disabled = false; toast(W.failed + ' (' + err.message + ')'); }
     });
     const who = d.getElementById('edit-reviewer');
     if (who) who.addEventListener('click', () => edit('reviewer', null, R.reviewer));
-    ebox.addEventListener('keydown', (e) => e.stopPropagation());
-    ebox.querySelector('.cancel').addEventListener('click', eshut);
-    ebox.querySelector('form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const value = etext.value.trim();
-      if (!value) { emsg.textContent = W.emptyValue; etext.focus(); return; }
-      esave.disabled = true; emsg.textContent = W.saving;
-      const steps = job.kind === 'reviewer' ? [['reviewer', null, value]] : [['decision', job.id, value], ...(job.then ? [[job.then, job.id]] : [])];
-      await run(steps, (m) => { emsg.textContent = m; }, { kind: job.kind, id: job.id, then: job.then || null, value });
-      esave.disabled = false;
+    etext.addEventListener('input', () => { emsg.textContent = ''; }); ename.addEventListener('input', () => { emsg.textContent = ''; });
+    ebox.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); ebox.querySelector('form').requestSubmit(); }
     });
+    ebox.querySelector('.cancel').addEventListener('click', eshut);
+    const save = async (then) => {
+      const value = field().value.replace(/\s+/g, ' ').trim();
+      if (!value) { emsg.textContent = W.emptyValue; field().focus(); return; }
+      esave.disabled = true; eonly.disabled = true; emsg.textContent = W.saving;
+      const kind = job.kind, id = job.id;
+      const steps = kind === 'reviewer' ? [['reviewer', null, value]] : kind === 'fix' || kind === 'hold' ? [[kind, id, value]] : [['decision', id, value], ...(then ? [[then, id]] : [])];
+      const said = kind === 'reviewer' ? null : { m: fill(kind === 'decision' ? (then ? W.did.tick : W.did.decision) : W.did[kind], { id }), undo: kind === 'fix' || kind === 'hold' ? [['withdraw', id]] : null };
+      await run(steps, (m) => { emsg.textContent = m; }, { kind, id, then: then || null, value }, said);
+      esave.disabled = false; eonly.disabled = false;
+    };
+    ebox.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); save(job.then); });
+    eonly.addEventListener('click', () => save(null));
     let draft = null;
     const kept = store('spec-relay-canvas-draft');
     if (kept) store('spec-relay-canvas-draft', null);
@@ -325,6 +515,14 @@ const CANVAS_SCRIPT = String.raw`(() => {
         edit(draft.kind, draft.id, draft.value, draft.then || undefined);
         emsg.textContent = W.changed;
       }
+    }
+    // The toast of the last write, with its undo.
+    const said = store('spec-relay-canvas-toast');
+    if (said) {
+      store('spec-relay-canvas-toast', null);
+      let t = null;
+      try { t = JSON.parse(said); } catch (e) { t = { m: said }; }
+      if (t && t.m) toast(t.m, t.undo ? { label: W.undo, run: () => run(t.undo, toast, null, { m: W.undone, undo: null }) } : null);
     }
   }
   // Links the canvas cannot show (images, source files, other sites) would leave it with no way back.
@@ -340,10 +538,50 @@ const CANVAS_SCRIPT = String.raw`(() => {
   d.addEventListener('auxclick', hold, true);
   // After a reload, put the focus back where it was, and say what was saved.
   const said = store('spec-relay-canvas-toast');
-  if (said) { store('spec-relay-canvas-toast', null); toast(said); }
+  if (said) { store('spec-relay-canvas-toast', null); let t = null; try { t = JSON.parse(said); } catch (e) { t = { m: said }; } if (t && t.m) toast(t.m); }
   const was = store('spec-relay-canvas-focus');
   if (was) { store('spec-relay-canvas-focus', null); const el = d.getElementById(was); if (el) el.focus({ preventScroll: true }); }
-  const keepFocus = () => { const el = d.activeElement && d.activeElement.closest ? d.activeElement.closest('[id]') : null; if (el && el !== d.body) store('spec-relay-canvas-focus', el.id); };
+  // Before a reload, remember where the reader is: the item they acted on (or the
+  // first one on screen) and how far from the top it stood. The page comes back
+  // there, not at its top. Kept in sessionStorage and in history.state (either
+  // may be refused); the address loses its #fragment, so the page does not jump to it.
+  const keepPlace = (acted) => {
+    // The item a button acted on (in the bar too), else where the focus is.
+    const own = acted ? d.getElementById(acted) : null;
+    const active = own || (d.activeElement && d.activeElement.closest ? d.activeElement.closest('[id]') : null);
+    if (active && active !== d.body) store('spec-relay-canvas-focus', active.id);
+    let el = own && own.matches('main .item') ? own : d.activeElement && d.activeElement.closest ? d.activeElement.closest('main .item') : null;
+    if (!el || el.getBoundingClientRect().bottom < 0 || el.getBoundingClientRect().top > innerHeight) el = [...d.querySelectorAll('main .item, main .group > h2')].find((x) => x.offsetParent !== null && x.getBoundingClientRect().bottom > 0) || null;
+    const place = { page: cfg.page, id: el && el.id ? el.id : null, top: el ? el.getBoundingClientRect().top : 0, y: scrollY };
+    store('spec-relay-canvas-place', JSON.stringify(place));
+    // Only for this reload: the browser's own restore would fight ours.
+    try { history.scrollRestoration = 'manual'; } catch (e) { /* not supported */ }
+    try { history.replaceState(Object.assign({}, history.state, { specRelayPlace: place }), '', location.pathname + location.search); } catch (e) { /* refused */ }
+  };
+  let place = null;
+  try { place = JSON.parse(store('spec-relay-canvas-place') || 'null'); } catch (e) { place = null; }
+  if (!place && history.state && history.state.specRelayPlace) place = history.state.specRelayPlace;
+  store('spec-relay-canvas-place', null);
+  try { if (history.state && history.state.specRelayPlace) { const s2 = Object.assign({}, history.state); delete s2.specRelayPlace; history.replaceState(s2, ''); } } catch (e) { /* refused */ }
+  if (place && place.page === cfg.page) {
+    let moved = false;
+    const put = () => {
+      if (moved) return;
+      const el = place.id ? d.getElementById(place.id) : null;
+      if (el && el.offsetParent !== null) scrollTo(0, scrollY + el.getBoundingClientRect().top - place.top); else scrollTo(0, place.y);
+    };
+    put();
+    // Late layout (fonts, images) may move it once more; a scroll by the reader ends that.
+    addEventListener('wheel', () => { moved = true; }, { once: true, passive: true });
+    addEventListener('keydown', () => { moved = true; }, { once: true });
+    addEventListener('touchstart', () => { moved = true; }, { once: true, passive: true });
+    addEventListener('mousedown', () => { moved = true; }, { once: true });
+    addEventListener('hashchange', () => { moved = true; }, { once: true });
+    addEventListener('load', () => { put(); setTimeout(() => { put(); moved = true; }, 80); });
+    setTimeout(put, 0);
+  }
+  // A manual reload or Back gets the browser's own restore again.
+  try { history.scrollRestoration = 'auto'; } catch (e) { /* not supported */ }
   // Follow the files: reload when they change, go where the agent sent the canvas.
   let busy = false, misses = 0;
   setInterval(async () => {
@@ -355,7 +593,7 @@ const CANVAS_SCRIPT = String.raw`(() => {
       misses = 0;
       // Seen once: a jump to an anchor on this same page does not reload it, so it must not repeat.
       if (s.goto && s.goto.seq > cfg.seq) { cfg.seq = s.goto.seq; location.href = base + '/r/' + s.goto.path; }
-      else if (s.version !== cfg.version) { keepFocus(); location.reload(); }
+      else if (s.version !== cfg.version) { keepPlace(); location.reload(); }
     } catch (err) {
       misses += 1;
       if (misses === 3 && !d.querySelector('.canvas-gone')) { const p = d.createElement('p'); p.className = 'canvas-gone'; p.setAttribute('role', 'status'); p.textContent = W.gone; d.body.prepend(p); }
@@ -373,16 +611,19 @@ export function interactive(html, { lang, pagePath, title, version, seq, nonce, 
   const L = labels(lang);
   const current = path.posix.basename(pagePath);
   const nav = `<nav class="canvas-nav" aria-label="${escapeHtml(W.nav)}"><a href="progress.html"${current === 'progress.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.progress)}</a><a href="specs.html"${current === 'specs.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.specs)}</a>${guide ? `<a href="guide.html"${current === 'guide.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.guide)}</a>` : ''}</nav>
-<p class="ask-row ask-page"><button type="button" class="ask" id="ask-page">${escapeHtml(W.askPage)}</button>${review ? ` <button type="button" class="ask mark" id="edit-reviewer">${escapeHtml(review.reviewer ? `${W.reviewer}: ${review.reviewer}` : W.reviewerSet)}</button>` : ''}</p>`;
-  const words = Object.fromEntries(['ask', 'askAbout', 'sending', 'sent', 'failed', 'empty', 'noLink', 'gone', ...(answers ? ['answer', 'helpful', 'qaSaved', 'qaFailed'] : []),
-    ...(review ? ['tick', 'untick', 'decide', 'decideTick', 'decisionTitle', 'reviewerTitle', 'saving', 'saved', 'changed', 'saveFailed', 'emptyValue', 'needDecision', 'notUtf8', 'busy', 'noLine', 'placeholder', 'noFile', 'bad'] : [])].map((k) => [k, W[k]]));
-  const config = JSON.stringify({ page: pagePath, title, version, seq, words, review, ...(answers ? { answers } : {}) }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+<p class="ask-row ask-page"><button type="button" class="ask" id="ask-page">${escapeHtml(W.askPage)}</button>${review ? ` <button type="button" class="ask mark" id="edit-reviewer">${escapeHtml(review.reviewer ? `${W.reviewer}: ${review.reviewer}` : W.reviewerSet)}</button>` : ''}</p>${review?.fixes ? `\n<p class="ask-row ask-page"><button type="button" class="act act-fix act-wide" id="send-fixes">${escapeHtml(W.sendFixes(review.fixes))}</button></p>` : ''}`;
+  const words = Object.fromEntries(['ask', 'zoomIn', 'zoomOut', 'askAbout', 'sending', 'sent', 'failed', 'empty', 'noLink', 'gone', ...(answers ? ['answer', 'helpful', 'qaSaved', 'qaFailed'] : []),
+    ...(review ? ['tick', 'untick', 'decide', 'decideTick', 'decisionTitle', 'reviewerTitle', 'saving', 'saved', 'changed', 'saveFailed', 'emptyValue', 'needDecision', 'notUtf8', 'busy', 'noLine', 'placeholder', 'noFile', 'bad',
+      'fix', 'hold', 'withdraw', 'unhold', 'fixTitle', 'holdTitle', 'fixHint', 'holdHint', 'fixesSent', 'fixesWaiting', 'openFix', 'noNote',
+      'fixPlaceholder', 'holdPlaceholder', 'decisionPlaceholder', 'did', 'undo', 'yourTurn', 'next', 'decideFirst', 'decideSave', 'decideOnly', 'redecide', 'reviewer', 'reviewerSet', 'save', 'undone', 'keysWrite'] : [])].map((k) => [k, W[k]]));
+  const config = JSON.stringify({ page: pagePath, title, version, seq, words, review, ...(review ? { states: L.states } : {}), ...(answers ? { answers } : {}) }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const dialog = `<dialog class="ask-box" id="ask-box" aria-labelledby="ask-title" aria-describedby="ask-about"><form method="dialog"><h2 id="ask-title">${escapeHtml(W.askTitle)}</h2><p class="about" id="ask-about"></p>
 <textarea id="ask-text" maxlength="4000" aria-labelledby="ask-title" aria-describedby="ask-about ask-hint ask-msg"></textarea>
 <p class="hint" id="ask-hint">${escapeHtml(W.askHint)}</p><p class="msg" id="ask-msg" role="status"></p><div class="buttons"><button type="button" class="cancel">${escapeHtml(W.cancel)}</button><button type="submit" class="primary">${escapeHtml(W.send)}</button></div></form></dialog>
 ${review ? `<dialog class="ask-box" id="edit-box" aria-labelledby="edit-title"><form method="dialog"><h2 id="edit-title"></h2>
-<input type="text" id="edit-text" maxlength="500" autocomplete="off" aria-labelledby="edit-title" aria-describedby="edit-hint edit-msg">
-<p class="hint" id="edit-hint">${escapeHtml(W.editHint)}</p><p class="msg" id="edit-msg" role="status"></p><div class="buttons"><button type="button" class="cancel">${escapeHtml(W.cancel)}</button><button type="submit" class="primary">${escapeHtml(W.save)}</button></div></form></dialog>
+<textarea id="edit-text" rows="4" maxlength="500" aria-labelledby="edit-title" aria-describedby="edit-hint edit-msg"></textarea>
+<input type="text" id="edit-name" maxlength="500" autocomplete="off" aria-labelledby="edit-title" aria-describedby="edit-hint edit-msg" hidden>
+<p class="hint" id="edit-hint">${escapeHtml(W.editHint)}</p><p class="msg" id="edit-msg" role="status"></p><div class="buttons"><button type="button" class="cancel">${escapeHtml(W.cancel)}</button><button type="button" class="only" id="edit-only" hidden>${escapeHtml(W.decideOnly)}</button><button type="submit" class="primary">${escapeHtml(W.save)}</button></div></form></dialog>
 ` : ''}<script type="application/json" id="canvas-config">${config}</script>
 <script nonce="${nonce}">${CANVAS_SCRIPT}</script>`;
   return html
@@ -393,6 +634,8 @@ ${review ? `<dialog class="ask-box" id="edit-box" aria-labelledby="edit-title"><
     // The canvas follows the files: no "render again", and the tick is a button here.
     .replace(`<footer>${escapeHtml(L.note)}</footer>`, () => `<footer>${escapeHtml(W.note)}</footer>`)
     .replace(`<li>${L.howto[2]}</li>`, () => (review ? `<li>${escapeHtml(W.howto)}</li>` : `<li>${L.howto[2]}</li>`))
+    // A blank decision is written with the button here, not in the file.
+    .replace(/(<div class="decision is-blank"><span class="label">[^<]*<\/span><p>)[^<]*(<\/p>)/g, (m, a, b) => (review ? `${a}${escapeHtml(W.noDecisionHere)}${b}` : m))
     .replace(/(<p class="meta">[^<]*<\/p>)/, (m) => `${m}\n${nav}`)
     .replace(/<\/body>\s*<\/html>\s*$/, () => `${dialog}\n</body>\n</html>\n`);
 }
@@ -409,6 +652,15 @@ export function askPrompt({ question, title, item, page: pagePath, id }, lang) {
   const back = id ? ` Then also send the answer to the canvas: invoke_canvas_action, actionName post_answer, input {"id": "${oneLine(id, 20)}", "answer": "<the answer, Markdown>"}; it shows under the item, and the person decides whether to save it.` : '';
   const prompt = `[canvas] ${q}\n\n(${lang === 'ja' ? '対象' : 'About'}: ${where}; page ${oneLine(pagePath, 300)}. The person typed this question in the spec-relay canvas. Answer it in the chat.${back} It is a question, not an approval: do not tick review.md, record a decision or archive because of it.)`;
   return { prompt, displayPrompt: `[canvas] ${q}${where ? `\n(${where})` : ''}` };
+}
+
+// The message for "send the change requests to the agent": what the person wrote
+// under each item, and what the agent does with it. A request for work, never an approval.
+export function fixPrompt({ change, items }, lang) {
+  const list = items.map((i) => `- ${i.id}: ${oneLine(i.remarks.filter((r) => r.kind === 'fix').pop()?.text, 500)}`).join('\n');
+  const head = lang === 'ja' ? `[canvas] ${change} のレビューで、直してほしい項目が ${items.length} 件あります。` : `[canvas] ${items.length} change request${items.length === 1 ? '' : 's'} in the review of ${change}.`;
+  const prompt = `${head}\n${list}\n\n(The person wrote these under the items of openspec/changes/${oneLine(change, 128)}/review.md with the canvas ("- fix: ..."). Read review.md again, correct the artifacts as the Reviews section of the spec-relay skill says, write "  - fixed: <what you changed>" under each fix line, keep the items unticked, render again and tell the person. It is a request for a change, not an approval: do not tick review.md or archive because of it.)`;
+  return { prompt, displayPrompt: `${head}\n${list}` };
 }
 
 // ---------------------------------------------------------------- the server
@@ -498,9 +750,9 @@ function reviewState(file) {
   const items = parseReview(text).flatMap((g) => g.items).filter((i) => i.id && !seen.has(i.id) && seen.add(i.id))
     .map((i) => {
       const decision = i.decision === null ? '' : decisionOf(`decision: ${i.decision}`);
-      return { id: i.id, done: i.done, q: i.letter === 'Q', decided: Boolean(decision), decision };
+      return { id: i.id, done: i.done, q: i.letter === 'Q', decided: Boolean(decision), decision, state: i.state };
     });
-  return { hash: sha256(buffer), items, reviewer: reviewerOf(text) };
+  return { hash: sha256(buffer), items, reviewer: reviewerOf(text), fixes: reviewRemarks(text).filter((i) => i.openFix).length };
 }
 
 const sameToken = (a, b) => {
@@ -627,6 +879,22 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         checked = Date.now();
         return reply(200, { ok: true, file: result.file });
       }
+      if (rest.length === 1 && rest[0] === 'fixes') {
+        // "Send the change requests to the agent": the open fix notes of this page's review.md, read here, in one message.
+        const origin = req.headers.origin;
+        if (req.method !== 'POST' || req.headers['x-spec-relay'] !== 'fixes' || (origin && origin !== `http://127.0.0.1:${port}`)) return send(res, 403, 'text/plain; charset=utf-8', 'forbidden');
+        const reply = (code, body) => send(res, code, 'application/json; charset=utf-8', JSON.stringify(body));
+        let body;
+        try { body = JSON.parse(await readBody(req)); } catch { return reply(400, { ok: false, problem: 'bad request' }); }
+        const name = body && typeof body.page === 'string' && body.page.startsWith(`${VIEWS}/`) ? path.posix.basename(body.page, '.html') : '';
+        const found = name ? reviewFile(root, name) : null;
+        if (!found) return reply(404, { ok: false, code: 'noFile', problem: 'this page has no review.md' });
+        const text = utf8Text(fs.readFileSync(found.file));
+        const open = text === null ? [] : reviewRemarks(text).filter((i) => i.openFix);
+        if (!open.length) return reply(409, { ok: false, problem: 'no change request is open' });
+        await ask(fixPrompt({ change: found.name, items: open }, lang()));
+        return reply(200, { ok: true, count: open.length });
+      }
       if (rest.length === 1 && rest[0] === 'review') {
         const origin = req.headers.origin;
         if (req.method !== 'POST' || req.headers['x-spec-relay'] !== 'review' || (origin && origin !== `http://127.0.0.1:${port}`)) return send(res, 403, 'text/plain; charset=utf-8', 'forbidden');
@@ -635,9 +903,9 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         try { body = JSON.parse(await readBody(req)); } catch { return reply(400, { ok: false, problem: 'bad request' }); }
         if (!body || typeof body !== 'object') return reply(400, { ok: false, problem: 'bad request' });
         const { action, id, value, hash } = body;
-        if (!['tick', 'untick', 'decision', 'reviewer'].includes(action) || typeof hash !== 'string'
+        if (!['tick', 'untick', 'decision', 'reviewer', 'fix', 'hold', 'withdraw'].includes(action) || typeof hash !== 'string'
           || (action === 'reviewer' ? typeof value !== 'string' : typeof id !== 'string')
-          || (action === 'decision' && typeof value !== 'string')) return reply(400, { ok: false, problem: 'bad request' });
+          || (['decision', 'fix', 'hold'].includes(action) && typeof value !== 'string')) return reply(400, { ok: false, problem: 'bad request' });
         const name = typeof body.page === 'string' && body.page.startsWith(`${VIEWS}/`) ? path.posix.basename(body.page, '.html') : '';
         const found = name ? reviewFile(root, name) : null;
         if (!found) return reply(404, { ok: false, code: 'noFile', problem: 'this page has no review.md to write' });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { checkReview, checkPortReady, checkPortDone, baselineHash, archivedChange, sourceFiles, databaseHash, main, nextSteps, language, inventoryRows, inventoryRowFor } from '../scripts/gate.mjs';
+import { checkReview, checkPortReady, checkPortDone, baselineHash, archivedChange, sourceFiles, databaseHash, main, nextSteps, language, inventoryRows, inventoryRowFor, reviewRemarks, noteState } from '../scripts/gate.mjs';
 import { quiet } from './helpers.mjs';
 import { tempDir, write } from './helpers.mjs';
 
@@ -991,4 +991,26 @@ test('a test database given as a fenced command block counts', () => {
   write(dir, `${T}/review.md`, 'Reviewer: Uma\n- [x] A1 platform\n- [x] A2 billing\n- [x] E1 platform\n- [x] E2 billing\n' + UI_BOXES + '- [x] D0 policy\n- [x] D1 procedure: keep\n- [x] D2 trigger: keep\n- [x] D90 e\n- [x] D91 m\n- [x] D92 s\n');
   write(dir, `${T}/data.md`, '# Data\n\n## Schema policy\nkeep\n\n## Database logic\n| Kind | Handling | Reason |\n|---|---|---|\n| procedure | keep | |\n| trigger | keep | |\n\n## Data access mapping\n| Topic | Source behavior | Target rule |\n|---|---|---|\n| Character set | cp932 | same |\n\n## Schema changes\nno migrations\n\n## Test database\n```powershell\nsqllocaldb create spec-relay\n```\n');
   assert.deepEqual(checkReview(dir, 'target-design'), { ok: true, problems: [] });
+});
+
+test('review notes: an unanswered fix stops the gate for the agent, a hold waits for the person', () => {
+  const items = reviewRemarks('## 1\n- [ ] K1 a\n  - fix: merge\n  - fixed: merged\n  - fix: rename too\n- [x] K2 b\n  - hold: ask\n- [ ] M1 c\n  - hold: ask ops\n<!--\n- [ ] M2 d\n  - fix: in a comment\n-->\n```\n- [ ] M3 e\n  - fix: in a fence\n```\n- [ ] M4 f\nnot indented\n  - fix: not a note of M4\n');
+  assert.deepEqual(items.map((i) => [i.id, i.openFix, i.remarks.map((r) => r.kind).join(',')]), [['K1', true, 'fix,fixed,fix'], ['K2', false, 'hold'], ['M1', false, 'hold'], ['M4', false, '']]);
+  const result = { ok: false, problems: ['not ticked: K1 a', 'not ticked: M1 c', 'not ticked: M4 f', 'fix requested and not answered: K1 — rename too', 'on hold: M1 — ask ops'] };
+  const next = nextSteps('review', result, 'ja');
+  assert.match(next.person.join('\n'), /直してほしいと書いた項目が 1 件あります（K1）/);
+  assert.match(next.person.join('\n'), /保留中の項目が 1 件あります（M1）/);
+  assert.match(next.person.join('\n'), /未承認の項目が 1 件あります（M4）/, 'items with a note are not counted again as unticked');
+  assert.deepEqual(next.agent, ['fix requested and not answered: K1 — rename too']);
+});
+
+test('review notes as people write them: unindented, full-width colons, bold labels; the latest note wins', () => {
+  const items = reviewRemarks('- [ ] K1 a\n- fix： 全角のコロン\n- [ ] K2 b\n  - **hold**: bold\n- [ ] K3 c\n  <!-- a comment line -->\n  - fix: after a comment\n');
+  assert.deepEqual(items.map((i) => [i.id, i.state, i.remarks.map((r) => r.text).join('|')]), [['K1', 'fix', '全角のコロン'], ['K2', 'hold', 'bold'], ['K3', 'fix', 'after a comment']]);
+  assert.equal(noteState(false, [{ kind: 'hold' }, { kind: 'fixed' }]), 'fixed');
+  assert.equal(noteState(false, [{ kind: 'fix' }, { kind: 'fixed' }, { kind: 'hold' }]), 'hold');
+  assert.equal(noteState(true, [{ kind: 'hold' }]), 'done');
+  assert.equal(noteState(true, [{ kind: 'fix' }]), 'fix', 'a tick does not hide an unanswered fix');
+  const next = nextSteps('review', { ok: false, problems: ['not ticked: R04: total', 'fix requested and not answered: R4 — wrong'] }, 'en');
+  assert.doesNotMatch(next.person.join('\n'), /not approved yet/, 'R04 and R4 are the same item');
 });

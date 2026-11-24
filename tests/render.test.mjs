@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { render, markdown, inline, parseRefs, parseReview, parseQuestions, diffChars, commonIndent, timeStamp, main, capabilities } from '../scripts/render.mjs';
 import { tempDir, write, quiet, crlf } from './helpers.mjs';
+import { contextFields, surveyFacts, surveyAid, contextCard } from '../scripts/survey-view.mjs';
 
 const CHANGE = 'openspec/changes/extract-billing-invoice';
 const SPEC = '## Purpose\n\nComputes invoice totals from the lines of an invoice.\n\n## ADDED Requirements\n\n### Requirement: Total\nThe system SHALL add the lines.\n\n#### Scenario: two lines\n- **WHEN** 100 x 3 and 55 x 1\n- **THEN** `355`\n\n### Requirement: Reject empty\nThe system SHALL reject an invoice without lines.\n\n#### Scenario: none\n- **WHEN** no lines\n- **THEN** an error\n';
@@ -34,11 +35,11 @@ test('an extract change renders as a review page with progress, items, trace and
   assert.deepEqual(render({ root: dir, change: 'extract-billing-invoice' }), { ok: true, out: 'openspec/spec-relay/views/extract-billing-invoice.html' });
   const page = html(dir, 'extract-billing-invoice');
   assert.match(page, /<html lang="ja">/);
-  assert.match(page, /<p class="remain"><b>1<\/b>件が未確認<\/p>/, 'one of three items is open');
+  assert.match(page, /<p class="remain"><b>1<\/b>件 あなたの番<\/p>/, 'one of three items is open');
   assert.match(page, /3 件中 2 件を確認済み/);
-  assert.match(page, /class="item k-req is-done" id="R1"[\s\S]*Total/);
-  assert.match(page, /class="item k-req is-open" id="R2"/);
-  assert.match(page, /href="#R2">最初の未確認 R2 へ/);
+  assert.match(page, /class="item k-req is-done st-done" id="R1"[\s\S]*Total/);
+  assert.match(page, /class="item k-req is-open is-mine st-open" id="R2"/);
+  assert.match(page, /href="#R2">次に見る R2 へ/);
   assert.match(page, /<dl class="gwt"><div class="when"><dt>操作<small>WHEN<\/small><\/dt>/, 'scenario steps with their Japanese names');
   assert.match(page, /<span class="q-kind">バグの疑い<\/span>/, 'the question shows its section of questions.md');
   assert.match(page, /trace\.md に記載がありません/, 'R2 has no trace entry');
@@ -190,8 +191,8 @@ test('a requirement without a review row is open and says so; a row that names n
   write(dir, `${CHANGE}/review.md`, 'Reviewer: Uma\n\n## 1. Requirements\n- [x] R1 Total\n- [x] R7 Gone\n\n## 2. Empty\n');
   render({ root: dir, change: 'extract-billing-invoice' });
   const page = html(dir, 'extract-billing-invoice');
-  assert.match(page, /<p class="remain"><b>2<\/b>件が未確認<\/p>/, 'the unlisted requirement and the unlisted question count as open');
-  assert.match(page, /class="item k-req is-open" id="x1"[\s\S]*?Reject empty[\s\S]*?review\.md に項目がありません/);
+  assert.match(page, /<p class="remain"><b>2<\/b>件 あなたの番<\/p>/, 'the unlisted requirement and the unlisted question count as open');
+  assert.match(page, /class="item k-req is-open is-mine st-open" id="x1"[\s\S]*?Reject empty[\s\S]*?review\.md に項目がありません/);
   assert.match(page, /id="R7"[\s\S]*?同じ名前の要件が仕様にありません/);
   assert.doesNotMatch(page, /Empty/, 'a group without items is not shown');
 });
@@ -209,9 +210,9 @@ test('review items are any <Letter><n> id, grouped by the headings of review.md'
   assert.match(page, /id="doc-ui-md"/);
   assert.match(page, /移行先設計レビュー/);
   assert.match(page, /<h2 id="g1">アーキテクチャ<span class="n">確認済み 1 \/ 2<\/span>/);
-  assert.match(page, /class="item small is-open" id="E1"/);
+  assert.match(page, /class="item is-open is-mine st-open" id="E1"[\s\S]*?<details class="how-fold"><summary>確認のしかた<\/summary>[\s\S]*?verification\.md/);
   assert.match(page, /id="doc-architecture-md"/);
-  assert.match(page, /<b>3<\/b>件が未確認/);
+  assert.match(page, /<b>3<\/b>件 あなたの番/);
 });
 
 test('questions are found in every shape the gate accepts', () => {
@@ -230,8 +231,8 @@ test('a decision and its tick that disagree are flagged, and unlisted questions 
   write(dir, `${CHANGE}/review.md`, `${REVIEW.replace('decision: keep', 'decision:')}- [ ] Q2 Units: decision: integers\n`);
   render({ root: dir, change: 'extract-billing-invoice' });
   const page = html(dir, 'extract-billing-invoice');
-  assert.match(page, /id="Q1"[\s\S]*?チェック済みですが、判断が未記入です/);
-  assert.match(page, /id="Q2"[\s\S]*?判断は書かれていますが、チェックされていません/);
+  assert.match(page, /id="Q1"[\s\S]*?確認済みですが、判断が未記入です/);
+  assert.match(page, /id="Q2"[\s\S]*?判断は書かれていますが、まだ確認済みにしていません/);
   assert.match(page, /<span class="id">Q3<\/span>[\s\S]*?review\.md に項目がありません/);
 });
 
@@ -243,14 +244,14 @@ test('screens show their table and messages, and the screenshot as a relative im
   write(dir, `${CHANGE}/review.md`, `${REVIEW}\n## 3. Screens\n- [ ] S1 Entry\n- [ ] S2 Outside\n- [ ] S3 Remote\n`);
   render({ root: dir, change: 'extract-billing-invoice' });
   const page = html(dir, 'extract-billing-invoice');
-  assert.match(page, /class="item k-screen is-open" id="S1"/);
+  assert.match(page, /class="item k-screen is-open is-mine st-open" id="S1"/);
   assert.match(page, /<img src="\.\.\/screens\/entry\.png" alt="[^"]*" loading="lazy"><figcaption><a href="\.\.\/screens\/entry\.png">原寸で開く<\/a>/);
   assert.match(page, /<td>Customer<\/td>[\s\S]*?&quot;No lines&quot; - when empty/);
   assert.equal(count(page, /<img /g), 1, 'nothing outside the repository and nothing remote is loaded');
   assert.equal(count(page, /画像ファイルがありません/g), 2);
   assert.doesNotMatch(page, /id="doc-screens-md"/, 'screens already shown are not repeated');
-  assert.match(page, /照合（AI の再確認）<\/span><span><span>confirmed<\/span> — src\/a\.cs:1/);
-  assert.match(page, /<span class="caution">unclear<\/span>/);
+  assert.match(page, /照合（AI の再確認）<\/span><span><span>一致（confirmed）<\/span> — src\/a\.cs:1/);
+  assert.match(page, /<span class="caution">不明（unclear）<\/span>/);
   // Written elsewhere, the page still points at the same file.
   render({ root: dir, change: 'extract-billing-invoice', out: 'out/deep/page.html' });
   assert.match(fs.readFileSync(path.join(dir, 'out/deep/page.html'), 'utf8'), /<img src="\.\.\/\.\.\/openspec\/spec-relay\/screens\/entry\.png"/);
@@ -263,13 +264,14 @@ test('a survey shows each context as an item and keeps the relationships table',
     'context-map.md': '# Context map\n\n## Contexts\n\n### Context: platform\n- **Type**: generic\n\n### Context: billing-core\n- **Type**: core\n\n### Context: order\n- **Type**: supporting\n\n## Relationships\n| Upstream | Downstream | Pattern | Channel |\n|---|---|---|---|\n| order | billing-core | customer-supplier | table t_order |\n',
   });
   assert.match(page, /調査レビュー/);
-  assert.match(page, /class="item k-context is-done" id="K1"[\s\S]*?<strong>Type<\/strong>: generic/);
-  assert.match(page, /class="item k-context is-open" id="K2"[\s\S]*?<strong>Type<\/strong>: core/);
+  assert.match(page, /class="item k-context is-done st-done" id="K1"[\s\S]*?<details class="fold">[\s\S]*?class="ctx-type t-generic">汎用（generic）/);
+  assert.match(page, /class="item k-context is-open is-mine st-open" id="K2"[\s\S]*?class="ctx-type t-core">中核（core）[\s\S]*?上流（これが使う）[\s\S]*?order/);
   assert.match(page, /id="K9"[\s\S]*?同じ id のコンテキストが context-map\.md にありません/);
-  assert.match(page, /class="item k-context is-open" id="x1"[\s\S]*?order[\s\S]*?review\.md に項目がありません/);
+  assert.match(page, /class="item k-context is-open is-mine st-open" id="x1"[\s\S]*?order[\s\S]*?review\.md に項目がありません/);
   assert.match(page, /id="doc-context-map-md"[\s\S]*?<th>Channel<\/th>[\s\S]*?<td>table t_order<\/td>/);
-  assert.equal(count(page, /<strong>Type<\/strong>: core/g), 1, 'the contexts are not repeated in the appendix');
-  assert.match(page, /<b>4<\/b>件が未確認/);
+  assert.equal(count(page, /class="ctx-type t-core"/g), 1, 'the contexts are not repeated in the appendix');
+  assert.equal(count(page, /<strong>Type<\/strong>/g), 0, 'the appendix does not repeat the contexts');
+  assert.match(page, /<b>4<\/b>件 あなたの番/);
 });
 
 test('an amendment shows the old wording from the baseline against the new', () => {
@@ -286,9 +288,9 @@ test('an amendment shows the old wording from the baseline against the new', () 
   assert.match(page, /<span class="delta added">＋ 追加<\/span><span>new one<\/span>/);
   assert.match(page, /<section class="scenario gone">[\s\S]*?<span class="delta removed">－ 削除<\/span><span>dropped<\/span>/);
   assert.match(page, /<span class="delta added">＋ 追加<\/span>Zero rate/);
-  assert.match(page, /class="item k-req is-open is-removed" id="R3"[\s\S]*?<div class="statement gone"><p>The system SHALL recalculate\.<\/p><\/div>[\s\S]*?not in the code/);
+  assert.match(page, /class="item k-req is-open is-mine st-open is-removed" id="R3"[\s\S]*?<div class="statement gone"><p>The system SHALL recalculate\.<\/p><\/div>[\s\S]*?not in the code/);
   assert.match(page, /id="R4"[\s\S]*?現在の仕様（openspec\/specs）に同じ名前の要件がありません/);
-  assert.match(page, /class="item small is-open" id="I1"/);
+  assert.match(page, /class="item is-open is-mine st-open" id="I1"[\s\S]*?<div class="how">[\s\S]*?impact\.md/);
   assert.doesNotMatch(page, /delta[^"]*">△/, 'the change mark is not the caution mark');
 });
 
@@ -296,7 +298,8 @@ test('the character difference is deterministic and gives up on very long texts'
   assert.deepEqual(diffChars('税額を四捨五入で加える', '税額を切り捨てで加える'), [['=', '税額を'], ['-', '四'], ['+', '切り'], ['=', '捨'], ['-', '五入'], ['+', 'て'], ['=', 'で加える']]);
   assert.deepEqual(diffChars('same', 'same'), [['=', 'same']]);
   assert.deepEqual(diffChars('', 'new'), [['+', 'new']]);
-  assert.equal(diffChars('a'.repeat(1001), 'b'.repeat(1001)), null);
+  assert.equal(diffChars('あ'.repeat(1001), 'い'.repeat(1001)), null);
+  assert.deepEqual(diffChars('Lock after 48 hours', 'Lock after 24 hours'), [['=', 'Lock after '], ['-', '48'], ['+', '24'], ['=', ' hours']], 'a number changes as a whole');
 });
 
 test('long snippets stop at 80 lines, lose their shared indentation and keep their line numbers', () => {
@@ -328,7 +331,7 @@ test('the page works without script and leaves the reader in control', () => {
   render({ root: dir, change: 'extract-billing-invoice' });
   const page = html(dir, 'extract-billing-invoice');
   assert.match(page, /<details class="toc"><summary>目次<\/summary>/, 'the index ships closed');
-  assert.match(page, /body:has\(#f-open:checked\) main \.item\.is-done,body:has\(#f-open:checked\) \.toc li\.is-done\{display:none\}/, 'the filter leaves the progress cells alone');
+  assert.match(page, /body:has\(#f-open:checked\) main \.item:not\(\.is-mine\),body:has\(#f-open:checked\) \.toc li:not\(\.is-mine\)\{display:none\}/, 'the filter leaves the progress cells alone');
   assert.doesNotMatch(page, /scroll-behavior/);
   assert.match(page, /<input type="checkbox" id="keys-on" checked>/, 'single-key shortcuts can be turned off');
   assert.match(page, /Content-Security-Policy" content="default-src 'none'/);
@@ -434,7 +437,7 @@ test('renames, deltas that name no baseline requirement and two amendments are a
   const page = html(dir, 'spec-billing-invoice');
   assert.match(page, /id="R1"[\s\S]*?Total → Grand total[\s\S]*?修正中の変更があります（amend-a）[\s\S]*?<ins> and the tax<\/ins>/);
   assert.match(page, /id="R1"[\s\S]*?invoice_total[\s\S]*?id="R2"/, 'the evidence follows the rename');
-  assert.match(page, /id="R2"[\s\S]*?修正中の変更があります（amend-b）[\s\S]*?<ins>n on<\/ins>/);
+  assert.match(page, /id="R2"[\s\S]*?修正中の変更があります（amend-b）[\s\S]*?<del>reject<\/del>[\s\S]*?<ins>warn on<\/ins>/);
   assert.match(page, /id="R3"[\s\S]*?Totals[\s\S]*?現在の仕様（openspec\/specs）に同じ名前の要件がありません/, 'a delta that names nothing is not dropped');
   assert.doesNotMatch(page, /PENDING/, 'the trace of an amendment in progress is not the evidence of an unchanged requirement');
 });
@@ -508,4 +511,91 @@ test('a relative --root writes the page inside that root; a change folder linked
   try { fs.symlinkSync(outside, path.join(dir, 'openspec/changes/extract-evil'), 'junction'); } catch { return; }
   render({ root: dir, change: 'extract-evil' });
   assert.doesNotMatch(html(dir, 'extract-evil'), /SECRET/);
+});
+
+test('a survey review shows the material of each map item: the diagram, the data table, the files', () => {
+  const dir = repo();
+  const page = change(dir, 'survey', 'spec-relay-survey', {
+    'review.md': 'Reviewer: Uma\n\n## 1. Contexts\n- [x] K1 platform: Platform\n- [ ] K2 billing: Billing\n  - fix: split invoices out\n- [ ] K3 order: Order\n  - fix: rename\n  - fixed: renamed to ordering\n\n## 2. Map\n- [ ] M1 The relationships between contexts are right\n- [ ] M2 Every piece of shared data has the right owner\n  - hold: ask the business\n- [ ] M3 The glossary conflicts are understood\n- [ ] M4 The capability list and its order are right\n- [ ] M5 The files marked carry may go to the new system unchanged\n\n## 3. Coverage\n- [ ] C1 Every file marked excluded may be left out of the migration\n\n## 4. Databases\n- [ ] D1 main: definitions and the logic in it\n- [ ] D90 The missing definitions are understood\n',
+    'context-map.md': '# Context map\n\n## Contexts\n\n### Context: platform\n- **Name**: Platform\n- **Type**: generic\n- **Responsibility**: sign-in\n\n### Context: billing\n- **Name**: Billing\n- **Type**: core\n- **Responsibility**: invoices\n- **Entry points**: `a.php`, `b.php`, `c.php`, `d.php`, `e.php`, `f.php`, `g.php`, `h.php`\n\n### Context: order\n- **Type**: supporting\n\n## Relationships\n| Upstream | Downstream | Pattern | Channel |\n|---|---|---|---|\n| platform | billing | shared kernel | call |\n| order | billing | customer-supplier | table t_order |\n| billing | order | conformist | event |\n\n## Shared data\n| Data | Owner | Also written by | Read by |\n|---|---|---|---|\n| t_order | order | billing | platform |\n',
+    'inventory.md': '# Inventory\n\n| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/billing/ | billing | port | |\n| src/img/logo.png | platform | carry | logo |\n| vendor/ | excluded | | composer |\n',
+    'capabilities.md': '# Capabilities\n\n### platform\n1. `platform/auth` Sign-in\n   - `src/auth/`\n\n### billing\n1. `billing/invoice` Invoices\n',
+    'glossary.md': '# Glossary\n\n## Conflicts\n- "order" means two things.\n',
+    'database.md': '# Databases\n\n## Databases\n| Database | Product and version | Connection setting | Definitions |\n|---|---|---|---|\n| main | MySQL 5.6 | default | none |\n\n## Logic in the database\n| Kind | Count | Contexts | Notes |\n|---|---|---|---|\n| trigger | 1 | order | |\n\n## Missing definitions\nThe log database has no dump.\n',
+  });
+  // Where each item stands, from its notes.
+  assert.match(page, /class="item k-context is-open st-fix" id="K2"[\s\S]*?<li class="rm-fix"><span class="label">あなた: 修正依頼<\/span><span>split invoices out<\/span>/);
+  assert.match(page, /class="item k-context is-open is-mine st-fixed" id="K3"[\s\S]*?class="rm-fixed"[\s\S]*?renamed to ordering/);
+  assert.match(page, /class="item is-open st-hold" id="M2"/);
+  assert.match(page, /<p class="remain"><b>[0-9]+<\/b>件 あなたの番<\/p>[\s\S]*?<p class="remain-split">うち再確認待ち 1。ほかに AI の対応待ち 1・保留中 1<\/p>/);
+  // A confirmed item folds its content; the open ones do not.
+  assert.match(page, /id="K1"[\s\S]*?<details class="fold"><summary>内容を表示/);
+  assert.doesNotMatch(page.match(/id="K2"[\s\S]*?<\/article>/)[0], /class="fold"/);
+  // What to check: once at the top of the contexts, and on each map item.
+  assert.match(page, /<div class="group-how"><div class="how"><p class="how-title">確認すること<\/p>[\s\S]*?責務の一文/);
+  assert.match(page, /id="M1"[\s\S]*?<div class="how">[\s\S]*?矢印の向き/);
+  // The card of a context: what the map says beside what the tables say.
+  assert.match(page, /id="K2"[\s\S]*?ほか 3 件を表示[\s\S]*?上流（これが使う）[\s\S]*?platform[\s\S]*?order[\s\S]*?<code>billing\/invoice<\/code>/);
+  // M1: the diagram (drawn by the script) and the table; the cycle billing <-> order is drawn too.
+  assert.match(page, /id="M1"[\s\S]*?<figure class="diagram rel" tabindex="0" role="region" aria-label="コンテキスト 3 個とつながり 3 本の図"><svg/);
+  const fig = page.match(/<figure class="diagram rel"[\s\S]*?<\/figure>/)[0];
+  assert.equal(count(fig, /class="rel-edge rel-(call|table|event)" marker-end/g), 2);
+  // The edge back (order -> billing, found after billing -> order) is laid out the
+  // other way, arrow at its start, beside the other edge between the two boxes.
+  assert.match(fig, /<path d="M410,31 [^"]*" class="rel-edge rel-table rel-back" marker-start[^>]*><title>order → billing/);
+  assert.match(fig, /<path d="M408,37 [^"]*" class="rel-edge rel-event" marker-end[^>]*><title>billing → order/);
+  assert.match(page, /class="rel-edge rel-table rel-back" marker-start[^>]*><title>order → billing · customer-supplier · table t_order<\/title>/);
+  // M2: data across contexts; M4 capabilities; M5 carried files; C1 excluded with reasons.
+  assert.match(page, /id="M2"[\s\S]*?<table class="matrix">[\s\S]*?t_order<span class="caution-inline">複数が書き込む<\/span>[\s\S]*?<td class="m-owns">所有<\/td>/);
+  assert.match(page, /id="M3"[\s\S]*?&quot;order&quot; means two things/);
+  assert.match(page, /id="M4"[\s\S]*?<td class="num">2<\/td><td><code>billing\/invoice<\/code><\/td>/);
+  assert.match(page, /id="M5"[\s\S]*?src\/img\/logo\.png<\/td><td>platform<\/td><td>logo<\/td>/);
+  assert.match(page, /id="C1"[\s\S]*?vendor\/<\/td><td>composer<\/td>/);
+  assert.match(page, /id="D1"[\s\S]*?MySQL 5\.6[\s\S]*?データベースの中のロジック[\s\S]*?trigger/);
+  assert.match(page, /id="D90"[\s\S]*?The log database has no dump/);
+  // The appendix: folded, and the inventory as counts with every row behind one click.
+  assert.match(page, /<section class="group appendix" id="doc-inventory-md"><details class="doc-fold"><summary><h2>inventory<\/h2><\/summary>[\s\S]*?<tr class="sum"><td>計<\/td><td class="num">1<\/td><td class="num">1<\/td><td class="num">3<\/td><\/tr>[\s\S]*?すべての行を表示（3 行）/);
+  assert.doesNotMatch(page, /<details class="doc-fold" open/);
+});
+
+test('without a survey, items still get their guidance, notes and states', () => {
+  const dir = repo({ lang: 'en' });
+  write(dir, `${CHANGE}/review.md`, 'Reviewer: Uma\n\n## 1. Requirements\n- [x] R1 Total\n- [ ] R2 Reject empty\n  - hold: ask accounting\n');
+  render({ root: dir, change: 'extract-billing-invoice' });
+  const page = html(dir, 'extract-billing-invoice');
+  assert.match(page, /class="item k-req is-open st-hold" id="R2"[\s\S]*?You: why on hold[\s\S]*?ask accounting/);
+  assert.match(page, /<p class="how-title">Check<\/p>[\s\S]*?source lines do/);
+  assert.match(page, /id="R1"[\s\S]*?<details class="fold"><summary>Show the content/);
+  assert.match(page, /<span class="seal is-open st-hold"><b aria-hidden="true">H<\/b><span>On hold<\/span>/);
+});
+
+test('survey facts read what analysts write, and show the rest as written', () => {
+  assert.deepEqual(contextFields(['- **Name:** Billing', '- Responsibility: invoices', '  and credit notes', '- **Owned data**：`t_invoice`']), { name: 'Billing', responsibility: 'invoices and credit notes', 'owned data': '`t_invoice`' });
+  assert.equal(contextFields(['- **Name**: Billing', '', 'A paragraph the analyst wrote.']), null, 'anything else: the card shows the block as written');
+  assert.equal(contextFields(['- **Name**: Billing', '  - a nested list']), null);
+  const facts = surveyFacts({
+    contexts: [{ name: 'billing', body: ['- **Name**: Billing', '', 'Note: invoices only.'] }, { name: 'order', body: [] }],
+    mapText: '## Shared data\n| Data | Owner | Also written by | Read by |\n|---|---|---|---|\n| t_order | order (batch, nightly) | billing（一部） | — |\n',
+    databaseText: '## Databases\n| Database | Product | Connection | Definitions |\n|---|---|---|---|\n| main | MySQL | default | none |\n',
+  });
+  assert.equal(facts.contexts[0].fields, null);
+  assert.match(contextCard(facts, { name: 'billing', body: facts.contexts[0].body }, 'en'), /<div class="doc">[\s\S]*?Note: invoices only\.[\s\S]*?<dl class="ctx-facts">/);
+  assert.deepEqual([facts.shared[0].owner, facts.shared[0].writers, facts.shared[0].readers], [['order'], ['billing'], []], 'notes in brackets are not contexts');
+  assert.match(surveyAid(facts, { id: 'D1', letter: 'D', title: 'main：定義とロジック' }, 'ja'), /MySQL/, 'a full-width colon ends the database name');
+});
+
+test('target, finish and amendment items show the part of their document they ask about', () => {
+  const dir = repo();
+  const page = change(dir, 'target-design', 'spec-relay-target', {
+    'review.md': 'Reviewer: Uma\n\n## 1. Architecture\n- [ ] A0 The style\n- [ ] A1 billing: Billing\n- [ ] A2 order: Order\n\n## 2. Conventions\n- [ ] V1 Runtime and frameworks\n\n## 3. Verification\n- [ ] E90 Sign-in and recorded data\n',
+    'architecture.md': '# Architecture\n\n## Style\nModular monolith, one module per context.\n\n## Modules\n| Context | Module path | Depends on |\n|---|---|---|\n| billing | target/billing | - |\n| platform | target/platform | - |\n',
+    'conventions.md': '# Conventions\n\n## Runtime and frameworks\nJava 21, Spring Boot 3.\n',
+    'verification.md': '# Verification\n\n## Sign-in\nA test user.\n\n## Recorded data\nNone kept.\n',
+  });
+  assert.match(page, /id="A0"[\s\S]*?<a href="#doc-architecture-md">architecture\.md より<\/a>[\s\S]*?Modular monolith/);
+  assert.match(page, /id="A1"[\s\S]*?<td>billing<\/td><td>target\/billing<\/td>/);
+  assert.doesNotMatch(page.match(/id="A1"[\s\S]*?<\/article>/)[0], /target\/platform/, 'only the row of the item\'s context');
+  assert.match(page, /id="A2"[\s\S]*?architecture\.md にこの項目の行がありません/);
+  assert.match(page, /id="V1"[\s\S]*?Java 21, Spring Boot 3/);
+  assert.match(page, /id="E90"[\s\S]*?Sign-in[\s\S]*?A test user[\s\S]*?Recorded data[\s\S]*?None kept/);
 });

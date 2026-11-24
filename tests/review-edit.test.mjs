@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { editReview, writeReview, canvasEdits, sha256, utf8Text, reviewerOf, decisionOf } from '../scripts/review-edit.mjs';
 import { parseReview } from '../scripts/render.mjs';
-import { tempDir, write } from './helpers.mjs';
+import { tempDir, write, crlf } from './helpers.mjs';
 
 const REVIEW = '# Review: extract-a\n\nReviewer:\n\n## 1. Requirements\n- [ ] R1 Password\n- [x] **R2** Lockout\n\n```\n- [ ] R3 in a fence\n```\n\n## 2. Questions\n- [ ] Q1 Rounding: decision: <!-- the person writes -->\n- [ ] Q2 Tax\n';
 const LOG = 'openspec/spec-relay/local/canvas-log.jsonl';
@@ -140,4 +140,36 @@ test('a busy file is retried, never written over a save made meanwhile, and a fa
   } finally { fs.renameSync = rename; }
   assert.equal(canvasEdits(dir).edits.length, 1, 'only the write that happened is logged');
   assert.deepEqual(fs.readdirSync(path.dirname(file)).filter((f) => f.endsWith('.tmp')), []);
+});
+
+test('fix and hold notes go under the item and open it again; withdraw takes the last one back', () => {
+  const text = crlf('# Review\n\n## 1. Contexts\n- [x] K1 platform: Platform\n  <!-- - fix: an example in a comment -->\n- [ ] K2 member: Member\n\n## 2. Map\n- [ ] M1 relations');
+  const fixed = editReview(text, { action: 'fix', id: 'K1', value: 'merge with\nmember' });
+  assert.equal(fixed.text, text.replace('- [x] K1 platform: Platform\r\n  <!-- - fix: an example in a comment -->\r\n', '- [ ] K1 platform: Platform\r\n  <!-- - fix: an example in a comment -->\r\n  - fix: merge with member\r\n'), 'unticked, one line, after the item\'s own lines, CRLF kept');
+  assert.equal(parseReview(fixed.text)[0].items[0].state, 'fix');
+  assert.equal(editReview(fixed.text, { action: 'tick', id: 'K1' }).code, 'openFix', 'an unanswered fix is withdrawn before a tick');
+  const held = editReview(fixed.text, { action: 'hold', id: 'M1', value: 'ask the business' });
+  assert.match(held.text, /- \[ \] M1 relations\r\n {2}- hold: ask the business$/, 'the last line gets a line end before the note');
+  assert.equal(parseReview(held.text)[1].items[0].state, 'hold');
+  const back = editReview(editReview(held.text, { action: 'withdraw', id: 'M1' }).text, { action: 'withdraw', id: 'K1' });
+  assert.equal(back.text, text.replace('- [x] K1', '- [ ] K1'), 'withdrawing both leaves the file as it was, but unticked');
+  assert.equal(editReview(text, { action: 'withdraw', id: 'K2' }).code, 'noNote');
+  // The agent's answer: a fixed note after the fix lets the person tick.
+  const answered = fixed.text.replace('  - fix: merge with member\r\n', '  - fix: merge with member\r\n  - fixed: merged member into platform\r\n');
+  assert.equal(parseReview(answered)[0].items[0].state, 'fixed');
+  assert.match(editReview(answered, { action: 'tick', id: 'K1' }).text, /- \[x\] K1 platform/);
+  assert.equal(editReview(answered, { action: 'withdraw', id: 'K1' }).code, 'noNote', 'the agent\'s note is not the person\'s to withdraw');
+  assert.equal(editReview(text, { action: 'fix', id: 'K2', value: '  ' }).code, 'emptyValue');
+});
+
+test('a note never lands inside a comment, and an unindented note still belongs to its item', () => {
+  const text = '## 1\n- [ ] K1 a\n  <!-- an example\n  - fix: not a note\n  -->\n- [ ] K2 b\n- hold: unindented\n\nnext paragraph\n';
+  const fixed = editReview(text, { action: 'fix', id: 'K1', value: 'merge' });
+  assert.equal(fixed.text, text.replace('  -->\n', '  -->\n  - fix: merge\n'), 'after the comment closes, not inside it');
+  assert.equal(parseReview(fixed.text)[0].items[0].state, 'fix');
+  assert.equal(parseReview(text)[0].items[1].state, 'hold');
+  const back = editReview(text, { action: 'withdraw', id: 'K2' });
+  assert.equal(back.text, text.replace('- hold: unindented\n', ''));
+  const open = '## 1\n- [ ] K1 a\n  <!-- not closed\n';
+  assert.equal(editReview(open, { action: 'fix', id: 'K1', value: 'x' }).text, '## 1\n- [ ] K1 a\n  - fix: x\n  <!-- not closed\n', 'an unclosed comment: the note goes before it');
 });
