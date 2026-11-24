@@ -48,14 +48,14 @@ Windows での準備と注意点は [docs/WINDOWS.md](docs/WINDOWS.md) にあり
 
 アプリごとの許可の設定、環境チェックの項目、並列数やモデルのオプション、導入で置かれるファイルは [docs/SETUP.md](docs/SETUP.md) にあります。
 
-## OpenSpec の利用統計を止める
+## OpenSpec の利用統計
 
-OpenSpec は初期設定で、匿名の利用統計（コマンド名と版。コードや仕様の中身は含まない）を送ります。導入スクリプトが実行する `openspec init` も送るので、最初から止めたいときは、「はじめかた」の 2 より前に環境変数を設定してください。キットはこの設定を変えません。
+OpenSpec は初期設定で、匿名の利用統計（コマンド名と版。コードや仕様の中身は含まない）を送ります。**キットは既定でこれを止めます。** 導入スクリプトの `openspec init` も含め、キットが起動する OpenSpec にはすべて環境変数 `OPENSPEC_TELEMETRY=0` を渡すので、利用者の設定は要りません。PC 全体の OpenSpec の設定（`%APPDATA%\openspec`）は変えません。
 
-- **導入の前から止める**：環境変数 `OPENSPEC_TELEMETRY=0`。PowerShell なら `[Environment]::SetEnvironmentVariable('OPENSPEC_TELEMETRY', '0', 'User')` を実行し、ターミナル（VS Code・Copilot app ではアプリ）を開き直します。
-- **導入のあとで止める**：移行対象のリポジトリで `node "<キットのフォルダー>/scripts/openspec.mjs" config set telemetry.enabled false`（この PC のすべてのプロジェクトに効きます）。プラグインとして入れたキットは `%USERPROFILE%\.copilot\installed-plugins\` の下にあります。
+- 自分で環境変数 `OPENSPEC_TELEMETRY` を設定しているときは、その値を優先します（送ってもよい場合は `1`）。
+- キットを通さずに `openspec` を直接実行したときは、この既定は効きません。
 
-止まっているかは環境チェック（`scripts/doctor.mjs`）が確かめます。AI が知らせるのは導入の前の1回で、手で実行すれば毎回表示されます。
+止まっているかは環境チェック（`scripts/doctor.mjs`）が確かめます。
 
 ## 守っていること
 

@@ -221,14 +221,19 @@ export function checkOpenspec(ctx) {
   };
 }
 
+// The kit runs OpenSpec with OPENSPEC_TELEMETRY=0 unless the person set the
+// variable themselves (openspec.mjs, openspecEnv); then OpenSpec's own rules apply.
 export function checkTelemetry(ctx) {
+  if (setTo(ctx.env, 'OPENSPEC_TELEMETRY') === undefined) {
+    return { id: 'telemetry', level: 'ok', message: ctx.t('キットが起動する OpenSpec は利用統計を送りません（既定で OPENSPEC_TELEMETRY=0 を渡します）。', 'OpenSpec run by the kit sends no usage statistics (the kit passes OPENSPEC_TELEMETRY=0 by default).') };
+  }
   const off = telemetryOff(ctx.env, ctx.platform, ctx.readFile);
   if (off) return { id: 'telemetry', level: 'ok', message: ctx.t(`OpenSpec の利用統計の送信は止まっています（${off}）。`, `OpenSpec usage statistics are off (${off}).`) };
   return {
     id: 'telemetry', level: 'info',
-    message: ctx.t('OpenSpec は初期設定で匿名の利用統計（コマンド名と版）を送ります。コードや仕様の中身は送りません。', 'OpenSpec sends anonymous usage statistics (command name and version) by default; no code or spec content.'),
-    fix: ctx.t('止めるときは、環境変数 `OPENSPEC_TELEMETRY=0` を設定します（導入の前から止まります。導入スクリプトの `openspec init` も送るためです）。導入のあとなら、移行対象のリポジトリで `node "<キットのフォルダー>/scripts/openspec.mjs" config set telemetry.enabled false` でも止まります（この PC のすべてのプロジェクトに効きます）。キットはこの設定を変えません。',
-      'To turn it off, set `OPENSPEC_TELEMETRY=0` (this works before setup too; the `openspec init` setup runs also sends). After setup, `node "<kit>/scripts/openspec.mjs" config set telemetry.enabled false` in the repository being migrated also works (all projects on this machine). The kit never changes this setting.'),
+    message: ctx.t('環境変数 OPENSPEC_TELEMETRY が設定されているので、キットの既定（0）より優先され、OpenSpec が匿名の利用統計（コマンド名と版）を送ります。コードや仕様の中身は送りません。', 'OPENSPEC_TELEMETRY is set, so it overrides the kit default (0) and OpenSpec sends anonymous usage statistics (command name and version); no code or spec content.'),
+    fix: ctx.t('止めるときは、環境変数 OPENSPEC_TELEMETRY を消すか 0 にします。',
+      'To turn it off, remove OPENSPEC_TELEMETRY or set it to 0.'),
   };
 }
 

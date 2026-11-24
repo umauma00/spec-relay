@@ -44,7 +44,7 @@ node "C:\path\to\spec-relay\scripts\doctor.mjs" --target . --client cli
 | Node.js | 22.12 以上（古い Node.js でも、このメッセージは出ます） | FAIL |
 | キット | スキーマ・スクリプト・エージェントがそろっているか | FAIL |
 | OpenSpec CLI | 導入前は npm があるか。導入後は、リポジトリの中の OpenSpec が入っていて動くか、版が 2.0.0 か（違えば FAIL。clone した直後で未導入のときは、導入スクリプトの再実行を案内） | FAIL |
-| OpenSpec の利用統計 | 送信が止まっているか（止め方を案内。キットは設定を変えません） | INFO |
+| OpenSpec の利用統計 | キットの既定（`OPENSPEC_TELEMETRY=0` を渡す）で止まっているか。利用者が `OPENSPEC_TELEMETRY` を自分で設定して送る状態なら、そう知らせる | INFO |
 | PowerShell | 実行ポリシーで `npm` が止まるか（`npm.cmd` を案内） | INFO |
 | Copilot のアプリ | Copilot CLI 1.0.109 以上、VS Code 1.143 以上 | WARN |
 | git | git があるか、リポジトリの一番上か、「所有者が違う」で拒否されていないか、長いパス | WARN |
