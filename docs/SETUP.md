@@ -79,7 +79,7 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 
 | 場所 | 中身 |
 |---|---|
-| `openspec/schemas/spec-relay-*/` | 各工程のスキーマとテンプレート（survey・target・extract・amend・port） |
+| `openspec/schemas/spec-relay-*/` | 各工程のスキーマとテンプレート（survey・target・extract・amend・port・finish） |
 | `openspec/config.yaml` | 移行元・移行先の言語とフォルダー（全成果物の生成に使われる） |
 | `openspec/spec-relay/tools/` | キットが確認した版の OpenSpec を固定する package.json と package-lock.json（コミットします）。`npm ci` で入る `node_modules/` は Git の対象外です。OpenSpec は `node "<キットのフォルダー>/scripts/openspec.mjs" <引数>` で呼びます（キットのスクリプトもオーケストレーターもこれを使います） |
 | `.agents/skills/openspec-*` | `openspec init --tools github-copilot` が置く OpenSpec 標準のスキル。導入スクリプトがすべて「`spec-relay-orchestrator` を使ってください」という案内に置き換えます（下の説明）。Copilot はこのフォルダーを直接読むので、リンクは作られません |

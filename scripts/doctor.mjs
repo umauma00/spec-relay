@@ -200,7 +200,7 @@ export function checkOpenspec(ctx) {
       return {
         id: 'openspec', level: 'fail',
         message: ctx.t('このリポジトリには、キットが固定する OpenSpec（openspec/spec-relay/tools）がありません。0.6.0 以前のキットで導入したリポジトリです。', 'this repository has no pinned OpenSpec (openspec/spec-relay/tools); it was set up with kit 0.6.0 or older.'),
-        fix: ctx.t('docs/UPGRADING.md の「0.6.0 から更新するとき」の手順に従ってください。', 'Follow "0.6.0 から更新するとき" in docs/UPGRADING.md.'),
+        fix: ctx.t('キットの docs/UPGRADING.md の「0.6.0 から更新するとき」の手順に従ってください。', 'Follow "0.6.0 から更新するとき" in docs/UPGRADING.md of the kit.'),
       };
     }
     return {
@@ -227,8 +227,8 @@ export function checkTelemetry(ctx) {
   return {
     id: 'telemetry', level: 'info',
     message: ctx.t('OpenSpec は初期設定で匿名の利用統計（コマンド名と版）を送ります。コードや仕様の中身は送りません。', 'OpenSpec sends anonymous usage statistics (command name and version) by default; no code or spec content.'),
-    fix: ctx.t('止めるときは、移行対象のリポジトリで `node "<キットのフォルダー>/scripts/openspec.mjs" config set telemetry.enabled false` を実行します（この PC のすべてのプロジェクトに効きます）。環境変数 `OPENSPEC_TELEMETRY=0` でも止まります。キットはこの設定を変えません。',
-      'To turn it off, run `node "<kit>/scripts/openspec.mjs" config set telemetry.enabled false` in the repository being migrated (all projects on this machine), or set `OPENSPEC_TELEMETRY=0`. The kit never changes this setting.'),
+    fix: ctx.t('止めるときは、環境変数 `OPENSPEC_TELEMETRY=0` を設定します（導入の前から止まります。導入スクリプトの `openspec init` も送るためです）。導入のあとなら、移行対象のリポジトリで `node "<キットのフォルダー>/scripts/openspec.mjs" config set telemetry.enabled false` でも止まります（この PC のすべてのプロジェクトに効きます）。キットはこの設定を変えません。',
+      'To turn it off, set `OPENSPEC_TELEMETRY=0` (this works before setup too; the `openspec init` setup runs also sends). After setup, `node "<kit>/scripts/openspec.mjs" config set telemetry.enabled false` in the repository being migrated also works (all projects on this machine). The kit never changes this setting.'),
   };
 }
 
@@ -390,8 +390,8 @@ export function checkSetup(ctx) {
       id: 'schemas', level: 'fail',
       message: ctx.t(`openspec/schemas のスキーマが、このキット（${ctx.kitVersion}）の版と違います: ${differs.slice(0, 3).join(', ')}${differs.length > 3 ? ` ほか ${differs.length - 3} 件` : ''}`,
         `the schemas in openspec/schemas differ from this kit (${ctx.kitVersion}): ${differs.slice(0, 3).join(', ')}${differs.length > 3 ? ` and ${differs.length - 3} more` : ''}`),
-      fix: ctx.t('キットを更新したときは、docs/UPGRADING.md の「〜から更新するとき」の手順に従ってください。手で書き換えた場合は元に戻してください。違うスキーマのまま進めると、途中で成果物や確認が合わなくなります。',
-        'If you updated the kit, follow "〜から更新するとき" in docs/UPGRADING.md. If someone edited them, restore them. With other schemas, artifacts and gates stop matching midway.'),
+      fix: ctx.t('キットを更新したときは、キットの docs/UPGRADING.md の「〜から更新するとき」の手順に従ってください。手で書き換えた場合は元に戻してください。違うスキーマのまま進めると、途中で成果物や確認が合わなくなります。',
+        'If you updated the kit, follow "〜から更新するとき" in docs/UPGRADING.md of the kit. If someone edited them, restore them. With other schemas, artifacts and gates stop matching midway.'),
     });
   } else {
     results.push({ id: 'schemas', level: 'ok', message: ctx.t(`スキーマはこのキットの版と同じです（${ctx.schemas.length} 個）。`, `the schemas match this kit (${ctx.schemas.length}).`) });
@@ -403,8 +403,8 @@ export function checkSetup(ctx) {
       id: 'legacy', level: 'fail',
       message: ctx.t(`OpenSpec 1.x（または spec-relay 0.6.0）のファイルが .github/ に残っています: ${list.join(', ')}`,
         `files from OpenSpec 1.x (or spec-relay 0.6.0) are still under .github/: ${list.join(', ')}`),
-      fix: ctx.t('docs/UPGRADING.md の「0.6.0 から更新するとき」の手順に従ってください。キットはこの場所のスキルを無効にしないので、OpenSpec 標準の apply・archive・sync が残っているとレビューを飛ばせます。元フォルダーが `.` のときは、調査の gate がこれらを元コードとして数えます。',
-        'Follow "0.6.0 から更新するとき" in docs/UPGRADING.md. The kit no longer disables skills there, so generic apply, archive or sync left there skip the review; with the source root ".", the survey gate also counts these files as source code.'),
+      fix: ctx.t('キットの docs/UPGRADING.md の「0.6.0 から更新するとき」の手順に従ってください。キットはこの場所のスキルを無効にしないので、OpenSpec 標準の apply・archive・sync が残っているとレビューを飛ばせます。元フォルダーが `.` のときは、調査の gate がこれらを元コードとして数えます。',
+        'Follow "0.6.0 から更新するとき" in docs/UPGRADING.md of the kit. The kit no longer disables skills there, so generic apply, archive or sync left there skip the review; with the source root ".", the survey gate also counts these files as source code.'),
     });
   }
   const bypass = ctx.bypassFiles(ctx.target);
@@ -429,7 +429,7 @@ export function checkSetup(ctx) {
     results.push({
       id: 'config', level: 'warn',
       message: ctx.t('openspec/config.yaml に並列化の設定がありません（0.2.0 以前の導入）。既定値（4・2・session）で動きます。', 'openspec/config.yaml has no parallel settings (set up with 0.2.0 or earlier); the defaults (4, 2, session) apply.'),
-      fix: ctx.t('docs/UPGRADING.md の「0.2.0 から更新するとき」の5行を context に足してください。', 'Add the five lines from "0.2.0 から更新するとき" in docs/UPGRADING.md to its context.'),
+      fix: ctx.t('キットの docs/UPGRADING.md の「0.2.0 から更新するとき」の5行を context に足してください。', 'Add the five lines from "0.2.0 から更新するとき" in docs/UPGRADING.md of the kit to its context.'),
     });
   }
   const tool = toolchainFor(ctx.cleanValue(ctx.configValue(ctx.target, 'Target language', '')));
