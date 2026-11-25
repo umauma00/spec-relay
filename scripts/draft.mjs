@@ -600,7 +600,7 @@ export function portDesign(root, change, { update = false } = {}) {
       title: /^scenario checks\b/i,
       heading: 'Scenario checks',
       header: ['| Requirement | Scenario | Check |', '|---|---|---|'],
-      rows: scenarios.map((s) => ({ key: `${norm(s.requirement)}\u0000${norm(s.scenario)}`, line: `| ${escCell(s.requirement)} | ${escCell(s.scenario)} | ${fixedCheck ?? '<!-- e2e / compare / unit -->'} |` })),
+      rows: scenarios.map((s) => ({ key: `${norm(s.requirement)}\u0000${norm(s.scenario)}`, line: `| ${escCell(s.requirement)} | ${escCell(s.scenario)} | ${fixedCheck ?? (notApplicable.length ? '<!-- compare / unit -->' : '<!-- e2e / compare / unit -->')} |` })),
       none: 'None',
     },
     sources: {

@@ -134,8 +134,9 @@ artifacts:
       If the capability has no screens (a batch job, a library, start-up
       and configuration), write `None` under the heading. The person then
       confirms it in the review (item S0), and the ports of this capability
-      skip the screen levels B2 and C of its context: list every screen a
-      user sees, even one the capability only shows (an error page).
+      skip the screen levels B2 and C of its context. So list every screen a
+      user sees, even one the capability only shows (an error page), and
+      write `None` only when there is none.
     requires:
       - source-map
 
@@ -340,8 +341,9 @@ artifacts:
       - One checkbox per requirement: `- [ ] R<n> <requirement name>` under
         `## 1. Requirements`, in spec order.
       - One checkbox per screen: `- [ ] S<n> <screen name>` under
-        `## 2. Screens`, in screens.md order. When screens.md says None, the
-        one item `- [ ] S0 This capability has no screens` instead.
+        `## 2. Screens`, in screens.md order. When screens.md says None,
+        write the single item `- [ ] S0 This capability has no screens`
+        instead.
       - One checkbox per question: `- [ ] Q<n> <short title>: decision: ...`
         under `## 3. Questions`. Leave the decision blank.
       - Under `## 4. Coverage`, only when coverage.md judges sites that hold

@@ -360,6 +360,13 @@ test('a capability whose reviewed screens.md says None skips B2 and C, and only 
   const drafted = portDesign(dir, 'port-calc-add');
   assert.deepEqual(drafted.notApplicable, ['B2', 'C']);
   assert.match(fs.readFileSync(design, 'utf8'), /\| Reject text \| Text input \| unit \|/);
+  // With B1 left, the choice it offers has no e2e.
+  write(dir, verification, '## Levels\n| Context | A scenario tests | B1 logic comparison | B2 screen tests | C screenshots | Notes |\n|---|---|---|---|---|---|\n| calc | yes | yes | yes | yes | |\n');
+  fs.rmSync(design);
+  portDesign(dir, 'port-calc-add');
+  assert.match(fs.readFileSync(design, 'utf8'), /\| Reject text \| Text input \| <!-- compare \/ unit --> \|/);
+  // The extract archived before 0.29.0 has no S0 item: its reviewed screens.md alone decides.
+  assert.equal(fs.existsSync(path.join(dir, 'openspec/changes/archive/2026-11-03-extract-calc-add/review.md')), false);
 });
 
 test('the parsers read the Scenario checks table in English and Japanese', () => {

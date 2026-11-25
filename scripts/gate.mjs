@@ -447,9 +447,9 @@ function checkExtract(root, dir, boxes, problems) {
   problems.push(...requireItems(boxes, 'S', screens, 'screen', 'screens.md'));
   // "None" is a finding the person confirms: every port of the capability then
   // skips the screen levels (B2, C) of its context.
-  const s0 = boxes.filter((b) => /^S0+\b/i.test(b.plain));
+  const s0 = boxes.filter((b) => /^S0\b/i.test(b.plain));
   if (noScreens(screensText) && s0.length === 0) problems.push(`screens.md says None, but review.md has no S0 item to confirm it: add "- [ ] ${NO_SCREENS_ITEM}" under "2. Screens" (draft.mjs review --update); without screens, the ports of this capability skip the screen levels B2 and C`);
-  if (screens.length && s0.length) problems.push('review.md has an S0 item (no screens), but screens.md lists screens: remove the S0 item (draft.mjs review --update)');
+  if (screens.length && s0.length) problems.push('review.md has an S0 item (no screens), but screens.md lists screens: number the screens from S1 and drop the S0 item (draft.mjs review --update)');
 
   const questions = readIf(path.join(dir, 'questions.md'), problems);
   if (questions === null) problems.push('questions.md is missing');
@@ -1698,8 +1698,7 @@ function checkPortEvidence(root, change, dir, capability, problems) {
   const followUp = [...new Set(todos.filter((t) => accepted.get(t.file) === true).map((t) => t.file))];
 
   // 4. The independent crosscheck of the port, merged on the code as it is now.
-  const extract = archivedChange(root, `extract-${capability.split('/').join('-')}`);
-  const screens = extract ? screenNames(readIf(path.join(extract, 'screens.md'), problems)) : [];
+  const { screens } = capabilityScreens(root, capability);
   const crosscheck = readIf(path.join(dir, 'crosscheck.md'), []);
   checkCrosscheck(dir, requirementNames(spec), screens, problems);
   if (crosscheck !== null && files !== null) {

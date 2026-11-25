@@ -850,6 +850,8 @@ Words); the finish step (step 6) lists it in the hand-over.
    are written `{{env:NAME}}` in the requests; the recording puts the
    placeholder back where an answer repeats a value, and leaves out values
    under names like token or session id.
+   A capability whose extract says it has no screens has no B2 or C command
+   and no old run (`e2e.mjs old` refuses it).
    A B2 (or C) command `spec-relay-e2e --base <address> --start '<command>'`
    runs the screen tests in `tests/e2e/<capability with - for />/` against
    the new system it starts, and only when exactly those tests passed on the

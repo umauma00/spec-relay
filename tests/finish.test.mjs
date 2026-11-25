@@ -110,6 +110,24 @@ test('in a git repository, ignored files (build output) are not part of the targ
   assert.notEqual(targetHash(dir), nested);
 });
 
+test('a context whose every capability has no screens drops B2 and C; one screen keeps them', () => {
+  const dir = repo();
+  const verification = 'openspec/changes/archive/2026-11-02-target-design/verification.md';
+  write(dir, verification, '## Levels\n| Context | A scenario tests | B1 logic comparison | B2 screen replay | C screenshots | Notes |\n|---|---|---|---|---|---|\n| platform | yes | no | no | no | |\n| billing | yes | yes | yes | yes | |\n');
+  // The extract's screens.md is not None (here: missing), so B2 and C stay.
+  assert.deepEqual(collect(dir).levels[1], { context: 'billing', chosen: ['A', 'B1', 'B2', 'C'] });
+  write(dir, 'openspec/changes/archive/2026-11-03-extract-billing-invoice/screens.md', '# Screens\n\nNone\n');
+  const facts = collect(dir);
+  assert.deepEqual(facts.levels[1], { context: 'billing', chosen: ['A', 'B1'], notApplicable: ['B2', 'C'] });
+  write(dir, `${F}/.openspec.yaml`, 'schema: spec-relay-finish\n');
+  assert.equal(draft(dir, 'finish').ok, true);
+  assert.match(fs.readFileSync(path.join(dir, F, 'checks.md'), 'utf8'), /\| billing \| <!-- pass \/ fail \/ not-run: reason --> \| <!-- pass \/ fail \/ not-run: reason --> \| - \| - \| B2, C: no capability has screens \|/);
+  // A second capability of the context with a screen keeps both for the context.
+  write(dir, 'openspec/spec-relay/plan.md', PLAN.replace('1. `billing/invoice` 請求書', '1. `billing/invoice` 請求書\n2. `billing/entry` 入力'));
+  write(dir, 'openspec/changes/archive/2026-11-03-extract-billing-entry/screens.md', '### Screen: Entry\n- x\n');
+  assert.deepEqual(collect(dir).levels[1], { context: 'billing', chosen: ['A', 'B1', 'B2', 'C'] });
+});
+
 test('paths, comments and pipes in the code pass through the draft to the gate unchanged', () => {
   const dir = repo();
   write(dir, 'ts/billing/invoice_service.py', '# TODO(port) total() || 0 fallback\n');
