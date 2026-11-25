@@ -172,19 +172,27 @@ export function merge(root, { into, parts, clean = false }) {
 
   const byId = table.names[0] === 'item' || (path.basename(into).toLowerCase() === 'crosscheck.md' && !/^(path|パス)$/.test(table.names[0]));
   // A walkthrough lists several behaviors per entry point: rows are grouped by
-  // the entry point, and a later part (a walk again after a fix) replaces the group.
+  // the entry point; the rows of this merge replace the group (see writeGrouped).
   if (WALK_HEADER.test(table.names[0] ?? '')) return writeGrouped(root, { into, target, lines, table, incoming, files, parts, clean, eol });
-  // The survey's crosscheck judges inventory rows as they are now: each incoming
-  // row gets the code of its inventory row, so gate.mjs sees a row that changed later.
+  // The survey's crosscheck judges inventory rows as they were given to the
+  // checker: draft.mjs items gives each path its row code, the checker copies it
+  // into its row, and a code that no longer matches means the row changed since
+  // (the part is refused). A row without a code gets the code of the row as it
+  // is now, so gate.mjs still sees a row that changes later.
   if (!byId && changeSchema(path.dirname(target)) === 'spec-relay-survey' && path.basename(into).toLowerCase() === 'crosscheck.md') {
     const inventory = new Map(inventoryRows(readIf(path.join(path.dirname(target), 'inventory.md'), []) ?? '').map((r) => [r.path.toLowerCase(), r]));
     for (const item of incoming) {
       const cells = cellsOf(item.row);
       const row = inventory.get(rowKey(item.row, false).key);
       if (!row || cells.length < 2) continue;
-      cells[1] = `${cells[1].replace(new RegExp(ROW_STAMP.source, 'gi'), '').trim()} <!-- row ${surveyRowStamp(row)} -->`;
+      const code = surveyRowStamp(row);
+      const given = item.row.match(ROW_STAMP)?.[1]?.toLowerCase();
+      if (given && given !== code) { problems.push(`${show(item.file)}: the checker judged ${row.path} as the inventory row was before it changed (row ${given}, now ${code}); have a checker judge the row again`); continue; }
+      cells.forEach((c, i) => { cells[i] = c.replace(new RegExp(ROW_STAMP.source, 'gi'), '').trim(); });
+      cells[1] = `${cells[1]} <!-- row ${code} -->`;
       item.row = `| ${cells.join(' | ')} |`;
     }
+    if (problems.length) return { ok: false, problems };
   }
   const rows = new Map();
   const claim = (row, where) => {

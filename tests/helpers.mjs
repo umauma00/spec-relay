@@ -76,7 +76,7 @@ export function walkthrough(entries, verdict = 'covered R1: s', evidence = 'src/
 // something else: a survey's inventory comes with a crosscheck that confirms
 // each row, and an extract's source map gets an entry point (when it lists
 // none) with a walkthrough that names a scenario of every requirement and cites
-// every line of the source-map files. The walkthrough is written again after
+// every line of the source-map files (in ranges of 40 lines, as the gate allows). The walkthrough is written again after
 // every write while it is the helper's own (a test that writes its own keeps it).
 const HELPER_WALK = '<!-- test helper walkthrough -->';
 export function writeChecked(dir, rel, text) {
@@ -111,7 +111,7 @@ function helperWalk(dir, change) {
     if (stat.isDirectory()) { for (const e of fs.readdirSync(full)) add(`${p.replace(/\/$/, '')}/${e}`); return; }
     const lines = fs.readFileSync(full, 'latin1').split(/\r\n|\r|\n/);
     const count = lines.length - (lines.at(-1) === '' ? 1 : 0);
-    if (count > 0) files.push(`\`${p}:1-${count}\``);
+    for (let from = 1; from <= count; from += 40) files.push(`\`${p}:${from}-${Math.min(count, from + 39)}\``);
   };
   for (const p of sourceMapPaths(mapText ?? '')) add(p);
   const evidence = files.length ? files.join('; ') : `${sourceMapPaths(mapText ?? '')[0] ?? entries[0].id}:1`;

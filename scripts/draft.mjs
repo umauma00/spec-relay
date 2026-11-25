@@ -40,7 +40,7 @@ import {
   requirementNames, screenNames, noScreens, NO_SCREENS_ITEM, inventoryRows, portLevels, questionIds, scenarioList, capabilitySegments, portCapability,
   PLACEHOLDER, DB_KINDS, REMARK,
 } from './gate.mjs';
-import { assignment, traceSources, checkSurveyCrosscheck } from './coverage.mjs';
+import { assignment, traceSources, checkSurveyCrosscheck, surveyRowStamp } from './coverage.mjs';
 import { checkLedger } from './sites.mjs';
 import { entryPoints } from './walkthrough.mjs';
 import { leftoverRows } from './finish.mjs';
@@ -95,9 +95,12 @@ export function items(root, change) {
   let screens = [];
   if (schema === 'spec-relay-survey') {
     const inventory = readIf(path.join(dir, 'inventory.md'), problems);
-    const paths = inventoryRows(inventory ?? '').map((r) => r.path);
+    const rows = inventoryRows(inventory ?? '');
+    const paths = rows.map((r) => r.path);
     if (inventory !== null && paths.length === 0) problems.push('inventory.md has no rows');
-    return { ok: problems.length === 0, change, paths, problems };
+    // The code of each row as it is now: the checker copies it into its row
+    // (`<!-- row <code> -->`), so merge.mjs refuses a check of a row that changed since.
+    return { ok: problems.length === 0, change, paths, codes: Object.fromEntries(rows.map((r) => [r.path, surveyRowStamp(r)])), problems };
   }
   let entries = null;
   if (schema === 'spec-relay-extract' || schema === 'spec-relay-amend') {

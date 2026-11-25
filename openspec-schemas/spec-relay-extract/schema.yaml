@@ -348,9 +348,12 @@ artifacts:
       checker crosschecks that requirement and walks the entry point again
       (merged on its own, its rows replace all the rows of that entry point), or the
       orchestrator moves it to questions.md and writes `question Q<n>`.
-      The evidence of every row cites the code: `path:line` (or
-      `path:symbol`, a path with spaces in backticks) of a file that exists,
-      with lines the file has, and what the code does.
+      The evidence of every row cites the code: `path:line` (a range of at
+      most 40 lines) or `path:Class.Method`, in backticks, from the
+      repository root, of a file that exists, with lines the file has, and
+      what the code does. Only `covered` rows count for the effect lines
+      below. A behavior moved to a question keeps its requirement in the
+      evidence (`R2: ...`).
       `gate.mjs review` fails while an entry point of source-map.md has no
       row, a row walks an entry point source-map.md does not list or has an
       empty Entry point cell, a row has no behavior or cites no existing

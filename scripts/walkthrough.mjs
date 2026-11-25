@@ -55,12 +55,17 @@ function entryId(item) {
 }
 
 // "None", or "None (only internal helpers)": the capability has no way in.
-const NONE = /^(none|なし|無し|該当なし)(?:\s*[(（:：\-–—]|\.?$)/i;
+const NONE = /^(none|n\/a|なし|無し|該当なし|特になし)(?:\s*[(（:：,、。\-–—]|\.?$)/i;
+
+// Whether an item names a place in the code (a path or path:symbol), not a group ("Pages").
+const placeLike = (id) => /[./\\:]/.test(id);
 
 // The entry points under "## Entry points" of a source map: [{ id, key }], in
 // order, without duplicates; `none` is set on the list when it says "None".
-// Only top-level list items count (a nested item describes its parent), and a
-// table there is read by its first column. Null when there is no such section.
+// Only top-level list items count (the least indented; a nested item describes
+// its parent), unless the top item is a group heading such as "Pages", whose
+// items are the entry points. A table there is read by its first column. Null
+// when there is no such section.
 export function entryPoints(text) {
   const body = section(text ?? '', /^(entry points?|入口|エントリー?ポイント)/i);
   if (body === null) return null;
@@ -75,12 +80,23 @@ export function entryPoints(text) {
     out.push({ id, key });
   };
   let fenced = false;
+  const items = [];
   for (const line of stripComments(body).split(/\r?\n/)) {
     if (FENCE.test(line)) { fenced = !fenced; continue; }
     if (fenced) continue;
-    const item = line.match(/^ ?(?:[-*+]|\d+[.)])\s+(.*)$/);
-    if (item) add(entryId(item[1]));
+    const item = line.replace(/\t/g, '    ').match(/^( *)(?:[-*+]|\d+[.)])\s+(.*)$/);
+    if (item) items.push({ indent: item[1].length, id: entryId(item[2]) });
   }
+  const top = Math.min(...items.map((i) => i.indent));
+  items.forEach((item, i) => {
+    if (item.indent !== top) return;
+    const children = [];
+    for (let j = i + 1; j < items.length && items[j].indent > top; j += 1) children.push(items[j]);
+    if (children.length && !placeLike(item.id) && !NONE.test(item.id)) {
+      const level = Math.min(...children.map((c) => c.indent));
+      for (const child of children) if (child.indent === level) add(child.id);
+    } else add(item.id);
+  });
   for (const { header, cells } of headedRows(body)) {
     if (/^(entry|入口|エントリ|path|パス)/i.test(header[0] ?? '')) add(entryId(cells[0] ?? ''));
   }
@@ -188,7 +204,11 @@ export function checkWalkthrough(root, dir, { requirements, screens, asked, assi
     const v = row.parsed;
     if (!row.behavior) bad.push(`walkthrough row of ${row.entry} names no behavior; write what a user or caller notices`);
     if (noEvidence(row.evidence)) bad.push(`walkthrough row ${where} has no evidence; give path:line and what the code does`);
-    else reached.push(...citedCode(root, row.evidence, where, bad));
+    else {
+      const cited = citedCode(root, row.evidence, where, bad);
+      // Only a behavior the spec states counts as reaching an effect line.
+      if (v.kind === 'covered') reached.push(...cited);
+    }
     if (v.kind === 'covered' || v.kind === 'vague') {
       for (const ref of v.refs) {
         const names = ref.letter === 'R' ? requirements : screens;
@@ -199,15 +219,17 @@ export function checkWalkthrough(root, dir, { requirements, screens, asked, assi
         if (!(scenarios.get(loose(name)) ?? []).includes(loose(ref.scenario))) { bad.push(`walkthrough row ${where} names the scenario "${ref.scenario}", which R${ref.n} "${name}" does not have; copy the name of the scenario that states the behavior, or write gap`); continue; }
         named.add(ref.n);
       }
-      if (v.kind === 'vague') bad.push(`walkthrough row ${where} is vague: the scenario does not state the condition or the values an implementer needs; have an analyst make it concrete (then walk ${row.entry} again), or move it to questions.md as "question Q<n>"`);
+      if (v.kind === 'vague') bad.push(`walkthrough row ${where} is vague: the scenario does not state the condition or the values an implementer needs; have an analyst make it concrete (then walk ${row.entry} again), or move it to questions.md as "question Q<n>" (name the requirement, R<n>, in the evidence)`);
     } else if (v.kind === 'other') {
       const paths = assignment.get(v.capability);
       if (v.capability === own) bad.push(`walkthrough row ${where} names its own capability as "other capability"`);
       else if (!paths) bad.push(`walkthrough row ${where} names ${v.capability}, which is not a capability of the plan`);
       else if (!evidenceRefs(row.evidence, root).some(({ file }) => ownersOf(assignment, repoPath(file)).includes(v.capability))) bad.push(`walkthrough row ${where} names ${v.capability}, but its evidence cites no file the plan gives to that capability; cite the line in that capability's code, or judge the behavior here`);
     } else if (v.kind === 'question') {
+      // A vague or missing scenario moved to a question still belongs to its requirement.
+      for (const m of row.evidence.matchAll(/(?<![A-Za-z0-9])R0*(\d+)(?![0-9])/g)) named.add(Number(m[1]));
       if (!asked.has(v.question)) bad.push(`walkthrough row ${where} points to ${v.question}, which is not in questions.md with a review item`);
-    } else if (v.kind === 'gap') bad.push(`walkthrough row ${where} is a gap: add the requirement it needs at the end of the spec (then walk ${row.entry} again), or move it to questions.md as "question Q<n>"`);
+    } else if (v.kind === 'gap') bad.push(`walkthrough row ${where} is a gap: add the requirement it needs at the end of the spec (then walk ${row.entry} again), or move it to questions.md as "question Q<n>" (name the requirement, R<n>, in the evidence when there is one)`);
     else bad.push(`walkthrough row ${where} has the verdict "${row.verdict || 'blank'}"; write only ${VERDICTS}, and put reasons in the Evidence cell`);
   }
   capped(problems, bad, (p) => p);
@@ -216,7 +238,18 @@ export function checkWalkthrough(root, dir, { requirements, screens, asked, assi
   // source map and the walk both missed.
   capped(problems, requirements.map((name, i) => ({ name, n: i + 1 })).filter(({ n }) => !named.has(n)), ({ name, n }) => `no walkthrough row names a scenario of R${n} "${name}": the entry point that leads there is missing from source-map.md or was not walked to its end; list it (a public function or a job counts) and walk it`);
   // Every effect of a covered site is a behavior somebody starts: some walk must reach it.
-  capped(problems, effects.map(({ site, lines }) => ({ site, lines: lines.filter((m) => !reached.some((ref) => refReaches(ref, site, m.line))) })).filter(({ lines }) => lines.length), ({ site, lines }) => `no walkthrough row reaches the effect lines of ${site.id} (${markerText(lines)}), which coverage.md judges covered: walk the entry point that leads there to the end and cite the line (or the member) in that row's evidence, or list the entry point the source map misses; when nothing reaches the code (dead code), judge the site "question Q<n>" in coverage.md`);
+  capped(problems, effects.map(({ site, lines }) => ({ site, lines: lines.filter((m) => !reached.some((ref) => reaches(ref, site, m.line))) })).filter(({ lines }) => lines.length), ({ site, lines }) => `no covered walkthrough row reaches the effect lines of ${site.id} (${markerText(lines)}), which coverage.md judges covered: walk the entry point that leads there to the end and cite the line (a range of at most ${MAX_SPAN} lines, or the method) in the evidence of the row whose scenario states it, or list the entry point the source map misses; when nothing reaches the code (dead code), judge the site "question Q<n>" in coverage.md`);
+}
+
+// A cited range or member reaches an effect line only when it is narrow: a range
+// of at most MAX_SPAN lines, or the member itself (a class name or a whole file
+// would let one row stand for every write behind it).
+const MAX_SPAN = 40;
+const lastName = (s) => String(s ?? '').replace(/#\d+$/, '').replace(/\(.*\)$/, (m) => (m === '(file)' ? m : '')).split(/\.|::|->/).pop().trim().toLowerCase();
+function reaches(ref, site, line) {
+  if (!refReaches(ref, site, line)) return false;
+  if (ref.from !== null) return ref.to - ref.from < MAX_SPAN;
+  return lastName(ref.symbol) === lastName(site.symbol);
 }
 
 // The effect lines of the sites coverage.md judges covered, without the lines
@@ -241,35 +274,59 @@ function coveredEffects(root, dir) {
 // and each path:symbol:lines in the rest, read as trace.md cells are read. A
 // path with spaces is found only in backticks.
 const SEGMENT = String.raw`[\p{L}\p{N}_@+$-][\p{L}\p{N}_.@+$-]*`;
-const LOCATION = new RegExp(String.raw`(?:\.{1,2}[\\/])?(?:${SEGMENT}[\\/])*${SEGMENT}\.[A-Za-z][A-Za-z0-9]*(?::(?:[A-Za-z_$\p{L}][\p{L}\p{N}_$.#~]*(?:::[\p{L}\p{N}_$.#~]+)*))?(?::?L?\d+(?:\s*[-–]\s*L?\d+)?(?:\s*,\s*L?\d+(?:\s*[-–]\s*L?\d+)?)*)?`, 'gu');
+const SYMBOL = String.raw`(?:\(file\)|[A-Za-z_$][\w$#~]*(?:(?:\.|::|->)[A-Za-z_$][\w$#~]*)*(?:#\d+)?)`;
+const LINE_LIST = String.raw`L?\d+(?:\s*[-–]\s*L?\d+)?(?:\s*,\s*L?\d+(?:\s*[-–]\s*L?\d+)?)*`;
+const LOCATION = new RegExp(String.raw`(?:\.{1,2}[\\/])?(?:${SEGMENT}[\\/])*${SEGMENT}\.[A-Za-z][A-Za-z0-9]*(?::(?!L?\d)${SYMBOL})?(?::${LINE_LIST})?`, 'gu');
+// Text that names something other than a repository file: a URL, a site path in
+// a redirect ("/billing/list.php", "~/Orders/List.aspx"), a quoted string.
+const NOT_HERE = /(?:[/~\\"'=]|:\/\/)$/;
+
 export function evidenceRefs(text, root = null) {
   const cell = stripComments(text);
-  const spans = [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
-  const rest = cell.replace(/`[^`]*`/g, ' ');
+  const found = [];
+  const scan = (part) => {
+    for (const m of part.matchAll(LOCATION)) if (!NOT_HERE.test(part.slice(Math.max(0, m.index - 3), m.index))) found.push(m[0]);
+  };
   // A backticked span that is one location as a whole may hold spaces (`My Project/a.vb:3`).
-  const whole = (span) => /^[^\s:][^:]*\.[A-Za-z][A-Za-z0-9]*(?::[^:\s]+)?(?::?\s*L?\d+(?:\s*[-–,]\s*L?\d+)*)?$/.test(span.trim()) && /[\\/:]/.test(span);
-  const found = [...spans.flatMap((span) => (whole(span) ? [span.trim()] : [...span.matchAll(LOCATION)].map((m) => m[0]))), ...[...rest.matchAll(LOCATION)].map((m) => m[0])];
+  const whole = (span) => /^[^\s:][^:]*\.[A-Za-z][A-Za-z0-9]*(?::[^:\s]+)?(?::\s*L?\d+(?:\s*[-–,]\s*L?\d+)*)?$/.test(span.trim()) && /[\\/:]/.test(span);
+  for (const m of cell.matchAll(/`([^`]+)`/g)) if (whole(m[1])) found.push(m[1].trim()); else scan(m[1]);
+  scan(cell.replace(/`[^`]*`/g, ' '));
   // A bare name with a dot in prose ("e.g.", "jQuery.ajax") is a location only
   // with a folder, a symbol or lines after it, or when the file is there.
   const located = (loc) => /[\\/:]/.test(loc) || (root && fs.existsSync(path.join(root, loc)));
-  // "file.php:12" has the lines after one colon; "file.php:Save:12" after the symbol.
-  return found.filter(located).flatMap((loc) => parseRefs(loc.replace(/^([^:]+\.[A-Za-z0-9]+):?(L?\d)/, '$1:$2'), root));
+  return found.filter(located).flatMap((loc) => parseRefs(loc, root)).map((ref) => ({ ...ref, file: existingSuffix(root, repoPath(ref.file)) }));
 }
 
-// The code a row cites, checked: each file exists and the lines are in it.
+// Japanese prose glued to a path ("入口のsrc/a.php"): the part after the prose, when that file exists.
+function existingSuffix(root, file) {
+  if (!root || fs.existsSync(path.join(root, file))) return file;
+  for (let i = 1; i < file.length; i += 1) {
+    if (/[^\x00-\x7f]/.test(file[i - 1]) && /[\x00-\x7f]/.test(file[i]) && fs.existsSync(path.join(root, file.slice(i)))) return file.slice(i);
+  }
+  return file;
+}
+
+// The code a row cites, checked: lines are in their file. A cited path that is
+// not a repository file (a URL, a page a redirect names, a file the code
+// writes) is not an error, but a row must cite at least one file that exists.
 function citedCode(root, evidence, where, bad) {
   const refs = evidenceRefs(evidence, root);
-  if (refs.length === 0) { bad.push(`walkthrough row ${where} cites no source location; give path:line (or path:symbol) of the code that does it`); return []; }
   const ok = [];
+  const missing = [];
   for (const ref of refs) {
-    const file = repoPath(ref.file);
-    if (file.split('/').includes('..') || !fs.existsSync(path.join(root, file))) { bad.push(`walkthrough row ${where} cites ${file}, which does not exist`); continue; }
+    const file = ref.file;
+    if (file.split('/').includes('..') || !fs.existsSync(path.join(root, file))) { missing.push(file); continue; }
     if (ref.from !== null) {
       const count = lineCount(root, file);
       if (ref.from < 1 || ref.to < ref.from) { bad.push(`walkthrough row ${where} gives ${file} the lines ${ref.from}-${ref.to}, which is not a range`); continue; }
       if (count !== null && ref.to > count) { bad.push(`walkthrough row ${where} gives ${file} the lines ${ref.from}-${ref.to}, but the file has ${count} lines`); continue; }
     }
-    ok.push({ ...ref, file });
+    ok.push(ref);
+  }
+  if (!ok.length && !bad.some((b) => b.startsWith(`walkthrough row ${where} gives`))) {
+    bad.push(missing.length
+      ? `walkthrough row ${where} cites no file that exists (${[...new Set(missing)].slice(0, 3).join(', ')}): give the repository path from the root, in backticks (a path with spaces needs them), as path:line or path:symbol`
+      : `walkthrough row ${where} cites no source location; give path:line (or path:symbol) of the code that does it, in backticks`);
   }
   return ok;
 }

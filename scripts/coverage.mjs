@@ -477,7 +477,7 @@ export const ROW_STAMP = /<!--\s*row\s+([0-9a-f]{6})\s*-->/i;
 
 // The code of what an inventory row says (its context, handling and notes): a
 // crosscheck row judged a row as it was, so a row changed since needs a new look.
-export const surveyRowStamp = (row) => crypto.createHash('sha256').update([row.context, row.handling, row.notes].map((c) => String(c ?? '').trim().toLowerCase()).join('\n')).digest('hex').slice(0, 6);
+export const surveyRowStamp = (row) => crypto.createHash('sha256').update([row.context, row.handling || 'port', row.notes].map((c) => String(c ?? '').trim().toLowerCase()).join('\n')).digest('hex').slice(0, 6);
 
 // An Evidence cell that says nothing: empty, a dash, n/a, none, a lone mark.
 const saysNothing = (cell) => {

@@ -574,10 +574,12 @@ the domain, not the folders.
      carry; the person confirms it in the review (M5).
    - **Crosscheck** (after the inventory, capabilities and database are
      written): split the inventory rows (`node "<kit>/scripts/draft.mjs"
-     items --change <change>` prints them as `paths`) across
+     items --change <change>` prints them as `paths`, with each row's code
+     under `codes`) across
      `spec-relay-checker` subagents as a **survey check**, in groups like the
      inventory's folders. Give each the paths of inventory.md,
-     context-map.md, capabilities.md and database.md, its rows, and
+     context-map.md, capabilities.md and database.md, its rows with their
+     codes (the checker copies each into its row), and
      `openspec/spec-relay/work/<change>/crosscheck/<nn>.md` to write; never
      the evidence files or the analysts' reports. Merge with `merge.mjs
      --into openspec/changes/<change>/crosscheck.md --parts

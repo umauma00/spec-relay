@@ -212,10 +212,12 @@ artifacts:
       `gate.mjs review` fails while an inventory row has no row or two
       rows, a row names a path the inventory does not have, a verdict is
       anything but `confirmed` or `question`, or a row has no evidence.
-      merge.mjs writes into each row the code of the inventory row it
-      judged (`<!-- row ... -->`); the gate fails on a row without it and
-      on an inventory row whose context, handling or notes changed after
-      it was judged, so judge changed rows again.
+      Each row carries the code of the inventory row it judged
+      (`<!-- row ... -->`): `draft.mjs items` gives the codes, the checker
+      copies them, and merge.mjs refuses a code that no longer matches and
+      writes it where the checker left it out. The gate fails on a row
+      without it and on an inventory row whose context, handling or notes
+      changed after it was judged, so judge changed rows again.
     requires:
       - inventory
       - capabilities

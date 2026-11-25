@@ -171,12 +171,16 @@ Then name where the specs state it:
 The table is `| Entry point | Behavior | Verdict | Evidence |`: the entry point
 id in every row, exactly as the task gives it (backticks included), one short
 behavior per row, the verdict alone in its cell, and `path:line - what the code
-does` as the evidence (a path with spaces in backticks). Cite the line that
-does it, also in other files: the write, the mail, the throw, the redirect, not
-only the call that leads there. The gate checks that each cited file and line
-exists, that every requirement is named by some row, and that every effect line
-of a site the omission check judged covered is cited by some row, so a walk
-that stops at the first file fails. When you find an entry point that is not in your list
+does` as the evidence: each location in backticks, with its path from the
+repository root (`` `src/billing/save.php:12-14` throws "..." ``), as lines (a
+range of at most 40) or the method (`path:Class.Method`, not only the class).
+Cite the line that does it, also in other files: the write, the mail, the
+throw, the redirect, not only the call that leads there. The gate checks that
+each row cites a file that exists with lines it has, that every requirement is
+named by some row, and that every effect line of a site the omission check
+judged covered is cited by a `covered` row, so a walk that stops at the first
+file fails. When a behavior goes to a question, keep its requirement in the
+evidence (`R2: ...`). When you find an entry point that is not in your list
 (a handler the source map left out), walk it too and write its id as
 `path:symbol`. Be strict: a behavior is covered only by a scenario that would
 fail if the code stopped doing it. When the task names an entry point to walk
@@ -210,8 +214,9 @@ of the rest to judge them). For each row decide:
 
 Write your verdict file as one Markdown table, `| Path | Verdict | Evidence |`,
 one row per inventory row you were given, with its path exactly as the task
-gives it, in a part file the orchestrator merges with merge.mjs (which records
-the inventory row you judged; a row that changes later is judged again). Give evidence in every row (for `confirmed`, the files you read and
+gives it and, in the Verdict cell after the verdict, the row code the task gives
+for that path (`confirmed <!-- row 1a2b3c -->`): merge.mjs refuses a row whose
+inventory row changed after you were given it. Give evidence in every row (for `confirmed`, the files you read and
 what they hold, in a few words). Return the file's path, the number of rows
 per verdict, every row that is not `confirmed`, and how many source files you
 read.
