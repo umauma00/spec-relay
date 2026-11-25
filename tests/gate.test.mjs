@@ -12,7 +12,7 @@ const PHP = `<?php\n${'//\n'.repeat(40)}`;
 
 const CHANGE = 'openspec/changes/extract-calc';
 const SPEC = `## Purpose\n\nAdds numbers.\n\n## ADDED Requirements\n\n### Requirement: Add two numbers\nThe system SHALL add.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n\n### Requirement: Reject text\nThe system SHALL reject text.\n\n#### Scenario: t\n- **WHEN** x\n- **THEN** y\n`;
-const QUESTIONS = '# Questions\n\n## Suspected bugs\n- Q1. Overflow wraps - keep or fix?\n\n## Ambiguities\nNone\n';
+const QUESTIONS = '# Questions\n\n## Suspected bugs\n- Q1. Overflow wraps - keep or fix?\n  - Recommended: keep\n  - Why: the old system does it\n\n## Ambiguities\nNone\n';
 const GOOD = 'Reviewer: Uma\n\n## 1. Requirements\n- [x] R1 Add two numbers\n- [x] R2 Reject text\n\n## 2. Questions\n- [x] Q1 Overflow: decision: keep\n';
 
 const CROSSCHECK = '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/calc.php:3 |\n| R2 Reject text | confirmed | src/calc.php:9 |\n';
@@ -597,7 +597,7 @@ test('next separates what the person decides from what the agent fixes, in the p
   assert.deepEqual(ja.person, [
     'レビューで未承認の項目が 2 件あります（R1, Q1）。チャットで承認を伝えるか、review.md で自分でチェックしてください。',
     'review.md に承認者の名前（Reviewer:）がありません。記録する名前を教えてください。',
-    '判断がまだの質問があります（Q1）。新しいシステムでどうするかを決めてください。',
+    '判断がまだの質問があります（Q1）。新しいシステムでどうするかを決めてください（各質問に AI の推奨と理由があります）。',
   ]);
   assert.deepEqual(ja.agent, []);
   write(dir, `${CHANGE}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | mismatch | x |\n| R2 Reject text | confirmed | x |\n');

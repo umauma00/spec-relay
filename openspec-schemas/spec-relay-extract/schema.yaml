@@ -302,6 +302,20 @@ artifacts:
 
       Give each item an id (Q1, Q2, ...), the related requirement and the
       source reference. Write "None" under a heading with no items.
+      Under every question, give the answer you recommend and why, as two
+      list lines indented by two spaces, with these English labels:
+      `  - Recommended: <the answer, one line the reviewer can take as the
+      decision>` and `  - Why: <the reason, with the source reference or the
+      fact that supports it>`. For a suspected bug, the usual recommendation
+      is to keep the behavior (a fix is follow-up work after the migration);
+      say when the evidence points the other way. When nothing in the code or
+      the artifacts supports any answer, write `Recommended: none` and say in
+      Why what would decide it (whom to ask, which record to look at); never
+      guess without saying so. Keep each line on one line where you can; a
+      line that wraps continues indented deeper. The reviewer decides; the
+      review page shows the recommendation beside the decision and lets the
+      reviewer take it as it is. `gate.mjs review` fails on a question
+      without both lines.
       Include every crosscheck row and coverage row that was resolved as
       `question Q<n>`.
     requires:

@@ -31,7 +31,7 @@ const GUIDE = {
         wrong: '違う動きや抜けている条件を書く。元コードのほうがバグだと思うときも、そう書く',
       },
       S: { check: ['画面の項目・操作・メッセージ・遷移が、実際の画面と同じか', 'スクリーンショットがあれば見比べる'], against: 'スクリーンショットと screens.md の記述' },
-      Q: { check: ['新しいシステムでどうするかを決めて、判断に書く'], against: '質問の本文と元コード', wrong: '質問そのものがおかしいときは「修正を依頼」。決められないときは「保留にする」で、誰に聞くかを書く' },
+      Q: { check: ['AI の推奨と理由を読み、新しいシステムでどうするかを決める', '推奨でよければ「推奨どおりにする」（review.md では推奨の文を decision: の後に写す）。違うときは自分の判断を書く'], against: '質問の本文、AI の推奨と理由、元コード', wrong: '質問そのものがおかしいときは「修正を依頼」。決められないときは「保留にする」で、誰に聞くかを書く' },
       C: { check: ['目印（DB への書き込み、例外など）があるのに「動作なし」とした箇所が、本当に仕様に要らないか'], against: '抜けの確認（箇所台帳）' },
     },
     'spec-relay-amend': {
@@ -76,7 +76,7 @@ const GUIDE = {
         wrong: 'Write the behavior that differs or the condition that is missing; also when you think the source is the bug',
       },
       S: { check: ['Are the fields, actions, messages and transitions those of the real screen?', 'Compare with the screenshot when there is one'], against: 'The screenshot and screens.md' },
-      Q: { check: ['Decide what the new system does, and write it as the decision'], against: 'The question and the source', wrong: 'Write when the question itself is wrong. When you cannot decide yet, put it on hold and say whom to ask' },
+      Q: { check: ["Read the agent's recommendation and its reason, and decide what the new system does", 'If the recommendation is right, "Take the recommendation" (in review.md, copy it after decision:); if not, write your own decision'], against: "The question, the agent's recommendation and reason, and the source", wrong: 'Write when the question itself is wrong. When you cannot decide yet, put it on hold and say whom to ask' },
       C: { check: ['Are the sites with markers (a database write, an error) that were judged "no behavior" really not part of the spec?'], against: 'The omission check (site ledger)' },
     },
     'spec-relay-amend': {

@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkboxes, questionIds, tableRows, changeSchema, archivedChange, REMARK, noteState } from './gate.mjs';
+import { checkboxes, questionIds, questionAdvice, questionStart, ADVICE, reviewProgress, tableRows, changeSchema, archivedChange, REMARK, noteState } from './gate.mjs';
 import { guideView, guidePage, guideWords, modules as guideModules, moduleKey, GUIDE_CSS } from './guide.mjs';
 import { ledgerSummary } from './sites.mjs';
 import { leftoverRows } from './finish.mjs';
@@ -43,6 +43,12 @@ const LABELS = {
     remain: (n) => `<b>${n}</b>件 あなたの番`, allDone: '<b>0</b>すべて確認済み', noneMine: '<b>0</b>あなたの番の項目はありません', remainShort: '件 あなたの番',
     of: (all, done) => `${all} 件中 ${done} 件を確認済み`, left: '残り', sheet: '項目ごとの状態',
     legendDone: '確認済み', legendOpen: '未確認',
+    endTitle: 'レビューの完了', endReady: (who) => `すべての項目が確認済みで、レビュー担当（${who}）も書かれています。`,
+    endSend: 'チャットに次の1行を送ってください。AI が最後の確認（gate）をして、アーカイブしてよいかを聞きます。',
+    endLine: (change) => `${change} のレビュー完了`, copy: 'コピー', copied: 'コピーしました', copyFailed: 'コピーできませんでした。文字を選んでコピーしてください。',
+    endLeft: 'まだ残っています:', endWhen: (change) => `終わったら、チャットに「${change} のレビュー完了」と送ってください。`,
+    endParts: { unticked: (n) => `未確認 ${n} 件`, fix: (n) => `AI の対応待ちの修正依頼 ${n} 件`, hold: (n) => `保留 ${n} 件`, undecided: (n) => `判断が未記入の質問 ${n} 件`, reviewer: 'レビュー担当の名前（Reviewer:）', orphans: (n) => `review.md に行がない項目 ${n} 件（AI が足します）`, paren: ['（', '）'] },
+    endStale: 'この欄は、このページを作った時点の review.md の内容です。review.md を直したら、AI にページの作り直しを頼むと変わります。',
     firstOpen: (id) => `次に見る ${id} へ ↓`, show: '表示', all: 'すべて', onlyOpen: 'あなたの番だけ', allClear: 'この区分に、あなたの番の項目はありません。',
     howto: ['項目を読む', '「確認すること」に沿って根拠と照らし合わせる', '正しければ review.md の行を <code>[x]</code> に。違うときはその行のすぐ下に <code>- fix: 直してほしいこと</code>、決められないときは <code>- hold: 理由</code> を書き足して（行頭に空白 2 つ）、チャットで AI に伝える'],
     states: { done: '確認済み', open: '未確認', fix: '修正依頼中', hold: '保留中', fixed: '再確認待ち' },
@@ -54,6 +60,8 @@ const LABELS = {
     screenLabels: { entry: '入口', layout: 'レイアウト', look: '見た目', scripts: 'スクリプト', label: 'ラベル', kind: '種類', required: '必須', 'format and limits': '形式と制限', default: '初期値', editable: '編集可', 'look details': '見た目の詳細', item: '項目', 'element or control': '要素・コントロール', details: '詳細', actions: '操作', messages: 'メッセージ', transitions: '遷移' }, noneWord: 'なし', verdicts: { confirmed: '一致', mismatch: '不一致', unclear: '不明', question: '質問へ' },
     noTrace: 'trace.md に記載がありません', unreadable: 'ファイルを読めませんでした', truncated: '長いため先頭のみ表示', encoding: (e) => `文字コード ${e} を変換して表示`, dedent: (n) => `字下げを ${n} 文字詰めて表示`,
     decision: '判断', noDecision: (id) => `未記入 — review.md の ${id} の行に decision: を書きます`,
+    recommended: 'AI の推奨', why: '理由', asRecommended: '推奨どおり', noAdvice: 'AI がまだ推奨と理由を書いていません。チャットで AI に頼んでください', noRec: 'AI は推奨できません',
+    takeHint: (id) => `推奨どおりでよければ、この文を review.md の ${id} の行の decision: の後に写します。違う判断なら自分の言葉で書きます。`,
     leftoverKind: '種類', leftoverWhere: '場所', leftoverClass: '分類（案）', leftoverReason: '理由', noLeftover: '同じ id の行が leftovers.md にありません',
     leftoverKinds: { todo: '実装の積み残し TODO(port)', 'follow-up': '後回しの作業', risk: 'リスク', verification: '実行できなかった比較', flow: 'テストのないコンテキスト間の流れ' },
     leftoverClasses: { 'before-release': '切替の前に直す', 'after-release': '切替の後の課題', 'wont-fix': '直さない' },
@@ -88,6 +96,12 @@ const LABELS = {
     remain: (n) => `<b>${n}</b>for you to check`, allDone: '<b>0</b>all confirmed', noneMine: '<b>0</b>nothing for you now', remainShort: 'your turn',
     of: (all, done) => `${done} of ${all} confirmed`, left: 'left', sheet: 'State of each item',
     legendDone: 'confirmed', legendOpen: 'open',
+    endTitle: 'Finishing the review', endReady: (who) => `Every item is confirmed, and the reviewer (${who}) is named.`,
+    endSend: 'Send this line in the chat. The agent runs the last check (the gate) and asks whether to archive.',
+    endLine: (change) => `Review of ${change} complete`, copy: 'Copy', copied: 'Copied', copyFailed: 'Could not copy. Select the text and copy it.',
+    endLeft: 'Still left:', endWhen: (change) => `When you are done, send "Review of ${change} complete" in the chat.`,
+    endParts: { unticked: (n) => `${n} not confirmed`, fix: (n) => `${n} change request${n === 1 ? '' : 's'} waiting for the agent`, hold: (n) => `${n} on hold`, undecided: (n) => `${n} question${n === 1 ? '' : 's'} without a decision`, reviewer: 'the reviewer name (Reviewer:)', orphans: (n) => `${n} item${n === 1 ? '' : 's'} with no line in review.md (the agent adds them)`, paren: [' (', ')'] },
+    endStale: 'This part shows review.md as it was when the page was made. After editing review.md, ask the agent to render the page again.',
     firstOpen: (id) => `Next to look at: ${id} ↓`, show: 'Show', all: 'All', onlyOpen: 'Your turn only', allClear: 'Nothing in this group is your turn.',
     howto: ['Read the item', 'Compare it with the evidence, following "Check"', 'If it is right, tick its line in review.md (<code>[x]</code>). If it is wrong, add a line <code>- fix: what should change</code> right under it; if you cannot decide yet, <code>- hold: why</code> (indented by two spaces), and tell the agent in the chat'],
     states: { done: 'Confirmed', open: 'Open', fix: 'Change requested', hold: 'On hold', fixed: 'Changed, look again' },
@@ -98,6 +112,8 @@ const LABELS = {
     scenario: 'Scenario', evidence: 'Evidence (source code)', source: 'Source', tests: 'Existing tests', crosscheck: 'Crosscheck (second look by the AI)', lines: '', noneWord: 'none',
     noTrace: 'No entry in trace.md', unreadable: 'Could not read the file', truncated: 'long; only the beginning is shown', encoding: (e) => `decoded from ${e}`, dedent: (n) => `indentation reduced by ${n} characters`,
     decision: 'Decision', noDecision: (id) => `blank — write decision: on the ${id} line of review.md`,
+    recommended: "The agent's recommendation", why: 'Why', asRecommended: 'as recommended', noAdvice: 'The agent has not written its recommendation and reason yet. Ask it in the chat', noRec: 'The agent cannot recommend an answer',
+    takeHint: (id) => `If you agree, copy this after decision: on the ${id} line of review.md. If not, write your own decision.`,
     leftoverKind: 'Kind', leftoverWhere: 'Where', leftoverClass: 'Class (proposed)', leftoverReason: 'Reason', noLeftover: 'No row of this id in leftovers.md',
     leftoverKinds: { todo: 'TODO(port) left in the code', 'follow-up': 'Work moved to after the migration', risk: 'Risk', verification: 'Comparison that did not run', flow: 'Cross-context flow without a test' },
     leftoverClasses: { 'before-release': 'Fix before the switch', 'after-release': 'Known issue after the switch', 'wont-fix': 'Accepted as it is' },
@@ -612,20 +628,28 @@ export function parseQuestions(text) {
   const map = new Map();
   let kind = '';
   let fenced = false;
+  let header = null;
   for (const line of stripComments(text ?? '').split(/\r?\n/)) {
     if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
     if (fenced) continue;
     const h = line.match(/^#{1,6}\s+(.*?)\s*#*\s*$/);
-    if (h) { kind = /^#\s/.test(line) ? '' : plainText(h[1]); continue; }
+    // A heading that begins with an id is a question ("### Q1 Rounding"); any other names the section.
+    if (h && !questionStart(line)) { kind = /^#\s/.test(line) ? '' : plainText(h[1]); header = null; continue; }
+    if (ADVICE.test(line)) continue;
+    if (/^\s*\|/.test(line) && !/\bQ\d+\b/i.test(line)) { if (!/^\s*\|?\s*:?-{2,}/.test(line)) header = splitRow(line).map((c) => plainText(c).toLowerCase()); continue; }
     const m = line.match(/\bQ(\d+)\b/i);
     if (!m) continue;
     const id = `Q${Number(m[1])}`;
     if (map.has(id)) continue;
     let body;
-    if (/^\s*\|/.test(line)) body = splitRow(line).filter((cell) => !/^\W*Q\d+\W*$/i.test(cell) && cell).join(' — ');
-    else body = line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').replace(/^\W*Q\d+[\s*_\]`).:-]*/i, '');
+    // A table row: its cells but the id and the Recommended and Why columns.
+    const adviceColumn = (i) => /^(recommended|recommendation|推奨|why|reason|理由)/.test(header?.[i] ?? '');
+    if (/^\s*\|/.test(line)) body = splitRow(line).filter((cell, i) => !/^\W*Q\d+\W*$/i.test(cell) && cell && !adviceColumn(i)).join(' — ');
+    else body = line.replace(/^\s*(?:#{1,6}\s+|(?:[-*+]|\d+[.)])\s+)/, '').replace(/^\W*Q\d+[\s*_\]`).:-]*/i, '');
     map.set(id, { kind, text: body.trim() });
   }
+  // The answer the agent recommends, and why (the person decides).
+  for (const [id, advice] of questionAdvice(text)) if (map.has(id) && (advice.recommended || advice.why)) Object.assign(map.get(id), advice);
   return map;
 }
 
@@ -816,9 +840,19 @@ function questionBody(it, c) {
   if (it.done && !written) notes.push(L.tickedNoDecision);
   if (!it.done && written) notes.push(L.decisionNoTick);
   const kind = q?.kind ? `<span class="q-kind">${escapeHtml(L.qkinds[q.kind.toLowerCase()] ?? q.kind)}</span>` : '';
+  // What the agent recommends, and why: the person may take it as it is.
+  // "Recommended: none" says the agent cannot recommend; the reason still shows.
+  const given = q?.recommended && !BLANK.test(plainText(q.recommended)) && !/^(<.*>|tbd|todo|tba|n\/a|-|\.\.\.|…)$/i.test(plainText(q.recommended).trim());
+  const rec = given && !q.none ? q.recommended : '';
+  const why = q?.why && !BLANK.test(plainText(q.why)) ? `<p class="rec-why"><span class="label">${escapeHtml(L.why)}</span>${inline(q.why)}</p>` : '';
+  // Only an open question asks for it: an archived or decided one is a record.
+  if (q && !given && !c.archived && !written) notes.push(L.noAdvice);
+  const same = rec && written && norm(plainText(it.decision)) === norm(plainText(rec));
+  const advice = rec ? `<div class="recommend"><span class="label">${escapeHtml(L.recommended)}</span><div><p class="rec-answer">${inline(rec)}</p>${why}${written ? '' : `<p class="rec-take">${escapeHtml(L.takeHint(it.label))}</p>`}</div></div>`
+    : given ? `<div class="recommend is-none"><span class="label">${escapeHtml(L.recommended)}</span><div><p class="rec-answer">${escapeHtml(L.noRec)}</p>${why}</div></div>` : '';
   return { tag: '', notes, html: `<div class="q-body">
 ${q?.text || kind ? `<p class="q-text">${kind}${q?.text && q.text !== it.title ? inline(q.text) : ''}</p>` : ''}
-<div class="decision ${written ? 'is-filled' : 'is-blank'}"><span class="label">${escapeHtml(L.decision)}</span><p>${written ? inline(it.decision) : escapeHtml(L.noDecision(it.label))}</p></div>
+${advice}<div class="decision ${written ? 'is-filled' : 'is-blank'}"><span class="label">${escapeHtml(L.decision)}</span><p>${written ? `${inline(it.decision)}${same ? ` <span class="as-rec">${escapeHtml(L.asRecommended)}</span>` : ''}` : escapeHtml(L.noDecision(it.label))}</p></div>
 </div>` };
 }
 
@@ -831,7 +865,35 @@ function leftoverBody(it, c) {
   return { tag: klass ? `<span class="klass k-${escapeHtml(String(row.klass).replace(/[^a-z-]/g, ''))}">${escapeHtml(klass)}</span>` : '', notes: [], html: `<div class="q-body">${same ? '' : `<p class="q-text">${inline(row.what)}</p>`}<dl class="facts">${facts.filter(([k, v]) => v && k !== L.leftoverClass).map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${inline(v)}</dd>`).join('')}</dl></div>` };
 }
 
-function reviewView({ root, dir, schema, L, outDir, lang = 'en' }) {
+// The end of an active change's review: what is still left, or, when nothing is,
+// how to tell the agent that the review is complete. In a browser the person
+// sends one line in the chat; the canvas replaces the part between the
+// end-send markers with a button that sends it.
+export function reviewEnd(text, change, L, anchors = new Map(), orphans = 0) {
+  const p = reviewProgress(text);
+  // An item waiting for the agent, on hold or without a decision is counted there, not twice.
+  const elsewhere = new Set([...p.left.fix, ...p.left.hold, ...p.left.undecided]);
+  p.left = { ...p.left, unticked: p.left.unticked.filter((id) => !elsewhere.has(id)) };
+  // Something the change holds that review.md has no item for is open too (the agent adds the item).
+  if (orphans) p.ready = false;
+  const link = (id) => (anchors.has(id) ? `<a href="#${escapeHtml(anchors.get(id))}">${escapeHtml(id)}</a>` : escapeHtml(id));
+  const parts = ['unticked', 'fix', 'hold', 'undecided'].filter((k) => p.left[k].length)
+    .map((k) => `<li>${escapeHtml(L.endParts[k](p.left[k].length))}${L.endParts.paren[0]}${p.left[k].slice(0, 12).map(link).join(', ')}${p.left[k].length > 12 ? ', …' : ''}${L.endParts.paren[1]}</li>`);
+  if (orphans) parts.push(`<li>${escapeHtml(L.endParts.orphans(orphans))}</li>`);
+  if (p.left.reviewer) parts.push(`<li>${escapeHtml(L.endParts.reviewer)}</li>`);
+  const line = L.endLine(change);
+  const send = p.ready
+    ? `<p>${escapeHtml(L.endReady(p.reviewer))}${L.endParts.paren[0] === '（' ? '' : ' '}${escapeHtml(L.endSend)}</p>
+<p class="end-line"><code id="end-line">${escapeHtml(line)}</code> <button type="button" class="copy" data-copy="end-line" data-done="${escapeHtml(L.copied)}" data-fail="${escapeHtml(L.copyFailed)}">${escapeHtml(L.copy)}</button></p>`
+    : `<p>${escapeHtml(L.endWhen(change))}</p>`;
+  return `<section class="review-end${p.ready ? ' is-ready' : ''}" id="review-end"><h2>${escapeHtml(L.endTitle)}</h2>
+${parts.length ? `<div class="end-left"><p>${escapeHtml(L.endLeft)}</p><ul>${parts.join('')}</ul></div>` : ''}
+<!--end-send-->${send}
+<p class="end-stale">${escapeHtml(L.endStale)}</p><!--/end-send-->
+</section>`;
+}
+
+function reviewView({ root, dir, schema, L, outDir, lang = 'en', archived = false }) {
   const groups = parseReview(readText(path.join(dir, 'review.md')) ?? '');
   const review = stripComments(readText(path.join(dir, 'review.md')) ?? '');
   const reviewer = review.match(/^Reviewer:[ \t]*(.*)$/m)?.[1].trim() ?? '';
@@ -859,7 +921,7 @@ function reviewView({ root, dir, schema, L, outDir, lang = 'en' }) {
   const questions = parseQuestions(questionsText);
   const leftoversText = readText(path.join(dir, 'leftovers.md'));
   const leftovers = new Map(leftoverRows(leftoversText ?? '').map((row) => [row.id, row]));
-  const c = { root, L, outDir, amend, baseline, cross, trace: parseTrace(readText(path.join(dir, 'trace.md'))) };
+  const c = { root, L, outDir, amend, archived, baseline, cross, trace: parseTrace(readText(path.join(dir, 'trace.md'))) };
   const survey = schema === 'spec-relay-survey' ? surveyFacts({
     contexts, mapText, inventoryText: readText(path.join(dir, 'inventory.md')), capabilitiesText: readText(path.join(dir, 'capabilities.md')),
     glossaryText: readText(path.join(dir, 'glossary.md')), databaseText: readText(path.join(dir, 'database.md')),
@@ -1391,6 +1453,25 @@ body:has(#f-open:checked) .group:not(:has(.item.is-mine)) .all-clear{display:blo
 .decision p{margin:0;color:var(--shu);font-weight:700;overflow-wrap:anywhere}
 .decision.is-blank{border:1.5px dashed var(--rule)}
 .decision.is-blank p{color:var(--ink2);font-weight:400;font-size:14px}
+.recommend{display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:10px;align-items:baseline;max-width:46em;border:1.5px solid var(--ai);padding:8px 12px;margin:0 0 8px}
+.recommend>.label{color:var(--ai)}
+.recommend p{margin:0;overflow-wrap:anywhere}
+.recommend .rec-answer{font-weight:700}
+.recommend.is-none{border-style:dashed}.recommend.is-none .rec-answer{font-weight:600;color:var(--ink2)}
+.recommend .rec-why{margin-top:4px;font-size:14px;color:var(--ink2)}
+.recommend .rec-why .label{margin-right:8px}
+.recommend .rec-take{margin-top:6px;font-size:13px;color:var(--ink2)}
+.review-end{border:2px solid var(--rule);padding:12px 16px;margin:0 0 40px}
+.review-end.is-ready{border-color:var(--shu)}
+.review-end h2{margin:0 0 8px;font:700 15px/1.4 var(--ui);letter-spacing:.08em}
+.review-end p{max-width:46em}
+.review-end ul{margin:4px 0 8px;padding-left:1.4em}
+.end-line{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.end-line code{font:700 15px/1.4 var(--mono);padding:4px 8px;border:1.5px solid var(--ink);overflow-wrap:anywhere}
+.end-line .copy{font:600 13px/1.2 var(--ui);padding:6px 12px;min-height:32px;border:1.5px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer}
+.end-stale{font-size:13px;color:var(--ink2)}
+@media print{.end-line .copy{display:none}}
+.as-rec{font:600 12px/1.2 var(--ui);color:var(--ai);border:1px solid var(--ai);padding:1px 6px;margin-left:6px;white-space:nowrap}
 
 .doc{max-width:64em;font-size:15px;overflow-wrap:anywhere;min-width:0}
 .doc h3{font-size:17px;margin:18px 0 6px}.doc h4{font-size:15px;margin:16px 0 4px}.doc h5,.doc h6{font-size:14px;margin:12px 0 4px}
@@ -1470,7 +1551,7 @@ details.fold>summary{cursor:pointer;color:var(--ink2);font:600 13px/1.6 var(--ui
 .item.is-done .item-head .id{font-size:13px;padding:1px 6px;margin-top:3px}
 .item.is-done .seal b{width:26px;height:26px;font-size:14px}
 .item.is-done details.fold{margin-top:0}
-@container (max-width:600px){.remarks li,.how-line,.decision{grid-template-columns:minmax(0,1fr);gap:0}}
+@container (max-width:600px){.remarks li,.how-line,.decision,.recommend{grid-template-columns:minmax(0,1fr);gap:0}}
 .facts dt,th{font-size:13px}
 h1,h2,h3,h4,.label,.how-title,summary,button,.seal,.legend,.remain-split,.toc .t,.next{word-break:auto-phrase}
 @container (min-width:860px){.item>.caution{padding-left:calc(3.1em + 26px)}}
@@ -1514,7 +1595,7 @@ main{padding:0;max-width:none}
 body:has(#f-open:checked) main .item:not(.is-mine){display:block}
 .claim{position:static;max-height:none;overflow:visible}
 .appendix-hint{border-top:2px solid #000}
-.item-head{break-after:avoid}.item.small,.item.k-q,.src,.scenario,.decision{break-inside:avoid}
+.item-head{break-after:avoid}.item.small,.item.k-q,.src,.scenario,.decision,.recommend{break-inside:avoid}
 .group>h2{break-after:avoid}
 .item.is-current .item-head .id{background:none;color:#000}.cells a[aria-current]{outline:0}
 details::details-content{content-visibility:visible;display:block}
@@ -1533,6 +1614,17 @@ const SCRIPT = String.raw`(() => {
   if (wide.matches) { if (toc) toc.open = true; }
   if (!matchMedia('(min-width:700px)').matches) d.querySelectorAll('details.src').forEach((x) => { x.open = false; });
   addEventListener('beforeprint', () => d.querySelectorAll('details:not(.fold):not(.doc-fold):not(.more)').forEach((x) => { x.open = true; }));
+  // "Copy" puts the line to send in the chat on the clipboard (a page opened from
+  // a file may refuse it: the text is then selected for the reader to copy).
+  d.querySelectorAll('button[data-copy]').forEach((b) => b.addEventListener('click', async () => {
+    const el = d.getElementById(b.dataset.copy);
+    if (!el) return;
+    const word = b.dataset.word || (b.dataset.word = b.textContent);
+    const select = () => { const r = d.createRange(); r.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); };
+    try { await navigator.clipboard.writeText(el.textContent); b.textContent = b.dataset.done; }
+    catch (e) { select(); let ok = false; try { ok = d.execCommand('copy'); } catch (e2) { ok = false; } b.textContent = ok ? b.dataset.done : b.dataset.fail; }
+    setTimeout(() => { b.textContent = word; }, 2500);
+  }));
 
   const items = () => [...d.querySelectorAll('main .item')].filter((x) => x.offsetParent !== null);
   let current = null, pinned = null;
@@ -1670,7 +1762,7 @@ const SCRIPT = String.raw`(() => {
 
 // mode 'review' shows what review.md records (progress, the filter, the keys, the
 // dock); mode 'read' is for approved specs: no seals or progress, a search box instead.
-export function page({ title, kind, meta, brief = '', groups = [], docs = [], L, lang, mode = 'review', nav = '', note = L.note, view = '' }) {
+export function page({ title, kind, meta, brief = '', groups = [], docs = [], L, lang, mode = 'review', nav = '', note = L.note, view = '', end = '' }) {
   const all = groups.flatMap((g) => g.items);
   const open = all.filter((x) => !x.done);
   const read = mode === 'read';
@@ -1720,6 +1812,7 @@ ${g.how ? `<div class="group-how">${g.how}</div>` : ''}
 ${g.items.map((x) => x.html).join('\n')}
 ${read ? '' : `<p class="all-clear">${escapeHtml(L.allClear)}</p>`}
 </section>`),
+    reviewed ? end : '',
     // On a review page the appendix is reference material: each document folded, opened when needed.
     ...(reviewed && docs.length ? [`<p class="appendix-hint"><span class="label">${escapeHtml(L.appendix)}</span> ${escapeHtml(L.appendixHint)}</p>`] : []),
     ...docs.map((s) => (reviewed
@@ -1843,12 +1936,17 @@ function buildView({ root = process.cwd(), change, spec, file, guide, lang, now 
     if (!found) return { ok: false, problems: [`change not found: ${change}`] };
     const schema = readText(path.join(found.dir, '.openspec.yaml')) === null ? '' : changeSchema(found.dir);
     const reviewed = fs.existsSync(path.join(found.dir, 'review.md'));
+    let orphans = 0;
     const html = withImages(root, found.dir, resolved, (outDir) => {
-      const shown = reviewed ? reviewView({ root, dir: found.dir, schema: schema || 'spec-relay-extract', L, outDir, lang: code }) : genericChangeView(found.dir);
+      const shown = reviewed ? reviewView({ root, dir: found.dir, schema: schema || 'spec-relay-extract', L, outDir, lang: code, archived: found.archived }) : genericChangeView(found.dir);
       const meta = [schema, found.archived ? L.archived : '', stamp].filter(Boolean).join(' · ');
-      return page({ title: change, kind: L.kinds[schema || (reviewed ? 'spec-relay-extract' : '')] ?? L.document, meta, ...shown, L, lang: code, nav });
+      // An archived change is done: only an active one says how to finish its review.
+      const anchors = new Map((shown.groups ?? []).flatMap((g) => g.items).filter((i) => i.id).map((i) => [i.id, i.anchor]));
+      orphans = (shown.groups ?? []).flatMap((g) => g.items).filter((i) => !i.id && i.kind).length;
+      const end = reviewed && !found.archived ? reviewEnd(readText(path.join(found.dir, 'review.md')) ?? '', path.basename(found.dir), L, anchors, orphans) : '';
+      return page({ title: change, kind: L.kinds[schema || (reviewed ? 'spec-relay-extract' : '')] ?? L.document, meta, ...shown, L, lang: code, nav, end });
     });
-    return { ok: true, title: change, html };
+    return { ok: true, title: change, html, orphans };
   }
   if (file) {
     // --file may name a file outside the repository on purpose; only what it links stays inside.
