@@ -37,7 +37,7 @@ import {
   requirementNames, screenNames, questionIds, scenarioList, chosenLevels, capabilitySegments, portCapability,
   PLACEHOLDER, DB_KINDS, REMARK,
 } from './gate.mjs';
-import { assignment } from './coverage.mjs';
+import { assignment, traceSources } from './coverage.mjs';
 import { checkLedger } from './sites.mjs';
 import { leftoverRows } from './finish.mjs';
 
@@ -45,7 +45,7 @@ const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHECKBOX = /^\s*(?:[-*+]|\d+[.)])\s+\[(.?)\]\s*(.*)$/;
 const FENCE = /^\s*(```|~~~)/;
 const stripComments = (text) => String(text ?? '').replace(/<!--[\s\S]*?-->/g, '');
-const ascii = (json) => json.replace(/[\u007f-￿]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
+const ascii = (json) => json.replace(/[\u007f-\uffff]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
 const escCell = (s) => String(s).replace(/\|/g, '\\|');
 // A name inside a review item: one line, no comment markers.
 const oneLine = (s) => String(s).replace(/<!--|-->/g, ' ').replace(/\s+/g, ' ').trim();
@@ -120,10 +120,13 @@ function tableUnder(text, title) {
   return headedRows(body).map(({ header, cells }) => ({ header, cells }));
 }
 
+// The databases of database.md: the Database column of the first table under
+// ## Databases, as the gate reads it.
 function databasesOf(text) {
   const rows = tableUnder(text, /^databases$/i);
   if (rows === null) return null;
-  return rows.map(({ cells }) => oneLine(plain(cells[0] ?? ''))).filter((name) => name && !PLACEHOLDER.test(name));
+  const first = rows.filter((r) => r.header === rows[0]?.header);
+  return first.map(({ header, cells }) => oneLine(plain(cells[Math.max(column(header, /^(database|データベース)/), 0)] ?? ''))).filter((name) => name && !PLACEHOLDER.test(name));
 }
 
 function surveyReview(dir, problems) {
@@ -150,7 +153,7 @@ function surveyReview(dir, problems) {
   ];
 }
 
-function targetReview(root, dir, problems) {
+function targetReview(root, dir, problems, warnings) {
   const survey = archivedChange(root, 'survey');
   if (!survey) { problems.push('no archived survey change; review and archive the survey first'); return []; }
   const contexts = contextIds(readIf(path.join(survey, 'context-map.md'), problems) ?? '');
@@ -181,7 +184,7 @@ function targetReview(root, dir, problems) {
       { key: 'D91', text: 'D91 The data access mapping' },
       { key: 'D92', text: 'D92 The schema changes and the test database' },
     ]]);
-    for (const kind of kinds.filter((k) => !handling.get(k))) problems.push(`data.md gives the ${kind} objects no handling (keep or move) under ## Database logic; the item says "keep or move" until it does`);
+    for (const kind of kinds.filter((k) => !handling.get(k))) warnings.push(`data.md gives the ${kind} objects no handling (keep or move) under ## Database logic; the item says "keep or move" until it does`);
   }
   return sections;
 }
@@ -214,7 +217,7 @@ function extractReview(root, dir, problems) {
   const sections = [
     ['1. Requirements', requirements.map((name, i) => ({ key: `R:${norm(name)}`, text: `R${i + 1} ${oneLine(name)}` }))],
     ['2. Screens', screens.map((name, i) => ({ key: `S:${norm(name)}`, text: `S${i + 1} ${oneLine(name)}` }))],
-    ['3. Questions', ids.map((id) => ({ key: id, text: `${id} ${titles.get(id) ?? id}: decision:`, question: true }))],
+    ['3. Questions', ids.map((id) => ({ key: `Q:${norm(titles.get(id) ?? id)}`, fallback: id, text: `${id} ${titles.get(id) ?? id}: decision:`, question: true }))],
   ];
   // The C1 item, in the gate's own words, when the omission check set sites aside.
   const own = walk(path.join(dir, 'specs')).filter((f) => f.endsWith('.md')).map((f) => path.relative(path.join(dir, 'specs'), path.dirname(f)).split(path.sep).join('/'))[0] ?? '';
@@ -234,7 +237,7 @@ function amendReview(dir, problems) {
   ];
 }
 
-function finishReview(dir, problems) {
+function finishReview(dir, problems, warnings) {
   const text = readIf(path.join(dir, 'leftovers.md'), problems);
   if (text === null) problems.push('leftovers.md is missing; run finish.mjs draft first');
   const rows = leftoverRows(text ?? '').filter((r) => /^L\d+$/.test(r.id));
@@ -242,10 +245,10 @@ function finishReview(dir, problems) {
     const t = light(r.what);
     return t.length > 80 ? `${t.slice(0, 79).trim()}…` : t;
   };
-  for (const r of rows.filter((x) => !x.klass)) problems.push(`leftovers.md ${r.id} has no class yet; the item says "class: ?" until it has one`);
+  for (const r of rows.filter((x) => !x.klass)) warnings.push(`leftovers.md ${r.id} has no class yet; the item says "class: ?" until it has one`);
   return [
     ['1. Checks', [{ key: 'C1', text: 'C1 The whole-system checks' }]],
-    ['2. Leftovers', rows.map((r) => ({ key: r.id, text: `${r.id} ${what(r) || r.kind} - class: ${r.klass || '?'}` }))],
+    ['2. Leftovers', rows.map((r) => ({ key: `L:${norm(what(r) || r.kind)}`, fallback: r.id, text: `${r.id} ${what(r) || r.kind} - class: ${r.klass || '?'}` }))],
     ['3. Handover', [{ key: 'H1', text: 'H1 The verdict' }, { key: 'H2', text: 'H2 Before the switch' }]],
   ];
 }
@@ -261,9 +264,12 @@ export function readReview(text, keyOf) {
   let item = null;
   let fenced = false;
   let comment = false;
+  // Free text and comments keep their blank lines between them.
+  let gap = false;
+  const keep = (line) => { if (gap && other.length) other.push(''); other.push(line); gap = false; };
   for (const line of lines) {
-    if (comment) { if (line.includes('-->')) comment = false; continue; }
-    if (!fenced && /^\s*<!--/.test(line) && !line.includes('-->')) { comment = true; continue; }
+    if (comment) { keep(line); if (line.includes('-->')) comment = false; continue; }
+    if (!fenced && /^\s*<!--/.test(line) && !line.includes('-->')) { comment = true; item = null; keep(line); continue; }
     if (FENCE.test(line)) fenced = !fenced;
     const box = !fenced && line.match(CHECKBOX);
     if (box) {
@@ -273,10 +279,10 @@ export function readReview(text, keyOf) {
       continue;
     }
     if (!fenced && /^Reviewer:/.test(line)) { reviewer = line; item = null; continue; }
-    if (!fenced && (/^#{1,6}\s/.test(line) || !line.trim() || /^\s*<!--.*-->\s*$/.test(line))) { if (/^#{1,6}\s/.test(line)) item = null; continue; }
+    if (!fenced && (/^#{1,6}\s/.test(line) || !line.trim())) { if (/^#{1,6}\s/.test(line)) item = null; gap = true; continue; }
     if (item && (REMARK.test(line) || /^\s/.test(line))) { item.block.push(line); continue; }
     item = null;
-    other.push(line);
+    keep(line);
   }
   return { items: found, reviewer, other };
 }
@@ -293,9 +299,10 @@ function keyFor(schema) {
     const rest = m[3];
     const subject = (s) => norm(s.replace(/\s*:\s*decision\s*:.*$/i, ''));
     if (schema === 'spec-relay-extract' || schema === 'spec-relay-amend') {
-      if (letter === 'R' || letter === 'S') return `${letter}:${subject(rest)}`;
+      if (letter === 'R' || letter === 'S' || letter === 'Q') return `${letter}:${subject(rest)}`;
       return id;
     }
+    if (schema === 'spec-relay-finish' && letter === 'L') return `L:${norm(rest.replace(/\s+-\s+class\s*:.*$/i, ''))}`;
     if (schema === 'spec-relay-survey') {
       if (letter === 'K') return `K:${norm(rest.split(/[:：]/)[0])}`;
       if (letter === 'D' && Number(m[2]) < 90) return `D:${norm(rest.split(/[:：]/)[0])}`;
@@ -310,24 +317,51 @@ function keyFor(schema) {
   };
 }
 
-const sameWords = (a, b) => norm(stripComments(a).replace(/^[A-Za-z]\d+\b\s*/, '')) === norm(stripComments(b).replace(/^[A-Za-z]\d+\b\s*/, ''));
+// The words of an item without its id, as the gate compares them (withoutId).
+const words = (s) => norm(plain(stripComments(s)).replace(/^[A-Za-z]\d+\b\s*[.:)-]?\s*/, ''));
+const sameWords = (a, b) => words(a) === words(b);
+const idOf = (text) => plain(stripComments(text)).match(/^([A-Za-z])(\d+)\b/)?.slice(1, 3).join('').toUpperCase().replace(/^([A-Z])0*(\d)/, '$1$2') ?? null;
 
-function renderReview(sections, reviewer, kept = new Map(), report = null, other = []) {
+// The decision a question's line holds, or ''.
+const decisionOf = (text) => text.match(/decision\s*:\s*(.*)$/i)?.[1]?.trim() ?? '';
+
+// Pairs every new item with the old item about the same subject: first by
+// subject, then, for an item whose subject changed (a rename the person asked
+// for, a question reworded), by the same id. matches: Map(new item -> { old, exact }).
+function pair(sections, old) {
+  const matches = new Map();
+  const used = new Set();
+  const byKey = new Map();
+  for (const item of old) if (item.key && !byKey.has(item.key)) byKey.set(item.key, item);
+  const all = sections.flatMap(([, list]) => list);
+  for (const item of all) {
+    const m = byKey.get(item.key);
+    if (m && !used.has(m)) { matches.set(item, { old: m, exact: true }); used.add(m); }
+  }
+  for (const item of all.filter((i) => !matches.has(i))) {
+    const id = item.fallback ?? idOf(item.text);
+    const m = old.find((o) => !used.has(o) && idOf(o.text) === id);
+    if (m) { matches.set(item, { old: m, exact: false }); used.add(m); }
+  }
+  return { matches, unused: old.filter((o) => !used.has(o)) };
+}
+
+function renderReview(sections, reviewer, matches = new Map(), report = null, other = []) {
   const out = ['# Review', '', reviewer ?? 'Reviewer: <!-- name -->'];
   for (const [heading, list] of sections) {
     out.push('', `## ${heading}`);
     for (const item of list) {
-      const old = kept.get(item.key);
-      if (!old) { out.push(`- [ ] ${item.text}`); report?.added.push(item.text); continue; }
-      kept.delete(item.key);
+      const match = matches.get(item);
+      if (!match) { out.push(`- [ ] ${item.text}`); report?.added.push(item.text); continue; }
+      const { old, exact } = match;
       const [, ...notes] = old.block;
-      // A question keeps the person's decision; a fixed item keeps its line.
-      if (item.question || sameWords(old.text, item.text)) {
-        const text = item.question ? old.text.replace(/^Q\d+/i, item.text.match(/^Q\d+/)[0]) : item.text;
+      // A question keeps the person's decision in either case.
+      const text = item.question ? `${item.text} ${decisionOf(old.text)}`.trim() : item.text;
+      if (exact && sameWords(old.text.replace(/\s*decision\s*:.*$/i, ''), item.text.replace(/\s*decision\s*:.*$/i, ''))) {
         out.push(`- [${old.done ? 'x' : ' '}] ${text}`, ...notes);
       } else {
-        out.push(`- [ ] ${item.text}`, ...notes);
-        report?.changed.push({ was: old.text, now: item.text, ticked: old.done });
+        out.push(`- [ ] ${text}`, ...notes);
+        report?.changed.push({ was: old.text, now: text, ticked: old.done });
       }
     }
   }
@@ -337,52 +371,57 @@ function renderReview(sections, reviewer, kept = new Map(), report = null, other
 
 export function review(root, change, { update = false } = {}) {
   const problems = [];
+  const warnings = [];
   const dir = path.join(root, 'openspec/changes', change);
   if (!fs.existsSync(dir)) return { ok: false, problems: [`change not found: ${change}`] };
   const schema = changeSchema(dir);
   let sections;
   if (schema === 'spec-relay-survey') sections = surveyReview(dir, problems);
-  else if (schema === 'spec-relay-target') sections = targetReview(root, dir, problems);
+  else if (schema === 'spec-relay-target') sections = targetReview(root, dir, problems, warnings);
   else if (schema === 'spec-relay-extract') sections = extractReview(root, dir, problems);
   else if (schema === 'spec-relay-amend') sections = amendReview(dir, problems);
-  else if (schema === 'spec-relay-finish') sections = finishReview(dir, problems);
+  else if (schema === 'spec-relay-finish') sections = finishReview(dir, problems, warnings);
   else return { ok: false, problems: [`${change} has schema ${schema}, which has no review`] };
   const file = path.join(dir, 'review.md');
   const rel = `openspec/changes/${change}/review.md`;
   const existing = readIf(file, problems);
+  // A missing or unreadable artifact would make its items look removed and
+  // drop the person's ticks and notes with them: write nothing then.
+  if (problems.length) return { ok: false, file: rel, written: false, problems, warnings };
   if (existing !== null && !update) {
-    return { ok: false, file: rel, problems: [...problems, `${rel} exists; run with --update to rebuild its items and keep the person's ticks, decisions and notes`] };
+    return { ok: false, file: rel, written: false, problems: [`${rel} exists; run with --update to rebuild its items and keep the person's ticks, decisions and notes`], warnings };
   }
-  if (existing === '' && problems.some((p) => /not UTF-8/.test(p))) return { ok: false, file: rel, problems };
-  const report = { added: [], changed: [], removed: [] };
+  const report = { added: [], changed: [], removed: [], moved: 0 };
   let text;
-  if (existing === null) text = renderReview(sections, null, new Map(), null);
+  if (existing === null) text = renderReview(sections, null);
   else {
     const old = readReview(existing, keyFor(schema));
-    const kept = new Map();
-    for (const item of old.items) {
-      if (item.key && !kept.has(item.key)) kept.set(item.key, item);
-      else report.removed.push({ item: item.text, ticked: item.done, notes: item.block.length - 1, why: item.key ? 'a second item for the same subject' : 'no id' });
+    const { matches, unused } = pair(sections, old.items);
+    text = renderReview(sections, old.reviewer, matches, report, old.other);
+    // What goes, with its lines, so that the orchestrator can tell the person and keep a fix's thread.
+    for (const item of unused) {
+      const why = !item.key ? 'no id' : old.items.some((o) => o !== item && o.key === item.key && !unused.includes(o)) ? 'a second item for the same subject' : 'its subject is gone';
+      report.removed.push({ item: item.text, ticked: item.done, lines: item.block, why });
     }
-    text = renderReview(sections, old.reviewer, kept, report, old.other);
-    for (const item of kept.values()) report.removed.push({ item: item.text, ticked: item.done, notes: item.block.length - 1, why: 'its subject is gone' });
+    report.moved = old.other.filter((l) => l.trim()).length;
   }
-  if (existing !== null && text === existing.replace(/\r\n/g, '\n')) return { ok: problems.length === 0, file: rel, written: false, ...report, problems };
+  if (existing !== null && text === existing.replace(/\r\n/g, '\n')) return { ok: true, file: rel, written: false, ...report, problems, warnings };
   // Keep the file's line endings.
   fs.writeFileSync(file, existing && /\r\n/.test(existing) ? text.replace(/\n/g, '\r\n') : text);
   const items = sections.reduce((n, [, list]) => n + list.length, 0);
-  return { ok: problems.length === 0, file: rel, written: true, items, ...(existing === null ? {} : report), problems };
+  return { ok: true, file: rel, written: true, items, ...(existing === null ? {} : report), problems, warnings };
 }
 
 // ---------------------------------------------------------------- port design.md
 
-// Trace rows of a trace.md: Map(normalised requirement -> source cell).
+// Trace rows of a trace.md, read as the gate reads them (a leading R<n> is
+// dropped, two rows of one requirement count together): Map(normalised
+// requirement -> source cell).
 function traceRows(text) {
   const rows = new Map();
-  for (const [requirement = '', source = ''] of tableRows(text ?? '')) {
-    const name = norm(requirement);
-    const src = stripComments(source).trim();
-    if (name && src && !PLACEHOLDER.test(src)) rows.set(name, src);
+  for (const [name, sources] of traceSources(text ?? '')) {
+    const cells = sources.map((src) => stripComments(src).trim()).filter((src) => src && !PLACEHOLDER.test(src));
+    if (cells.length) rows.set(name, cells.join('; ').replace(/\|/g, '\\|'));
   }
   return rows;
 }
@@ -435,8 +474,15 @@ function levelsFor(root, context) {
 // (start is the heading), or null.
 function sectionRange(lines, title) {
   let start = -1;
+  let fenced = false;
+  let comment = false;
   for (let i = 0; i < lines.length; i += 1) {
-    const h2 = lines[i].match(/^##\s+(.*?)\s*$/);
+    const line = lines[i];
+    if (comment) { if (line.includes('-->')) comment = false; continue; }
+    if (FENCE.test(line)) { fenced = !fenced; continue; }
+    if (fenced) continue;
+    if (/<!--/.test(line) && !/<!--[\s\S]*?-->/.test(line.slice(line.indexOf('<!--')))) { comment = true; continue; }
+    const h2 = line.match(/^##\s+(.*?)(?:\s+#+)?\s*$/);
     if (!h2) continue;
     if (start >= 0) return { start, end: i };
     if (title.test(plain(h2[1]).replace(/^\d+[.)]?\s+/, ''))) start = i;
@@ -478,28 +524,28 @@ export function portDesign(root, change, { update = false } = {}) {
   if (screens.length && !policy) problems.push(`the archived target design's ui.md gives context ${context} no screen policy; ask the person for each screen's policy and write it under Decisions`);
   const levels = levelsFor(root, context);
   if (levels === null) problems.push(`the archived target design's verification.md has no row for context ${context}`);
-  // Without B1 or B2 every scenario is a unit test; otherwise the check is a choice.
-  const fixedCheck = levels && !levels.includes('B1') && !levels.includes('B2') ? 'unit' : null;
+  // Without B1, B2 or C every scenario is a unit test; otherwise the check is a choice.
+  const fixedCheck = levels && !levels.some((l) => ['B1', 'B2', 'C'].includes(l)) ? 'unit' : null;
   const { refs, from } = sourceReferences(root, capability);
   for (const name of requirements.filter((n) => !refs.has(norm(n)))) problems.push(`no trace row for requirement "${name}" in the archived extract or amendments`);
 
   const tables = {
     screens: {
-      title: /^screens$/i,
+      title: /^screens\b/i,
       heading: 'Screens',
       header: ['| Screen (screens.md) | Policy (ui.md) | Target page or form | How the design is kept |', '|---|---|---|---|'],
       rows: screens.map((s) => ({ key: norm(s), line: `| ${escCell(s)} | ${policy ?? '<!-- ask the person -->'} | <!-- --> | <!-- --> |` })),
       none: 'None',
     },
     scenarios: {
-      title: /^scenario checks$/i,
+      title: /^scenario checks\b/i,
       heading: 'Scenario checks',
       header: ['| Requirement | Scenario | Check |', '|---|---|---|'],
       rows: scenarios.map((s) => ({ key: `${norm(s.requirement)}\u0000${norm(s.scenario)}`, line: `| ${escCell(s.requirement)} | ${escCell(s.scenario)} | ${fixedCheck ?? '<!-- e2e / compare / unit -->'} |` })),
       none: 'None',
     },
     sources: {
-      title: /^source references$/i,
+      title: /^source references\b/i,
       heading: 'Source references',
       header: ['| Requirement | Source (from trace.md) |', '|---|---|'],
       rows: requirements.map((r) => ({ key: norm(r), source: refs.get(norm(r)) ?? '', line: `| ${escCell(r)} | ${refs.get(norm(r)) ?? '<!-- not in trace.md -->'} |` })),
@@ -519,7 +565,7 @@ export function portDesign(root, change, { update = false } = {}) {
     const body = t.rows.length ? [...t.header, ...t.rows.map((r) => r.line)] : [t.none];
     if (!range) {
       // Before the first section the template puts after it, else at the end.
-      const later = LATER[t.heading].map((h) => sectionRange(lines, new RegExp(`^${h}$`, 'i'))?.start).filter((i) => i !== undefined);
+      const later = LATER[t.heading].map((h) => sectionRange(lines, new RegExp(`^${h}\\b`, 'i'))?.start).filter((i) => i !== undefined);
       const at = later.length ? Math.min(...later) : -1;
       if (at < 0) lines = [...lines.join('\n').replace(/\n*$/, '').split('\n'), '', `## ${t.heading}`, ...body];
       else lines.splice(at, 0, `## ${t.heading}`, ...body, '');
@@ -538,9 +584,10 @@ export function portDesign(root, change, { update = false } = {}) {
     const present = [];
     let last = -1;
     inside.forEach((line, i) => { if (/^\s*\|/.test(line)) last = i; });
+    const un = (c) => norm((c ?? '').replace(/\\\|/g, '|'));
     for (const cells of tableRows(inside.join('\n'))) {
-      if (name === 'scenarios') present.push({ key: `${norm(cells[0] ?? '')}\u0000${norm(cells[1] ?? '')}`, cells });
-      else present.push({ key: norm(cells[0] ?? ''), cells });
+      if (name === 'scenarios') present.push({ key: `${un(cells[0])}\u0000${un(cells[1])}`, cells });
+      else present.push({ key: un(cells[0]), cells });
     }
     const missing = t.rows.filter((r) => !present.some((p) => p.key === r.key));
     for (const p of present.filter((x) => x.key.replace(/\u0000/g, '') && !t.rows.some((r) => r.key === x.key))) result.gone.push({ table: name, row: p.cells.slice(0, 2).map(plain).join(' | ') });

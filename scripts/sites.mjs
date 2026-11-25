@@ -1148,8 +1148,8 @@ export function checkLedger(root, dir, { requirements, screens, asked, assignmen
   const wording = `C1 The marker lines of ${n} are judged to hold nothing to migrate (list ${code})`;
   if (boxes) {
     const item = boxes.find((b) => /^C1\b/i.test(b.plain));
-    if (!item) problems.push(`review.md has no C1 item: ${n} with marker lines ${quiet.length === 1 ? 'is' : 'are'} judged "no behavior" or "no effect" (${quiet.slice(0, 3).join('; ')}${quiet.length > 3 ? '; ...' : ''}); add "- [ ] ${wording}" under "## 4. Coverage", for the person to decide`);
-    else if (!new RegExp(`(^|[^0-9a-z])${code}([^0-9a-z]|$)`, 'i').test(item.plain)) problems.push(`review item C1 is not for the list as it is now (${n} with marker lines judged "no behavior" or "no effect"); write "- [ ] ${wording}" and leave it unticked, so the person sees the list again`);
+    if (!item) problems.push(`review.md has no C1 item: ${n} with marker lines ${quiet.length === 1 ? 'is' : 'are'} judged "no behavior" or "no effect" (${quiet.slice(0, 3).join('; ')}${quiet.length > 3 ? '; ...' : ''}); run draft.mjs review --change <change> --update, which adds "- [ ] ${wording}" under "## 4. Coverage" for the person to decide`);
+    else if (!new RegExp(`(^|[^0-9a-z])${code}([^0-9a-z]|$)`, 'i').test(item.plain)) problems.push(`review item C1 is not for the list as it is now (${n} with marker lines judged "no behavior" or "no effect"); run draft.mjs review --change <change> --update, which writes "- [ ] ${wording}" unticked, so the person sees the list again`);
   }
   return { wording };
 }

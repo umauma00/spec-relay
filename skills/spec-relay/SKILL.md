@@ -356,8 +356,11 @@ you assist. This gate is the point of the kit.
    requirement, screen, question, context or leftover, run `node
    "<kit>/scripts/draft.mjs" review --change <change> --update`: it rebuilds
    the items, keeps the person's ticks, decisions and notes for every subject
-   that is still there, and unticks an item whose words changed. Tell the
-   person about every item in its `removed` list that was ticked or had notes.
+   that is still there (a renamed item keeps its notes under the same id), and
+   unticks an item whose words changed. It writes nothing while an artifact
+   it reads is missing or not UTF-8. Tell the person about every item in its
+   `removed` list that was ticked or had notes (its `lines` hold them), and
+   about `warnings`.
    - A `fix:` note under an item (written in the file or the canvas, or
      sent from the canvas as "[canvas] ... change requests"), or a change
      asked for in the chat, is that request. Correct the artifacts (in
@@ -859,10 +862,14 @@ changes no behavior.
    --change finish`. It runs every command of checks.md over the whole target
    root and every chosen level of every context with its ports' commands,
    writes `pass` or `fail` into checks.md and the target hash, and prints the
-   last lines of each failure. Never write those cells or the hash yourself.
-   Write `not-run: <reason>` only for a level the run could not run (a level
-   no archived port has a command for, or the source program cannot run),
-   and for each cross-context flow name the test that covers it, or `none`. A
+   last lines of each failure. Never write `pass`, `fail` or the hash
+   yourself. When a chosen level cannot run (the source program cannot run
+   any more), write `not-run: <reason>` in its cell before the run: the run
+   skips that cell. A cell the run leaves open names, in `problems`, a port
+   whose design.md has no command for the level: ask the person whether to
+   add it through a port change or write not-run. A context without a
+   capability of its own gets the Test command's result as its A. For each
+   cross-context flow, name the test that covers it, or `none`. A
    failure is fixed, never accepted: show it to the person and fix it through
    a new port change (`port-<capability>-v<n>`; `finish.mjs ready` then
    waits for it), then run `finish.mjs run` again.

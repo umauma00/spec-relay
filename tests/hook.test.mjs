@@ -195,3 +195,14 @@ test('hooks.json runs the hook for shell and edit tools and never exits non-zero
     assert.equal(missing.stdout.trim(), '', exe);
   }
 });
+
+test('only the orchestrator runs the scripts that write review.md, a port design and the finish checks', () => {
+  const dir = project();
+  const sub = { agentId: 'i1', agentType: 'spec-relay-implementer' };
+  for (const command of ['node "C:/kit/scripts/draft.mjs" review --change extract-billing-invoice --update', 'node draft.mjs port-design --change port-billing-invoice', 'node "C:/kit/scripts/finish.mjs" run --change finish']) {
+    assert.match(shell(dir, command, sub), /only the orchestrator runs draft\.mjs/, command);
+    assert.equal(shell(dir, command), null, command);
+  }
+  assert.equal(shell(dir, 'node draft.mjs items --change extract-billing-invoice', sub), null);
+  assert.equal(shell(dir, 'node finish.mjs collect', sub), null);
+});

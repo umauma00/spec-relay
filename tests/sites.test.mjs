@@ -744,9 +744,9 @@ test('"no behavior" on a site with marker lines needs the person\'s C1 item with
   const code = listCode(['src/log.php:audit', 'src/log.php:stamp']);
   assert.match(code, /^[0-9a-f]{6}$/);
   const item = `C1 The marker lines of 2 sites are judged to hold nothing to migrate (list ${code})`;
-  assert.deepEqual(problems(), [`review.md has no C1 item: 2 sites with marker lines are judged "no behavior" or "no effect" (src/log.php:audit; src/log.php:stamp); add "- [ ] ${item}" under "## 4. Coverage", for the person to decide`]);
+  assert.deepEqual(problems(), [`review.md has no C1 item: 2 sites with marker lines are judged "no behavior" or "no effect" (src/log.php:audit; src/log.php:stamp); run draft.mjs review --change <change> --update, which adds "- [ ] ${item}" under "## 4. Coverage" for the person to decide`]);
   // An item for another list (an older one, or one of the same length) is not this list's.
-  const stale = [`review item C1 is not for the list as it is now (2 sites with marker lines judged "no behavior" or "no effect"); write "- [ ] ${item}" and leave it unticked, so the person sees the list again`];
+  const stale = [`review item C1 is not for the list as it is now (2 sites with marker lines judged "no behavior" or "no effect"); run draft.mjs review --change <change> --update, which writes "- [ ] ${item}" unticked, so the person sees the list again`];
   review('- [x] C1 The 2 sites judged no behavior have nothing to migrate\n');
   assert.deepEqual(problems(), stale);
   review(`- [x] C1 動作なしと判断した 2 箇所は移行しなくてよい（list ${listCode(['src/log.php:audit', 'src/log.php:name'])}）\n`);
@@ -800,7 +800,7 @@ test('a marker line that holds no effect is set aside in the verdict, and the pe
   write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| List orders | src/orders.php:2, 6 | none |\n');
   // What was set aside is the person's to confirm, and the item names this list.
   const code = listCode(['src/orders.php:(file) no effect 4,5']);
-  assert.deepEqual(problems(), [`review.md has no C1 item: 1 site with marker lines is judged "no behavior" or "no effect" (src/orders.php:(file) no effect 4,5); add "- [ ] C1 The marker lines of 1 site are judged to hold nothing to migrate (list ${code})" under "## 4. Coverage", for the person to decide`]);
+  assert.deepEqual(problems(), [`review.md has no C1 item: 1 site with marker lines is judged "no behavior" or "no effect" (src/orders.php:(file) no effect 4,5); run draft.mjs review --change <change> --update, which adds "- [ ] C1 The marker lines of 1 site are judged to hold nothing to migrate (list ${code})" under "## 4. Coverage" for the person to decide`]);
   review(`- [x] C1 The marker lines of 1 site are judged to hold nothing to migrate (list ${code})\n`);
   assert.deepEqual(problems(), []);
   // Another line set aside is another list: the tick no longer counts.

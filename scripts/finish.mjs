@@ -307,9 +307,9 @@ export function checkFinish(root, change, dir, boxes, problems) {
   const checks = readIf(path.join(dir, 'checks.md'), problems);
   if (checks === null) problems.push('checks.md is missing');
   const recorded = stripComments(checks ?? '').match(/^Target:\s*sha256:\s*([0-9a-f]{64})\b/mi)?.[1];
-  if (checks !== null && !recorded) problems.push('checks.md records no target hash ("Target: sha256:<hash>"; get it with finish.mjs hash after the checks)');
+  if (checks !== null && !recorded) problems.push('checks.md records no target hash ("Target: sha256:<hash>"; finish.mjs run writes it)');
   else if (recorded && facts.target.sha256 && recorded.toLowerCase() !== facts.target.sha256) {
-    problems.push('the target code changed after the checks were recorded; run every check again and record the new hash (finish.mjs hash)');
+    problems.push('the target code changed after the checks were recorded; run every check again (finish.mjs run --change <change>)');
   }
   const commandRows = tableRows(section(checks, /^commands?\b|^コマンド/i)).map(([purpose = '', command = '', result = '']) => ({ purpose: plain(purpose), command: plain(command), result: cell(result) })).filter((r) => r.purpose || r.command);
   if (checks !== null && commandRows.length === 0) problems.push('checks.md lists no command under ## Commands (the build and test commands of conventions.md)');
@@ -423,7 +423,7 @@ export function finishState(root, { checkReview, artifactCount }) {
 
 function draftChecks(facts) {
   const lines = ['# Whole-system checks', '', `Target: sha256:${facts.target.sha256 ?? ''}`, '',
-    `<!-- ${facts.target.files} files under ${facts.target.root}. Run finish.mjs hash after the last fix and replace the hash. -->`, '',
+    `<!-- ${facts.target.files} files under ${facts.target.root}. finish.mjs run --change <change> runs the checks and writes the results and this hash. -->`, '',
     '## Commands', '| Purpose | Command | Result | Notes |', '|---|---|---|---|'];
   for (const c of facts.commands) lines.push(`| ${c.purpose} | \`${c.command.replace(/\|/g, '\\|')}\` | <!-- pass / fail --> | |`);
   if (facts.commands.length === 0) lines.push('| <!-- purpose --> | <!-- command from conventions.md --> | <!-- pass / fail --> | |');
@@ -476,7 +476,11 @@ const commandIn = (cell = '') => {
   const text = stripComments(cell).replace(/\\\|/g, '|').trim().replace(/^`+([\s\S]*?)`+$/, '$1').trim();
   return /^(<.*>|tbd|todo|-|none|なし|\.\.\.|…)?$/i.test(text) ? '' : text;
 };
-const RUN_NOTE = /\s*(?:;\s*)?finish\.mjs run [^;|]*/g;
+// Exactly the note this script writes, so the orchestrator's words around it stay.
+// It is "finish.mjs run <date>", then ", <n> s" or ": <part> / <part>", where a
+// part is "<level> failed in <capability> <capability>" or the no-port note.
+const RUN_PART = String.raw`(?:[A-Z0-9]+ failed in [a-z0-9/-]+(?: [a-z0-9/-]+)*|A failed in the Test command|no port, the Test command)`;
+const RUN_NOTE = new RegExp(String.raw`\s*(?:;\s*)?finish\.mjs run \d{4}-\d{2}-\d{2}(?:, [\d.]+ s|: ${RUN_PART}(?: / ${RUN_PART})*)?(?=\s*(?:[;(]|$))`, 'g');
 // The Notes cell with this run's note in place of an earlier one.
 const noted = (cell, note) => {
   const kept = stripComments(cell ?? '').replace(RUN_NOTE, '').replace(/^\s*;\s*|\s*;\s*$/g, '').trim();
@@ -560,7 +564,17 @@ export async function runChecks(root, change, { timeoutMs = 60 * 60 * 1000, run 
     }
   }
 
-  // ## Verification levels, per context, over its archived ports.
+  // ## Verification levels, per context, over its archived ports. A cell the
+  // orchestrator set to not-run (the source program cannot run) is not run.
+  const lt = tableIn(lines, /^verification\b|^検証|^比べ方/i);
+  if (!lt) problems.push('checks.md has no table under ## Verification levels');
+  const colOf = (level) => (lt ? lt.header.findIndex((h) => new RegExp(`^${level.toLowerCase()}(?![0-9a-z])`).test(h)) : -1);
+  const rowOf = (context) => (lt ? lt.rows.findIndex((cells) => plain(cells[0] ?? '').toLowerCase() === context) : -1);
+  const notRun = (context, level) => {
+    const n = rowOf(context);
+    const c = colOf(level);
+    return n >= 0 && c >= 0 && /^not[- ]?run/i.test(stripComments(lt.rows[n][c] ?? '').trim());
+  };
   const changes = path.join(root, 'openspec/changes');
   const byContext = new Map();
   for (const capability of planCapabilities(readIf(path.join(root, PLAN), problems))) {
@@ -570,56 +584,72 @@ export async function runChecks(root, change, { timeoutMs = 60 * 60 * 1000, run 
     if (!byContext.has(context)) byContext.set(context, []);
     byContext.get(context).push({ capability, change: path.relative(changes, portDir).split(path.sep).join('/') });
   }
+  const { isE2eCommand } = await import('./e2e.mjs');
   const levels = [];
+  const skipped = [];
   const outcome = new Map();
+  const seen = new Map();
+  const note = (p) => { if (!problems.includes(p)) problems.push(p); };
   for (const [context, ports] of byContext) {
     for (const port of ports) {
       const plan = verifyPlan(root, port.change, port.capability);
-      for (const p of plan.problems) problems.push(`${port.capability}: ${p}`);
-      const done = new Map();
-      for (const { level, command } of plan.runs) {
-        if (level === 'boundary') continue;
-        let result = ran.get(command) ?? done.get(command);
+      for (const p of plan.problems) note(`${port.capability}: ${p}`);
+      for (const level of ['A', ...plan.levels]) {
+        const key = `${context}\0${level}`;
+        const was = outcome.get(key) ?? { pass: true, failed: [], missing: [] };
+        outcome.set(key, was);
+        if (notRun(context, level)) { if (!skipped.some((x) => x.context === context && x.level === level)) skipped.push({ context, level, why: 'checks.md says not-run' }); continue; }
+        const step = plan.runs.find((r) => r.level === level);
+        // A port without the level's command leaves the cell open, whatever the others did.
+        if (!step) { was.missing.push(port.capability); continue; }
+        // The screen tests are the port's own; any other command runs once for all.
+        const id = isE2eCommand(step.command) ? `${port.capability}\0${step.command}` : step.command;
+        let result = ran.get(step.command) ?? seen.get(id);
         const again = Boolean(result);
         if (!result) {
-          progress(`${context} ${level} (${port.capability}): ${command}`);
-          result = await runOne(command, cwd, { timeoutMs, root, change: null, capability: port.capability });
+          progress(`${context} ${level} (${port.capability}): ${step.command}`);
+          result = await runOne(step.command, cwd, { timeoutMs, root, change: null, capability: port.capability });
           progress(`${context} ${level}: ${result.exitCode === 0 ? 'passed' : result.timedOut ? 'timed out' : `failed, exit code ${result.exitCode}`} in ${result.seconds}s`);
-          done.set(command, result);
+          seen.set(id, result);
         }
-        levels.push({ context, capability: port.capability, level, command, exitCode: result.exitCode, ...(again ? { sameAs: 'an earlier run' } : { seconds: result.seconds }), ...(result.exitCode !== 0 && !again ? { tail: tailOf(result.output) } : {}) });
-        const key = `${context}\0${level}`;
-        const was = outcome.get(key) ?? { pass: true, failed: [] };
+        levels.push({ context, capability: port.capability, level, command: step.command, exitCode: result.exitCode, ...(again ? { sameAs: 'an earlier run' } : { seconds: result.seconds }), ...(result.exitCode !== 0 && !again ? { tail: tailOf(result.output) } : {}) });
         if (result.exitCode !== 0) { was.pass = false; was.failed.push(port.capability); }
-        outcome.set(key, was);
       }
     }
   }
-  const lt = tableIn(lines, /^verification\b|^検証|^比べ方/i);
-  if (!lt) problems.push('checks.md has no table under ## Verification levels');
-  else {
-    const colOf = (level) => lt.header.findIndex((h) => new RegExp(`^${level.toLowerCase()}(?![0-9a-z])`).test(h));
+  if (lt) {
+    // A context with no capability of its own has no scenario tests but the
+    // whole-system Test command: its A is that command's result.
+    const test = commands.find((c) => /^(test|テスト)/i.test(c.purpose));
     const notesAt = lt.header.findIndex((h) => /^(notes?|備考|メモ)/.test(h));
     for (const [n, cells] of lt.rows.entries()) {
       const context = plain(cells[0] ?? '').toLowerCase();
-      const failedNotes = [];
+      if (!context || byContext.has(context) || !test || colOf('A') < 0 || notRun(context, 'A')) continue;
+      outcome.set(`${context}\0A`, { pass: test.exitCode === 0, failed: test.exitCode === 0 ? [] : ['the Test command'], missing: [], viaTest: true });
+    }
+    for (const [n, cells] of lt.rows.entries()) {
+      const context = plain(cells[0] ?? '').toLowerCase();
+      const notes = [];
       let touched = false;
-      for (const level of LEVELS) {
+      for (const level of ['A', 'B1', 'B2', 'C']) {
         const result = outcome.get(`${context}\0${level}`);
         const c = colOf(level);
-        if (!result || c < 0) continue;
+        if (!result || c < 0 || notRun(context, level)) continue;
+        if (result.missing.length) { note(`level ${level} of context ${context} has no command in the design.md of ${result.missing.join(', ')}; its cell is left as it was`); continue; }
+        if (!result.pass && !result.failed.length) continue;
         while (cells.length <= c) cells.push('');
         cells[c] = result.pass ? 'pass' : 'fail';
         touched = true;
-        if (!result.pass) failedNotes.push(`${level} failed in ${result.failed.join(', ')}`);
+        if (!result.pass) notes.push(`${level} failed in ${result.failed.join(' ')}`);
+        if (result.viaTest) notes.push('no port, the Test command');
       }
       if (touched && notesAt >= 0) {
         while (cells.length <= notesAt) cells.push('');
-        cells[notesAt] = noted(cells[notesAt], `finish.mjs run ${date}${failedNotes.length ? `: ${failedNotes.join(', ')}` : ''}`);
+        cells[notesAt] = noted(cells[notesAt], `finish.mjs run ${date}${notes.length ? `: ${notes.join(' / ')}` : ''}`);
       }
       if (touched) lines[lt.at[n]] = rowLine(cells);
     }
-    for (const context of byContext.keys()) if (!lt.rows.some((cells) => plain(cells[0] ?? '').toLowerCase() === context)) problems.push(`checks.md has no verification row for context ${context}`);
+    for (const context of byContext.keys()) if (rowOf(context) < 0) note(`checks.md has no verification row for context ${context}`);
   }
 
   // The fingerprint of the code the checks ran on.
@@ -631,7 +661,7 @@ export async function runChecks(root, change, { timeoutMs = 60 * 60 * 1000, run 
   try { fs.writeFileSync(file, crlf ? out.replace(/\n/g, '\r\n') : out); } catch (error) { problems.push(`could not write checks.md: ${error.message}`); }
   const failed = [...commands, ...levels].filter((r) => r.exitCode !== 0);
   for (const r of failed) problems.push(`${r.purpose ?? `level ${r.level} of ${r.capability}`} failed: ${r.command}`);
-  return { ok: problems.length === 0, file: `openspec/changes/${change}/checks.md`, target: sha256, commands, levels, problems };
+  return { ok: problems.length === 0, file: `openspec/changes/${change}/checks.md`, target: sha256, commands, levels, skipped, problems };
 }
 
 // ---------------------------------------------------------------- CLI
@@ -671,10 +701,11 @@ export function main(argv) {
   else if (command === 'run' && opts.change) {
     const minutes = Number(opts.timeout ?? 60);
     if (!(minutes > 0) || minutes * 60 * 1000 > 2 ** 31 - 1) return usage();
-    return runChecks(opts.root, opts.change, { timeoutMs: minutes * 60 * 1000 }).then((r) => {
+    // Ctrl+C stops the commands and the systems they started.
+    return import('./run.mjs').then(({ stopAllOnSignal }) => { stopAllOnSignal(); return runChecks(opts.root, opts.change, { timeoutMs: minutes * 60 * 1000 }).then((r) => {
       console.log(ascii(JSON.stringify(r, null, 2)));
       return r.ok ? 0 : 1;
-    });
+    }); });
   }
   else if (command === 'hash') {
     const files = targetFiles(opts.root);

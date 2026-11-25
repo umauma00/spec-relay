@@ -288,7 +288,7 @@ export function checkSourceMap(root, dir, capability, problems) {
 const withoutRequirementId = (s) => norm(plain(s).replace(/^R\d+\s*[.:)-]?\s*/i, ''));
 
 // The Source cells of trace.md by requirement name (lowercase, without its R<n>).
-function traceSources(text) {
+export function traceSources(text) {
   const rows = new Map();
   for (const [name = '', source = ''] of tableRows(text ?? '')) {
     const key = withoutRequirementId(name);

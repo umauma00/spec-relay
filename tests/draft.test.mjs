@@ -57,25 +57,49 @@ test('--update keeps the person\'s ticks, decisions and notes, and unticks what 
   write(dir, `${X}/screens.md`, 'None\n');
   const result = review(dir, 'extract-calc', { update: true });
   assert.equal(result.written, true);
-  assert.deepEqual(result.added, ['R1 Add two integers', 'R3 Clear']);
-  assert.deepEqual(result.removed.map((r) => [r.item, r.ticked, r.why]), [['R1 Add two numbers', true, 'its subject is gone'], ['S1 Calculator', true, 'its subject is gone']]);
+  assert.deepEqual(result.added, ['R3 Clear']);
+  // The renamed requirement keeps its place and notes, unticked.
+  assert.deepEqual(result.changed, [{ was: 'R1 Add two numbers', now: 'R1 Add two integers', ticked: true }]);
+  assert.deepEqual(result.removed, [{ item: 'S1 Calculator', ticked: true, lines: ['- [x] S1 Calculator', '  - hold: ask the accounting team'], why: 'its subject is gone' }]);
   const text = read(dir, `${X}/review.md`);
   assert.equal(text, '# Review\n\nReviewer: Uma\n\n## 1. Requirements\n- [ ] R1 Add two integers\n- [ ] R2 Reject `text`\n  - fix: say what the error says\n  - fixed: added the message\n- [ ] R3 Clear\n\n## 2. Screens\n\n## 3. Questions\n- [x] Q1 Overflow wraps around at 2^31: decision: keep, the old system did the same\n- [x] Q2 Rounding of halves: decision:\n');
   // Nothing changed: nothing is written.
   assert.equal(review(dir, 'extract-calc', { update: true }).written, false);
 });
 
-test('--update unticks an item whose wording changed but keeps its notes, and keeps CRLF', () => {
+test('--update reads hand-written ids as the gate does, keeps decisions and CRLF, and unticks a reworded question', () => {
   const dir = extract();
-  write(dir, `${X}/review.md`, 'Reviewer: Uma\r\n\r\n- [x] R1 Add two numbers\r\n  - fix: x\r\n  - fixed: y\r\n- [x] R2 Reject text\r\n- [x] S1 Calculator\r\n- [x] Q1 Overflow: decision: keep\r\n- [x] Q2 Halves: decision: up\r\nA note the person wrote.\r\n');
+  write(dir, `${X}/review.md`, 'Reviewer: Uma\r\n\r\n- [x] R1: Add two numbers\r\n  - fix: x\r\n  - fixed: y\r\n- [x] **R2** Reject text\r\n- [x] S1. Calculator\r\n- [x] Q1 Overflow: decision: keep\r\n- [x] Q2 Rounding of halves: decision: up\r\n<!-- a comment\r\nof two lines -->\r\nA note the person wrote.\r\n');
   const result = review(dir, 'extract-calc', { update: true });
-  // "Reject text" and "Reject `text`" are the same subject; the line is rewritten with the spec's name.
-  assert.deepEqual(result.changed, []);
+  // "Reject text" and "Reject `text`" are the same subject; Q1's title is not the one questions.md gives.
+  assert.deepEqual(result.changed, [{ was: 'Q1 Overflow: decision: keep', now: 'Q1 Overflow wraps around at 2^31: decision: keep', ticked: true }]);
+  assert.equal(result.moved, 3);
   const text = read(dir, `${X}/review.md`);
   assert.match(text, /\r\n/);
-  assert.match(text, /- \[x\] R1 Add two numbers\r\n {2}- fix: x\r\n {2}- fixed: y\r\n/);
-  assert.match(text, /- \[x\] Q1 Overflow: decision: keep\r\n/);
-  assert.match(text, /A note the person wrote\.\r\n$/);
+  assert.match(text, /- \[x\] R1 Add two numbers\r\n {2}- fix: x\r\n {2}- fixed: y\r\n- \[x\] R2 Reject `text`\r\n/);
+  assert.match(text, /- \[x\] S1 Calculator\r\n/);
+  assert.match(text, /- \[ \] Q1 Overflow wraps around at 2\^31: decision: keep\r\n- \[x\] Q2 Rounding of halves: decision: up\r\n/);
+  assert.match(text, /<!-- a comment\r\nof two lines -->\r\nA note the person wrote\.\r\n$/);
+});
+
+test('--update follows questions by their title and writes nothing while an artifact is unreadable', () => {
+  const dir = extract();
+  review(dir, 'extract-calc');
+  write(dir, `${X}/review.md`, tickAll(read(dir, `${X}/review.md`)).replace(/Q1 (.*)decision:$/m, 'Q1 $1decision: keep').replace(/Q2 (.*)decision:$/m, 'Q2 $1decision: round up'));
+  // Q1 is withdrawn and Q2 becomes Q1: its decision moves with it.
+  write(dir, `${X}/questions.md`, '# Questions\n\n## Ambiguities\n- **Q1** Rounding of halves\n');
+  const result = review(dir, 'extract-calc', { update: true });
+  assert.match(read(dir, `${X}/review.md`), /## 3. Questions\n- \[x\] Q1 Rounding of halves: decision: round up\n$/);
+  assert.deepEqual(result.removed.map((r) => r.item), ['Q1 Overflow wraps around at 2^31: decision: keep']);
+  const before = read(dir, `${X}/review.md`);
+  fs.writeFileSync(path.join(dir, `${X}/screens.md`), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('### Screen: Calculator', 'utf16le')]));
+  const refused = review(dir, 'extract-calc', { update: true });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.written, false);
+  assert.match(refused.problems.join(), /not UTF-8/);
+  fs.rmSync(path.join(dir, `${X}/screens.md`));
+  assert.match(review(dir, 'extract-calc', { update: true }).problems.join(), /screens.md is missing/);
+  assert.equal(read(dir, `${X}/review.md`), before);
 });
 
 test('review writes the survey checklist from the context map and database.md', () => {
@@ -108,7 +132,8 @@ test('review writes the target-design checklist the gate asks for', () => {
   write(dir, `${T}/ui.md`, '## Screens\n| Context | Screens | Policy |\n|---|---|---|\n| platform | all | same |\n| billing | all | layout |\n\n## Carried files\nNone\n');
   write(dir, `${T}/data.md`, '## Schema policy\nkeep\n\n## Database logic\n| Kind | Handling |\n|---|---|\n| procedure | keep |\n\n## Exceptions\nNone\n\n## Data access mapping\nNone\n\n## Schema changes\nnone\n\n## Test database\nLocalDB\n');
   const result = review(dir, 'target-design');
-  assert.match(result.problems.join(), /gives the trigger objects no handling/);
+  assert.equal(result.ok, true);
+  assert.match(result.warnings.join(), /gives the trigger objects no handling/);
   const text = read(dir, `${T}/review.md`);
   assert.match(text, /- \[ \] A1 platform: ts\/platform\n- \[ \] A2 billing: ts\/billing\n/);
   assert.match(text, /- \[ \] D1 procedure: keep\n- \[ \] D2 trigger: keep or move\n/);
@@ -127,7 +152,7 @@ test('review writes the amend and finish checklists', () => {
   write(dir, 'openspec/changes/finish/.openspec.yaml', 'schema: spec-relay-finish\n');
   write(dir, 'openspec/changes/finish/leftovers.md', '| ID | Kind | Where | What | Class | Reason |\n|---|---|---|---|---|---|\n| L1 | todo | `ts/a.ts:2` | TODO(port) rounding \\| negative | after-release | rare |\n| L2 | risk | billing | x | <!-- before-release / after-release / wont-fix --> | |\n');
   const result = review(dir, 'finish');
-  assert.match(result.problems.join(), /L2 has no class yet/);
+  assert.match(result.warnings.join(), /L2 has no class yet/);
   assert.match(read(dir, 'openspec/changes/finish/review.md'), /- \[ \] L1 TODO\(port\) rounding \| negative - class: after-release\n- \[ \] L2 x - class: \?\n/);
 });
 
@@ -167,6 +192,23 @@ test('port-design writes design.md from the template with the copied tables', ()
   // The amendment's trace wins.
   assert.match(text, /\| Add two numbers \| `src\/calc.py:add:1-2` \|\n\| Reject text \| src\/calc.py:check:5-9 \|\n/);
   assert.match(text, /## Decisions\n/);
+});
+
+test('port-design reads trace.md as the gate does and keeps a scenario with a pipe in its name', () => {
+  const dir = port('no');
+  write(dir, 'openspec/changes/archive/2026-11-02-target-design/verification.md', '## Levels\n| Context | A | B1 | B2 | C |\n|---|---|---|---|---|\n| calc | yes | no | no | yes |\n');
+  write(dir, 'openspec/changes/archive/2026-11-05-amend-calc-add/trace.md', '| Requirement | Source | Existing tests |\n|---|---|---|\n| R2 Reject text | src/calc.py:check:5-9 | none |\n| Reject text | src/calc.py:msg:20 | none |\n');
+  write(dir, 'openspec/specs/calc/add/spec.md', BASE.replace('#### Scenario: Text input', '#### Scenario: Text a | b'));
+  write(dir, `${P}/proposal.md`, `## Baseline\n- \`calc/add\` sha256:${baselineHash(dir, 'calc/add')}\n`);
+  write(dir, `${P}/design.md`, '## Structure\nx\n\n```\n## Scenario checks\n```\n\n## Source References (from trace) ##\n| Requirement | Source |\n|---|---|\n| <!-- r --> | <!-- s --> |\n');
+  const result = portDesign(dir, 'port-calc-add');
+  assert.equal(result.ok, true, result.problems.join('\n'));
+  const text = read(dir, `${P}/design.md`);
+  assert.match(text, /\| Reject text \| src\/calc.py:check:5-9; src\/calc.py:msg:20 \|/);
+  assert.equal(text.match(/## Source References/g).length, 1);
+  // C runs screen tests, so the check is the person's choice.
+  assert.match(text, /\| Reject text \| Text a \\\| b \| <!-- e2e \/ compare \/ unit --> \|/);
+  assert.deepEqual(portDesign(dir, 'port-calc-add', { update: true }).added, []);
 });
 
 test('port-design fills only template sections, and --update adds missing rows', () => {
@@ -227,8 +269,8 @@ test('finish.mjs run runs every check once and writes the results and the hash i
   assert.match(text, new RegExp(`^Target: sha256:${targetHash(dir)}$`, 'm'));
   assert.match(text, /\| Build \| `npm run build` \| pass \| finish\.mjs run \d{4}-\d{2}-\d{2}, 1\.5 s \|/);
   assert.match(text, /\| billing \| pass \| fail \| - \| - \| finish\.mjs run \d{4}-\d{2}-\d{2}: B1 failed in billing\/payment \|/);
-  // platform has no port: its row is left for the orchestrator.
-  assert.match(text, /\| platform \| <!-- pass \/ fail \/ not-run: reason --> \| - \| - \| - \| \|/);
+  // platform has no port: its A is the whole-system Test command.
+  assert.match(text, /\| platform \| pass \| - \| - \| - \| finish\.mjs run \d{4}-\d{2}-\d{2}: no port, the Test command \|/);
   // A second run replaces its own note and keeps the orchestrator's.
   write(dir, 'openspec/changes/finish/checks.md', text.replace(/(\| Build \| `npm run build` \| pass \| )([^|]*)\|/, '$1 12 targets; $2|'));
   const again = await runChecks(dir, 'finish', { run: async () => ({ exitCode: 0, seconds: 2, timedOut: false, output: '' }), progress: () => {} });
@@ -236,6 +278,29 @@ test('finish.mjs run runs every check once and writes the results and the hash i
   const now = read(dir, 'openspec/changes/finish/checks.md');
   assert.match(now, /\| Build \| `npm run build` \| pass \| 12 targets; finish\.mjs run \d{4}-\d{2}-\d{2}, 2 s \|/);
   assert.match(now, /\| billing \| pass \| pass \| - \| - \| finish\.mjs run \d{4}-\d{2}-\d{2} \|/);
+});
+
+test('finish.mjs run keeps a not-run cell, leaves a level a port has no command for, and keeps the orchestrator\'s counts', async () => {
+  const dir = finishRepo();
+  quiet(() => finishDraft(dir, 'finish'));
+  write(dir, 'openspec/changes/finish/checks.md', read(dir, 'openspec/changes/finish/checks.md').replace(/\| billing \| ([^|]*) \| ([^|]*) \|/, '| billing | $1 | not-run: the PHP server is gone |'));
+  const calls = [];
+  const ok = async (command) => { calls.push(command); return { exitCode: 0, seconds: 1, timedOut: false, output: '' }; };
+  let result = await runChecks(dir, 'finish', { run: ok, progress: () => {} });
+  assert.ok(!calls.some((c) => c.startsWith('node b1-')));
+  assert.deepEqual(result.skipped, [{ context: 'billing', level: 'B1', why: 'checks.md says not-run' }]);
+  assert.match(read(dir, 'openspec/changes/finish/checks.md'), /\| billing \| pass \| not-run: the PHP server is gone \|/);
+  // A port without the B1 command: the cell stays as it was.
+  quiet(() => fs.rmSync(path.join(dir, 'openspec/changes/finish/checks.md')));
+  quiet(() => finishDraft(dir, 'finish'));
+  write(dir, 'openspec/changes/archive/2026-11-04-port-billing-payment/design.md', '## Verification\n| Level | Covers | Command |\n|---|---|---|\n| A | all | |\n');
+  result = await runChecks(dir, 'finish', { run: ok, progress: () => {} });
+  assert.match(result.problems.join('\n'), /level B1 of context billing has no command in the design.md of billing\/payment/);
+  const text = read(dir, 'openspec/changes/finish/checks.md');
+  assert.match(text, /\| billing \| pass \| <!-- pass \/ fail \/ not-run: reason --> \|/);
+  write(dir, 'openspec/changes/finish/checks.md', text.replace(/(\| Test \| `npm test` \| pass \| )(finish\.mjs run [^|]*?) \|/, '$1$2 (412 tests, 412 passed) |'));
+  await runChecks(dir, 'finish', { run: ok, progress: () => {} });
+  assert.match(read(dir, 'openspec/changes/finish/checks.md'), /\| Test \| `npm test` \| pass \| \(412 tests, 412 passed\); finish\.mjs run \d{4}-\d{2}-\d{2}, 1 s \|/);
 });
 
 test('finish.mjs run refuses a chained command and a missing checks.md', async () => {
@@ -250,10 +315,10 @@ test('finish.mjs run refuses a chained command and a missing checks.md', async (
 });
 
 test('readReview keeps an item\'s notes with it and the rest apart', () => {
-  const { items: found, reviewer, other } = readReview('# Review\n\nReviewer: Uma\n<!-- a\ncomment -->\n- [x] R1 a\n  - fix: b\n- [ ] R2 c\nfree text\n', (b) => b.slice(0, 2));
+  const { items: found, reviewer, other } = readReview('# Review\n\nReviewer: Uma\n<!-- a\ncomment -->\n- [x] R1 a\n  - fix: b\n- [ ] R2 c\nfree text\n\nmore text\n', (b) => b.slice(0, 2));
   assert.equal(reviewer, 'Reviewer: Uma');
   assert.deepEqual(found.map((i) => [i.key, i.done, i.block.length]), [['R1', true, 2], ['R2', false, 1]]);
-  assert.deepEqual(other, ['free text']);
+  assert.deepEqual(other, ['<!-- a', 'comment -->', 'free text', '', 'more text']);
 });
 
 test('the CLI prints ASCII-only JSON and exits 0, 1 or 2', () => {

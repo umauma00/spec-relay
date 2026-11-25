@@ -115,11 +115,11 @@ artifacts:
     template: review.md
     instruction: |
       Build the checklist the HUMAN reviewer works through. Keep it short:
+      the person decides the leftovers' classes and accepts the verdict.
       Write it with `node "<kit>/scripts/draft.mjs" review --change <change>`,
       which builds this list from the artifacts; after a change that adds,
       renames or removes a subject, run it again with `--update`, which keeps
       the reviewer's ticks, decisions and notes. Do not retype the list.
-      the person decides the leftovers' classes and accepts the verdict.
       - Keep the `Reviewer:` line.
       - Under `## 1. Checks`: `C1 The whole-system checks`.
       - Under `## 2. Leftovers`: one checkbox per row of leftovers.md,
