@@ -104,7 +104,7 @@ need the reasoning behind a step.
   person asks to see a spec.
 - **Canvas question**: a message that starts with `[canvas]` was typed by the
   person in the spec-relay canvas about the page or item it names. Answer it
-  here. It is a question, never an approval or a decision: do not tick
+  here (see Code questions under Working in parallel). It is a question, never an approval or a decision: do not tick
   `review.md`, write a `decision:`, or archive because of it. Ask in the chat
   when it sounds like one.
 - **Review note**: a sub-list line under a review item in `review.md`:
@@ -283,7 +283,7 @@ not wash out these instructions.
    wave-<n>`: it saves the hashes of the files no subagent may write (every
    active change's `review.md`, `questions.md`, `crosscheck.md` and
    `verify.json` and `e2e-old.json`, every active port's `proposal.md` and `design.md`,
-   `plan.md`, `lessons.md`,
+   the finish change's `checks.md` and `leftovers.md`, `plan.md`, `lessons.md`,
    `openspec/specs/`, `openspec/config.yaml` and the source files). After the
    wave, run `gate.mjs guard --compare wave-<n>`, which lists only the paths
    that changed (exit code 1 then: read the lists). If the wave is still
@@ -319,6 +319,27 @@ not wash out these instructions.
    write what its review taught to the lessons before later analysts start.
 9. Hand the person reviews of the same context one after another where the
    order allows, because they share words and data.
+10. **What stays with you.** Talking with the person, the gates, ticks and
+   decisions in `review.md`, `questions.md`, `plan.md`, `lessons.md`, the
+   port's proposal, design decisions and tasks, `impact.md`, the finish
+   change's `checks.md` and `leftovers.md` (the flows and the classes you
+   propose), running
+   `verify.mjs`, `e2e.mjs old`, `finish.mjs run` and `render.mjs`, and
+   archiving. Everything that needs reading many source files or artifacts
+   to write a few lines goes to a subagent, even when it is one task and
+   nothing runs beside it: your context has to last the whole migration,
+   and a compaction loses what the person said. A change whose new text you
+   already know, in one file (a word, a name, a line the person dictated),
+   is faster done yourself than delegated. A single task is a wave of one:
+   save and compare the guard around it as around any wave.
+11. **Code questions.** When the person asks about the source code or the
+   new code (in the chat, a `[canvas]` question, a review item) and the
+   answer needs more than a few files, give the question to one
+   `spec-relay-analyst` as a question task: the question, the page or item
+   it came from, the folders or files to look in, and "write nothing;
+   answer with path:line for every claim". Check that the answer names
+   real files, and pass it on in your own words. Answer from what you
+   already know when that is enough.
 
 ## Reviews: what every human review shares
 
@@ -377,11 +398,23 @@ you assist. This gate is the point of the kit.
    item's note goes under `## Other notes` at the end.
    - A `fix:` note under an item (written in the file or the canvas, or
      sent from the canvas as "[canvas] ... change requests"), or a change
-     asked for in the chat, is that request. Correct the artifacts (in
-     extract and amend, have the checker check the changed rows again),
-     then write `  - fixed: <what you changed, in one line>` right under that
-     fix line, keep the item unticked, render again and ask the person to
-     look again. When you think the request is wrong, do not change the
+     asked for in the chat, is that request. Correct the artifacts. Change
+     a word, a name or a line whose new text you already know yourself.
+     Give anything that needs the source or other artifacts read (a
+     scenario, a requirement, a trace row, a screen, a context's boundary,
+     a table of the target design, a section of handover.md) to one
+     `spec-relay-analyst` with the item, the person's words from the fix
+     line, the files to change and the schema artifact, and read only its
+     report. Tell it to add a new requirement at the end of its spec file
+     and to report every requirement or screen it added or renamed, so that
+     you untick those and run `draft.mjs review --update`. Never give it
+     review.md, questions.md, impact.md, crosscheck.md, a port's proposal
+     and design, or the finish change's checks.md and leftovers.md: they
+     stay yours. In extract and amend, have the checker
+     check the changed rows again, whoever changed them. Then write
+     `  - fixed: <what you changed, in one line>` right under that fix
+     line, keep the item unticked, render again and ask the person to look
+     again. When you think the request is wrong, do not change the
      artifacts: say why in the chat and let the person withdraw or keep it.
    - A `hold:` note waits for the person. Do not answer it by ticking; ask
      whether someone else must be asked, and note what they decide.
@@ -570,11 +603,13 @@ the domain, not the folders.
    switch (all at once, or side by side on the same database), whether the
    database product stays, and whether the defaults for the logic in the
    database (keep triggers, constraints, views, procedures and functions in
-   the database) fit; never ask for a connection string. Write
-   architecture.md first (yourself or one analyst), then give conventions.md,
-   ui.md and data.md to three analysts in one wave, then
-   verification.md (it suggests level C from ui.md's policies), with the
-   person's answers in each task.
+   the database) fit; never ask for a connection string. Give
+   architecture.md to one analyst first (it reads the archived survey's
+   context map, inventory and database.md), then conventions.md, ui.md and
+   data.md to three analysts in one wave, then verification.md (it suggests
+   level C from ui.md's policies), with the person's answers in each task.
+   Read only what the person must decide on (the Modules table, the
+   policies, the levels) to ask them.
 3. Write review.md with `node "<kit>/scripts/draft.mjs" review --change
    <change>`, validate, and run the review (above). While the person
    reviews the target design, start analyzing (step 3) the capabilities in
@@ -894,9 +929,15 @@ changes no behavior.
    every row: `before-release`, `after-release` or `wont-fix`. Fix nothing
    here: a `TODO(port)` the person wants fixed now goes through a port change,
    then the draft is made again (delete leftovers.md first).
-5. **Handover and review.** Write handover.md from its instruction and
-   review.md with `draft.mjs review --change finish` (one item per leftover,
-   with its class), validate (`node "<kit>/scripts/openspec.mjs" validate finish
+5. **Handover and review.** Give handover.md to one `spec-relay-analyst`
+   (schema `spec-relay-finish`, artifact `handover`; it reads checks.md,
+   leftovers.md, the plan, the archived ports, the survey's inventory and
+   the target design's conventions.md), and read only its Verdict and
+   Before the switch to report them. When a class changes in the review or
+   `finish.mjs run` runs again, handover.md is out of date: give it back to
+   the analyst as a correction and untick H1 and H2. Write review.md with
+   `draft.mjs review --change finish` (one item per leftover, with its
+   class), validate (`node "<kit>/scripts/openspec.mjs" validate finish
    --strict`) and run the review (above). Show the leftovers grouped by
    class, so that the person can accept a whole class at once, and put the
    `before-release` items first. `gate.mjs review --change finish` also fails
@@ -951,7 +992,7 @@ reads it and it approves nothing. See docs/GUIDE.md.
    routes.md, which opens the page at that file).
 6. **Questions from the canvas.** A question the person types on a guide page
    arrives as `[canvas] ...` with an id such as `q3-1a2b`. Answer it in the chat
-   from the code, then send the same answer to the canvas:
+   from the code (a code question, see Working in parallel), then send the same answer to the canvas:
    `invoke_canvas_action` (instanceId `spec-relay`, actionName `post_answer`,
    input `{ "id": "q3-1a2b", "answer": "<Markdown>" }`). It shows under the
    item, and on a module's page the person can press "Helpful (save to the
