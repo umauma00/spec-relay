@@ -23,7 +23,7 @@ function extract() {
   write(dir, `${X}/source-map.md`, '# Source map\n\n## Source files\n| Path | Role | In scope |\n|---|---|---|\n| `src/calc.php` | calculator | full |\n');
   write(dir, `${X}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Add two numbers | src/calc.php:add:3-5 | none |\n| Reject `text` | src/calc.php:add:9 | none |\n');
   write(dir, `${X}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n');
-  write(dir, `${X}/questions.md`, '# Questions\n\n## Suspected bugs\n- Q1. Overflow wraps around at 2^31 - src/calc.php:4 - keep or fix?\n\n## Ambiguities\n- **Q2** Rounding of halves\n');
+  write(dir, `${X}/questions.md`, '# Questions\n\n## Suspected bugs\n- Q1. Overflow wraps around at 2^31 - src/calc.php:4 - keep or fix?\n  - Recommended: keep\n  - Why: the old system does it\n\n## Ambiguities\n- **Q2** Rounding of halves\n  - Recommended: keep\n  - Why: the old system does it\n');
   write(dir, `${X}/screens.md`, '# Screens\n\n### Screen: Calculator\n- labels\n');
   write(dir, `${X}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | x |\n| R2 Reject text | confirmed | x |\n| S1 Calculator | confirmed | x |\n');
   return dir;

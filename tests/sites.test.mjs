@@ -181,7 +181,7 @@ test('the extract gate needs one valid ledger row per site', () => {
   write(dir, `${C}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Total | src/invoice.php:total:2 | none |\n');
   write(dir, `${C}/screens.md`, 'None\n');
   write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Total | confirmed | x |\n');
-  write(dir, `${C}/questions.md`, '- Q1. Is save dead code?\n');
+  write(dir, `${C}/questions.md`, '- Q1. Is save dead code?\n  - Recommended: keep\n  - Why: the old system does it\n');
   write(dir, `${C}/review.md`, 'Reviewer: Uma\n- [x] R1 Total\n- [x] Q1 save: decision: keep\n');
   const ledger = (rows) => write(dir, `${C}/coverage.md`, `| Site | Verdict | Evidence |\n|---|---|---|\n${rows}`);
   const problems = () => checkReview(dir, 'extract-billing-invoice').problems;
@@ -758,7 +758,7 @@ test('"no behavior" on a site with marker lines needs the person\'s C1 item with
   assert.equal(ledgerSummary(dir, path.join(dir, C)).code, code);
   // Without such a site the item is not needed.
   write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/log.php:audit` | question Q1 | 2 |\n| `src/log.php:stamp` | question Q1 | 3 |\n| `src/log.php:name` | covered R1 | 4 |\n');
-  write(dir, `${C}/questions.md`, '- Q1. Are audit and stamp still used?\n');
+  write(dir, `${C}/questions.md`, '- Q1. Are audit and stamp still used?\n  - Recommended: keep\n  - Why: the old system does it\n');
   review('- [x] Q1 audit: decision: keep\n');
   assert.deepEqual(problems(), []);
   assert.equal(ledgerSummary(dir, path.join(dir, C)).code, null);

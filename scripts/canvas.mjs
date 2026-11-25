@@ -26,9 +26,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { view, page, labels, escapeHtml, markdown, parseReview, capabilities, timeStamp } from './render.mjs';
+import { view, page, labels, escapeHtml, markdown, parseReview, parseQuestions, capabilities, timeStamp } from './render.mjs';
 import { status, checklist, stepLabel, stepName, STEPS } from './status.mjs';
-import { language, changeSchema, archivedChange, reviewRemarks } from './gate.mjs';
+import { language, changeSchema, archivedChange, reviewRemarks, reviewProgress, PLACEHOLDER } from './gate.mjs';
 import { writeReview, sha256, utf8Text, reviewerOf, decisionOf } from './review-edit.mjs';
 import { GUIDE, guidePage, modules as guideModules, saveQa, locate } from './guide.mjs';
 
@@ -58,7 +58,11 @@ const WORDS = {
     holdHint: 'review.md のこの項目の下に「- hold: …」の1行として書きます（改行は空白になります）。決まったら「保留を解除」してから、確認済みにするか修正を依頼してください。',
     sendFixes: (n) => `修正依頼を AI に送る（${n} 件）`, fixesSent: 'チャットに送りました。AI が直すと、項目の下に直した内容が出ます。', fixesWaiting: '送りました — AI の対応待ち（{n} 件）',
     openFix: 'AI がまだ対応していない修正依頼があります。「依頼を取り下げる」を押してから確認済みにしてください。', noNote: '取り下げるものがありません。',
-    did: { tick: '{id} を確認済みにしました。', untick: '{id} の確認を外しました。', fix: '{id} に修正依頼を書きました（AI にはまだ送っていません）。', hold: '{id} を保留にしました。', withdraw: '{id} の依頼を取り下げました。', unhold: '{id} の保留を解除しました。', decision: '{id} の判断を保存しました。' }, undo: '元に戻す', undone: '元に戻しました。', keysWrite: [['x', '確認済みにする（下のバーの項目）'], ['f', '修正を依頼（下のバーの項目）'], ['h', '保留にする（下のバーの項目）']], noDecisionHere: '未記入 —「判断を書く…」で書きます',
+    did: { tick: '{id} を確認済みにしました。', untick: '{id} の確認を外しました。', fix: '{id} に修正依頼を書きました（AI にはまだ送っていません）。', hold: '{id} を保留にしました。', withdraw: '{id} の依頼を取り下げました。', unhold: '{id} の保留を解除しました。', decision: '{id} の判断を保存しました。', take: '{id} を推奨どおりにして確認済みにしました。' }, undo: '元に戻す', undone: '元に戻しました。', keysWrite: [['x', '確認済みにする（下のバーの項目）'], ['f', '修正を依頼（下のバーの項目）'], ['h', '保留にする（下のバーの項目）']], noDecisionHere: '未記入 — 下のボタンで書きます',
+    takeRec: '推奨どおりにする', otherDecision: '別の判断を書く…', recHint: 'AI の推奨: {rec}', takeRecTitle: '推奨の答えを判断として書き、確認済みにします',
+    done: 'レビュー完了をチャットに知らせる', doneLeft: 'レビュー完了（残り {n} 件）', doneName: 'レビュー担当の名前を書く（完了の前に必要）',
+    doneHint: 'チャットに「[canvas]」付きで届きます。AI が最後の確認（gate）をして、アーカイブしてよいかをチャットで聞きます。このボタンだけではアーカイブされません。',
+    doneSent: 'チャットに送りました。AI が最後の確認をして、アーカイブしてよいかを聞きます。', doneWaiting: '送りました — AI の確認待ち', notDone: 'まだ残っている項目があります。読み直しました。',
     yourTurn: '{n} 件 あなたの番', next: '次へ ↓', decideFirst: '判断を書く…', decideSave: '保存して確認済みにする', decideOnly: '保存だけする', redecide: '判断を直す',
     send: '送る', cancel: 'やめる', sending: '送っています…', sent: 'チャットに送りました。', failed: '送れませんでした', empty: '質問を書いてください。',
     notRepo: 'このフォルダには openspec/ がありません。spec-relay を導入したリポジトリでチャットを開いてください。',
@@ -91,7 +95,11 @@ const WORDS = {
     holdHint: 'This writes one line "- hold: ..." (line breaks become spaces) under the item in review.md. When you have decided, take it off hold, then confirm it or request a change.',
     sendFixes: (n) => `Send the change requests to the agent (${n})`, fixesSent: 'Sent to the chat. When the agent has corrected it, what changed shows under the item.', fixesWaiting: 'Sent — waiting for the agent ({n})',
     openFix: 'The agent has not answered a change request yet. Press "Withdraw the request" before confirming.', noNote: 'Nothing to withdraw.',
-    did: { tick: '{id} marked confirmed.', untick: '{id} unmarked.', fix: 'Change request written under {id} (not sent to the agent yet).', hold: '{id} put on hold.', withdraw: 'The request on {id} withdrawn.', unhold: '{id} taken off hold.', decision: 'The decision on {id} saved.' }, undo: 'Undo', undone: 'Undone.', keysWrite: [['x', 'mark confirmed (the item in the bar)'], ['f', 'request a change (the item in the bar)'], ['h', 'put on hold (the item in the bar)']], noDecisionHere: 'blank — write it with "Write the decision…"',
+    did: { tick: '{id} marked confirmed.', untick: '{id} unmarked.', fix: 'Change request written under {id} (not sent to the agent yet).', hold: '{id} put on hold.', withdraw: 'The request on {id} withdrawn.', unhold: '{id} taken off hold.', decision: 'The decision on {id} saved.', take: '{id} set as recommended and confirmed.' }, undo: 'Undo', undone: 'Undone.', keysWrite: [['x', 'mark confirmed (the item in the bar)'], ['f', 'request a change (the item in the bar)'], ['h', 'put on hold (the item in the bar)']], noDecisionHere: 'blank — write it with the buttons below',
+    takeRec: 'Take the recommendation', otherDecision: 'Write another decision…', recHint: "The agent's recommendation: {rec}", takeRecTitle: 'Writes the recommended answer as the decision and confirms the item',
+    done: 'Tell the chat the review is complete', doneLeft: 'Review complete ({n} left)', doneName: 'Write the reviewer name (needed first)',
+    doneHint: 'It reaches the chat marked "[canvas]". The agent runs the last check (the gate) and asks in the chat whether to archive. This button alone archives nothing.',
+    doneSent: 'Sent to the chat. The agent runs the last check and asks whether to archive.', doneWaiting: 'Sent — waiting for the agent', notDone: 'Some items are still open. The page was reloaded.',
     yourTurn: '{n} your turn', next: 'Next ↓', decideFirst: 'Write the decision…', decideSave: 'Save and confirm', decideOnly: 'Save only', redecide: 'Edit the decision',
     send: 'Send', cancel: 'Cancel', sending: 'Sending…', sent: 'Sent to the chat.', failed: 'Could not send', empty: 'Write a question first.',
     notRepo: 'This folder has no openspec/. Open the chat in a repository where spec-relay is set up.',
@@ -222,6 +230,8 @@ html{scroll-padding-bottom:calc(var(--bar,0px) + 12px)}
 @media (max-width:999px){.js body.has-actbar .keys{display:flex;flex-wrap:wrap;gap:4px 16px;margin:6px 0 0;padding:6px 0 0}}
 @media (forced-colors:active){.filter label:has(input:checked){outline:3px solid Highlight;outline-offset:-5px}.item.is-current .item-head .id{outline:2px solid Highlight;outline-offset:2px}.act-ok{border-width:3px}}
 .act.is-sent{border-style:dashed;opacity:1;cursor:default}
+.review-end .act[disabled]:not(.is-sent){cursor:default}
+.act-ok.is-sent,.act-ok.is-sent:hover{background:var(--paper);color:var(--ink)}
 .canvas-toast{display:flex;gap:12px;align-items:center;justify-content:space-between}
 .canvas-toast button{font:600 13px/1.2 var(--ui);padding:6px 10px;min-height:32px;border:1.5px solid var(--paper);background:none;color:var(--paper);cursor:pointer;flex:none}
 .ask-box button.only{margin-right:auto}
@@ -380,7 +390,8 @@ const CANVAS_SCRIPT = String.raw`(() => {
       job = { kind, id, then };
       const title = id ? titleOf(id) : '';
       etitle.textContent = kind === 'reviewer' ? W.reviewerTitle : (kind === 'fix' ? W.fixTitle : kind === 'hold' ? W.holdTitle : W.decisionTitle) + ' — ' + id + (title ? ' ' + title : '');
-      ehint.textContent = kind === 'fix' ? W.fixHint : kind === 'hold' ? W.holdHint : hintDefault;
+      const rec = kind === 'decision' && byId(id) ? byId(id).rec : '';
+      ehint.textContent = kind === 'fix' ? W.fixHint : kind === 'hold' ? W.holdHint : rec ? fill(W.recHint, { rec }) + ' ' + hintDefault : hintDefault;
       etext.hidden = kind === 'reviewer'; ename.hidden = kind !== 'reviewer';
       etext.placeholder = kind === 'fix' ? W.fixPlaceholder : kind === 'hold' ? W.holdPlaceholder : W.decisionPlaceholder;
       // A decision not written yet: save and confirm, or only save.
@@ -400,7 +411,11 @@ const CANVAS_SCRIPT = String.raw`(() => {
       if (it.state === 'fix') button(W.withdraw, 'act-quiet', () => act('withdraw', it.id));
       else if (it.done) button(W.untick, 'act-quiet', () => act('untick', it.id));
       else {
-        if (it.q && !it.decided) button(W.decideFirst, 'act-ok', () => edit('decision', it.id, '', 'tick'));
+        // A question with the agent's recommendation: take it in one press, or write another decision.
+        if (it.q && !it.decided && it.rec) {
+          button(W.takeRec, 'act-ok', () => run([['decision', it.id, it.rec], ['tick', it.id]], toast, null, { m: fill(W.did.take, { id: it.id }), undo: [['untick', it.id]] })).title = W.takeRecTitle;
+          button(W.otherDecision, 'act-quiet', () => edit('decision', it.id, '', 'tick'));
+        } else if (it.q && !it.decided) button(W.decideFirst, 'act-ok', () => edit('decision', it.id, '', 'tick'));
         else button(W.tick, 'act-ok', () => act('tick', it.id));
         button(W.fix, 'act-fix', () => edit('fix', it.id, ''));
         if (it.state === 'hold') button(W.unhold, 'act-quiet', () => act('withdraw', it.id));
@@ -426,7 +441,8 @@ const CANVAS_SCRIPT = String.raw`(() => {
     const count = d.createElement('span'); count.className = 'count'; count.textContent = fill(W.yourTurn, { n: mineCount });
     const nextB = d.createElement('button'); nextB.type = 'button'; nextB.className = 'act act-quiet'; nextB.textContent = W.next;
     nextB.addEventListener('click', () => { const p = d.querySelector('.dock .primary'); if (p) p.click(); });
-    barNext.append(count, nextB);
+    if (R.done && R.done.ready) { const db = d.createElement('button'); db.type = 'button'; db.className = 'act act-ok review-done'; db.textContent = W.done; barNext.append(db); }
+    else barNext.append(count, nextB);
     bar.append(barHead, barButtons, barNext);
     d.body.appendChild(bar);
     d.body.classList.add('has-actbar');
@@ -463,7 +479,8 @@ const CANVAS_SCRIPT = String.raw`(() => {
       if (tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable) || (tag === 'INPUT' && !/^(radio|checkbox)$/.test(t.type))) return;
       if (ebox.open || box.open) return;
       const it = shown;
-      if (e.key === 'x' && !it.done && it.state !== 'fix') { if (it.q && !it.decided) edit('decision', it.id, '', 'tick'); else act('tick', it.id); }
+      // On an undecided question, x opens the decision with the recommendation filled in (saved only on Save).
+      if (e.key === 'x' && !it.done && it.state !== 'fix') { if (it.q && !it.decided) edit('decision', it.id, it.rec || '', 'tick'); else act('tick', it.id); }
       else if (e.key === 'f' && !it.done && it.state !== 'fix') edit('fix', it.id, '');
       else if (e.key === 'h' && !it.done && it.state !== 'fix' && it.state !== 'hold') edit('hold', it.id, '');
       else return;
@@ -486,8 +503,28 @@ const CANVAS_SCRIPT = String.raw`(() => {
         toast(W.fixesSent);
       } catch (err) { fixes.disabled = false; toast(W.failed + ' (' + err.message + ')'); }
     });
+    // "Review complete": every item is confirmed and the reviewer named. The server
+    // reads review.md again and tells the chat; the agent then runs the gate and
+    // asks about the archive. Once sent, the buttons say so until review.md changes.
+    const doneKey = 'spec-relay-canvas-done:' + cfg.page;
+    const doneButtons = [...d.querySelectorAll('.review-done')];
+    const markDone = () => doneButtons.forEach((b) => { b.disabled = true; b.classList.add('is-sent'); b.textContent = W.doneWaiting; });
+    if (doneButtons.length && store(doneKey) === hash) markDone();
+    doneButtons.forEach((b) => b.addEventListener('click', async () => {
+      doneButtons.forEach((x) => { x.disabled = true; });
+      try {
+        const res = await fetch(base + '/done', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'done' }, body: JSON.stringify({ page: cfg.page, hash }) });
+        if (res.status === 409) { let j = {}; try { j = await res.json(); } catch (e) { /* not JSON */ } reload(j.code === 'stale' ? W.changed : W.notDone); return; }
+        if (!res.ok) throw new Error(String(res.status));
+        store(doneKey, hash);
+        markDone();
+        toast(W.doneSent);
+      } catch (err) { doneButtons.forEach((x) => { x.disabled = false; }); toast(W.failed + ' (' + err.message + ')'); }
+    }));
     const who = d.getElementById('edit-reviewer');
     if (who) who.addEventListener('click', () => edit('reviewer', null, R.reviewer));
+    const named = d.getElementById('done-name');
+    if (named) named.addEventListener('click', () => edit('reviewer', null, R.reviewer));
     etext.addEventListener('input', () => { emsg.textContent = ''; }); ename.addEventListener('input', () => { emsg.textContent = ''; });
     ebox.addEventListener('keydown', (e) => {
       e.stopPropagation();
@@ -611,11 +648,18 @@ export function interactive(html, { lang, pagePath, title, version, seq, nonce, 
   const L = labels(lang);
   const current = path.posix.basename(pagePath);
   const nav = `<nav class="canvas-nav" aria-label="${escapeHtml(W.nav)}"><a href="progress.html"${current === 'progress.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.progress)}</a><a href="specs.html"${current === 'specs.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.specs)}</a>${guide ? `<a href="guide.html"${current === 'guide.html' ? ' aria-current="page"' : ''}>${escapeHtml(W.guide)}</a>` : ''}</nav>
-<p class="ask-row ask-page"><button type="button" class="ask" id="ask-page">${escapeHtml(W.askPage)}</button>${review ? ` <button type="button" class="ask mark" id="edit-reviewer">${escapeHtml(review.reviewer ? `${W.reviewer}: ${review.reviewer}` : W.reviewerSet)}</button>` : ''}</p>${review?.fixes ? `\n<p class="ask-row ask-page"><button type="button" class="act act-fix act-wide" id="send-fixes">${escapeHtml(W.sendFixes(review.fixes))}</button></p>` : ''}`;
+<p class="ask-row ask-page"><button type="button" class="ask" id="ask-page">${escapeHtml(W.askPage)}</button>${review ? ` <button type="button" class="ask mark" id="edit-reviewer">${escapeHtml(review.reviewer ? `${W.reviewer}: ${review.reviewer}` : W.reviewerSet)}</button>` : ''}</p>${review?.fixes ? `\n<p class="ask-row ask-page"><button type="button" class="act act-fix act-wide" id="send-fixes">${escapeHtml(W.sendFixes(review.fixes))}</button></p>` : ''}${review?.done?.ready ? `\n<p class="ask-row ask-page"><button type="button" class="act act-ok act-wide review-done">${escapeHtml(W.done)}</button></p>` : ''}`;
+  // The end of the review: a button that tells the chat, in place of the line to send.
+  const doneButton = !review?.done ? '' : review.done.ready
+    ? `<p><button type="button" class="act act-ok review-done">${escapeHtml(W.done)}</button></p><p class="end-stale">${escapeHtml(W.doneHint)}</p>`
+    : review.done.left === 0 && !review.done.reviewer
+      ? `<p><button type="button" class="act act-ok" id="done-name">${escapeHtml(W.doneName)}</button></p>`
+      : `<p><button type="button" class="act" disabled>${escapeHtml(W.doneLeft.replace('{n}', String(review.done.left)))}</button></p>`;
   const words = Object.fromEntries(['ask', 'zoomIn', 'zoomOut', 'askAbout', 'sending', 'sent', 'failed', 'empty', 'noLink', 'gone', ...(answers ? ['answer', 'helpful', 'qaSaved', 'qaFailed'] : []),
     ...(review ? ['tick', 'untick', 'decide', 'decideTick', 'decisionTitle', 'reviewerTitle', 'saving', 'saved', 'changed', 'saveFailed', 'emptyValue', 'needDecision', 'notUtf8', 'busy', 'noLine', 'placeholder', 'noFile', 'bad',
       'fix', 'hold', 'withdraw', 'unhold', 'fixTitle', 'holdTitle', 'fixHint', 'holdHint', 'fixesSent', 'fixesWaiting', 'openFix', 'noNote',
-      'fixPlaceholder', 'holdPlaceholder', 'decisionPlaceholder', 'did', 'undo', 'yourTurn', 'next', 'decideFirst', 'decideSave', 'decideOnly', 'redecide', 'reviewer', 'reviewerSet', 'save', 'undone', 'keysWrite'] : [])].map((k) => [k, W[k]]));
+      'fixPlaceholder', 'holdPlaceholder', 'decisionPlaceholder', 'did', 'undo', 'yourTurn', 'next', 'decideFirst', 'decideSave', 'decideOnly', 'redecide', 'reviewer', 'reviewerSet', 'save', 'undone', 'keysWrite',
+      'takeRec', 'otherDecision', 'recHint', 'takeRecTitle', 'done', 'doneLeft', 'doneName', 'doneSent', 'doneWaiting', 'notDone'] : [])].map((k) => [k, W[k]]));
   const config = JSON.stringify({ page: pagePath, title, version, seq, words, review, ...(review ? { states: L.states } : {}), ...(answers ? { answers } : {}) }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const dialog = `<dialog class="ask-box" id="ask-box" aria-labelledby="ask-title" aria-describedby="ask-about"><form method="dialog"><h2 id="ask-title">${escapeHtml(W.askTitle)}</h2><p class="about" id="ask-about"></p>
 <textarea id="ask-text" maxlength="4000" aria-labelledby="ask-title" aria-describedby="ask-about ask-hint ask-msg"></textarea>
@@ -636,6 +680,9 @@ ${review ? `<dialog class="ask-box" id="edit-box" aria-labelledby="edit-title"><
     .replace(`<li>${L.howto[2]}</li>`, () => (review ? `<li>${escapeHtml(W.howto)}</li>` : `<li>${L.howto[2]}</li>`))
     // A blank decision is written with the button here, not in the file.
     .replace(/(<div class="decision is-blank"><span class="label">[^<]*<\/span><p>)[^<]*(<\/p>)/g, (m, a, b) => (review ? `${a}${escapeHtml(W.noDecisionHere)}${b}` : m))
+    // The recommendation is taken with a button here, not copied into the file.
+    .replace(/<p class="rec-take">[^<]*<\/p>/g, (m) => (review ? '' : m))
+    .replace(/<!--end-send-->[\s\S]*?<!--\/end-send-->/, (m) => (review ? doneButton : m))
     .replace(/(<p class="meta">[^<]*<\/p>)/, (m) => `${m}\n${nav}`)
     .replace(/<\/body>\s*<\/html>\s*$/, () => `${dialog}\n</body>\n</html>\n`);
 }
@@ -661,6 +708,19 @@ export function fixPrompt({ change, items }, lang) {
   const head = lang === 'ja' ? `[canvas] ${change} のレビューで、直してほしい項目が ${items.length} 件あります。` : `[canvas] ${items.length} change request${items.length === 1 ? '' : 's'} in the review of ${change}.`;
   const prompt = `${head}\n${list}\n\n(The person wrote these under the items of openspec/changes/${oneLine(change, 128)}/review.md with the canvas ("- fix: ..."). Read review.md again, correct the artifacts as the Reviews section of the spec-relay skill says, write "  - fixed: <what you changed>" under each fix line, keep the items unticked, render again and tell the person. It is a request for a change, not an approval: do not tick review.md or archive because of it.)`;
   return { prompt, displayPrompt: `${head}\n${list}` };
+}
+
+// The message for "review complete": the person's part of the review is done.
+// The agent runs the gate and asks whether to archive; this is never that yes.
+export function donePrompt({ change, total, reviewer }, lang) {
+  const name = oneLine(change, 128);
+  // The name is the person's text: on one line, in quotes, without brackets that could end the sentence.
+  const who = oneLine(reviewer, 80).replace(/[()（）「」『』"“”。.]/g, ' ').replace(/\s+/g, ' ').trim();
+  const head = lang === 'ja'
+    ? `[canvas] ${name} のレビューが終わりました（review.md の ${total} 項目すべて確認済み、レビュー担当「${who}」）。`
+    : `[canvas] The review of ${name} is complete (all ${total} items of review.md confirmed, reviewer "${who}").`;
+  const prompt = `${head}\n\n(The person pressed "Review complete" in the spec-relay canvas. Read openspec/changes/${name}/review.md again, run gate.mjs review --change ${name} and report the result as the Reviews section of the spec-relay skill says (step 4). When it passes, ask the person whether to archive, recommending it. This message is not that yes: archive only on the person's explicit yes in the chat.)`;
+  return { prompt, displayPrompt: head };
 }
 
 // ---------------------------------------------------------------- the server
@@ -746,13 +806,22 @@ function reviewState(file) {
   const buffer = fs.readFileSync(file);
   const text = utf8Text(buffer);
   if (text === null) return null;
+  // The answer the agent recommends for each question (questions.md next to review.md).
+  let questions = new Map();
+  try { questions = parseQuestions(utf8Text(fs.readFileSync(path.join(path.dirname(file), 'questions.md'))) ?? ''); } catch { /* none */ }
   const seen = new Set();
   const items = parseReview(text).flatMap((g) => g.items).filter((i) => i.id && !seen.has(i.id) && seen.add(i.id))
     .map((i) => {
       const decision = i.decision === null ? '' : decisionOf(`decision: ${i.decision}`);
-      return { id: i.id, done: i.done, q: i.letter === 'Q', decided: Boolean(decision), decision, state: i.state };
+      const q = i.letter === 'Q';
+      // A placeholder or "none" is no answer to take.
+      const advice = q ? questions.get(i.id) : null;
+      const rec = advice && !advice.none && !PLACEHOLDER.test(oneLine(advice.recommended, 500)) ? oneLine(advice.recommended, 500) : '';
+      return { id: i.id, done: i.done, q, decided: Boolean(decision), decision, state: i.state, ...(rec ? { rec } : {}) };
     });
-  return { hash: sha256(buffer), items, reviewer: reviewerOf(text), fixes: reviewRemarks(text).filter((i) => i.openFix).length };
+  const progress = reviewProgress(text);
+  return { hash: sha256(buffer), items, reviewer: reviewerOf(text), fixes: reviewRemarks(text).filter((i) => i.openFix).length,
+    done: { ready: progress.ready, left: [...new Set(Object.entries(progress.left).filter(([k]) => k !== 'reviewer').flatMap(([, v]) => v))].length, reviewer: !progress.left.reviewer } };
 }
 
 const sameToken = (a, b) => {
@@ -813,8 +882,10 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         const found = reviewFile(root, name);
         try { review = found ? reviewState(found.file) : null; } catch { review = null; }
         result = view({ root, change: name, lang: code, now: now(), at });
+        // An item the page shows that review.md has no line for keeps the review open.
+        if (review && result?.orphans) review.done = { ...review.done, ready: false, left: review.done.left + result.orphans };
       }
-      built = result?.ok ? { html: result.html, title: result.title, review } : null;
+      built = result?.ok ? { html: result.html, title: result.title, review, orphans: result?.orphans ?? 0 } : null;
     }
     if (cache.size > 30) cache.clear();
     cache.set(key, built);
@@ -894,6 +965,26 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         if (!open.length) return reply(409, { ok: false, problem: 'no change request is open' });
         await ask(fixPrompt({ change: found.name, items: open }, lang()));
         return reply(200, { ok: true, count: open.length });
+      }
+      if (rest.length === 1 && rest[0] === 'done') {
+        // "Review complete": review.md is read here, and only a finished review is sent.
+        const origin = req.headers.origin;
+        if (req.method !== 'POST' || req.headers['x-spec-relay'] !== 'done' || (origin && origin !== `http://127.0.0.1:${port}`)) return send(res, 403, 'text/plain; charset=utf-8', 'forbidden');
+        const reply = (code, body) => send(res, code, 'application/json; charset=utf-8', JSON.stringify(body));
+        let body;
+        try { body = JSON.parse(await readBody(req)); } catch { return reply(400, { ok: false, problem: 'bad request' }); }
+        const name = body && typeof body.page === 'string' && body.page.startsWith(`${VIEWS}/`) ? path.posix.basename(body.page, '.html') : '';
+        const found = name ? reviewFile(root, name) : null;
+        if (!found) return reply(404, { ok: false, code: 'noFile', problem: 'this page has no review.md' });
+        const buffer = fs.readFileSync(found.file);
+        const text = utf8Text(buffer);
+        if (text === null) return reply(400, { ok: false, code: 'notUtf8', problem: 'review.md is not UTF-8' });
+        const progress = reviewProgress(text);
+        // The page must show the file as it is now: a stale page is reloaded first.
+        if (typeof body.hash !== 'string' || body.hash !== sha256(buffer)) { checked = 0; cache.clear(); return reply(409, { ok: false, code: 'stale', problem: 'review.md changed since the page was shown' }); }
+        if (!progress.ready || pageHtml(found.name)?.orphans) return reply(409, { ok: false, code: 'notDone', problem: 'the review is not complete' });
+        await ask(donePrompt({ change: found.name, total: progress.total, reviewer: progress.reviewer }, lang()));
+        return reply(200, { ok: true });
       }
       if (rest.length === 1 && rest[0] === 'review') {
         const origin = req.headers.origin;

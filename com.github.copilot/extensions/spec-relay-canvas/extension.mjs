@@ -79,7 +79,7 @@ session = await joinSession({
     createCanvas({
       id: 'spec-relay',
       displayName: 'spec-relay HTML view',
-      description: 'Shows the spec-relay migration as HTML pages next to the chat: progress, review pages, approved specs and the code guide, with a button to ask about any item. On the page of an active change the person can tick items, ask for a change ("fix:") or put one on hold ("hold:") under an item, and write decisions and the reviewer in review.md (their own edit; never an approval to archive). The agent cannot write through it. When you offer it to the person, call it the HTML view, not a canvas.',
+      description: 'Shows the spec-relay migration as HTML pages next to the chat: progress, review pages, approved specs and the code guide, with a button to ask about any item. On the page of an active change the person can tick items, ask for a change ("fix:") or put one on hold ("hold:") under an item, and write decisions (or take the recommendation from questions.md) and the reviewer in review.md (their own edit; never an approval to archive). When everything is confirmed, its "review complete" button sends a [canvas] message: run gate.mjs review, then ask whether to archive. The agent cannot write through it. When you offer it to the person, call it the HTML view, not a canvas.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
