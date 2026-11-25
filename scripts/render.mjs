@@ -347,25 +347,50 @@ export function parseTrace(text) {
 
 // "src/a/Invoice.cs:Invoice.Total:10-42" -> { file, symbol, from, to }. Several
 // references may share a cell, separated by <br>, ";" or ",".
-// The path ends at the first ".ext" followed by ":" or the end, so paths may hold
-// spaces, non-ASCII letters or backslashes, and symbols may hold "::".
+// The path ends at the first ":" (no file name holds one on Windows), so paths
+// may hold spaces, non-ASCII letters, backslashes or dotted folders, and symbols
+// may hold "::". A path with an extension or a dotfile (.gitignore) may stand
+// alone; a file without one (Makefile, bin/console, artisan) is a path only when
+// a symbol or lines follow it, so prose such as "see the invoice class" or a
+// symbol such as "Billing::Total" is not read as a file.
 const RANGE = String.raw`L?\d+(?:\s*[-–]\s*L?\d+)?`;
 const LINES = new RegExp(String.raw`^(?:(.*?):)?\s*(${RANGE}(?:\s*,\s*${RANGE})*)$`, 'i');
+const BAD_PATH = /[<>"|?*]/;
+const NOT_A_FILE = /^(?:n\/a|tbd|todo|tba|none|なし|無し|-|—|\.\.\.|…)$/i;
+// A file without an extension: a name, or a path with a folder ("bin/console").
+const BARE_FILE = /^(?:[\p{L}\p{N}_.\-]+|[^\s\\/][^\\/]*(?:[\\/][^\\/]+)+)$/u;
+// Where the next reference of a cell starts after a ",": a path, then ":".
+const NEXT_REF = String.raw`,(?=\s*(?:[^,:;<]+\.[A-Za-z0-9]+|[^,:;<\s]*[\\/][^,:;<]*|[\p{L}\p{N}_.\-]+)\s*:(?!:))`;
+const SPLIT = new RegExp(String.raw`<br\s*\/?>|;|${NEXT_REF}`, 'iu');
+
+function refFile(file, rest) {
+  if (!file || BAD_PATH.test(file) || NOT_A_FILE.test(file)) return false;
+  if (/\.[A-Za-z0-9]+$/.test(file)) return true;
+  const name = file.split(/[\\/]/).pop();
+  if (/^\.[^.\s]/.test(name)) return true; // .gitignore, .env, .htaccess
+  // Without an extension the text after ":" has to be a location: lines, or a
+  // symbol with no spaces. "C:\\src", "http://x" and "Billing::Total" are not.
+  if (rest === null || !rest || /^[:\\/]/.test(rest) || !BARE_FILE.test(file)) return false;
+  return LINES.test(rest) || !/\s/.test(rest);
+}
+
 export function parseRefs(cell) {
   const refs = [];
-  for (const part of cell.replace(/`/g, '').split(/<br\s*\/?>|;|,(?=\s*[^,:;<]+\.[A-Za-z0-9]+:)/i)) {
-    const m = part.trim().match(/^([^:<>"|?*]+?\.[A-Za-z0-9]+)(?::(.*))?$/);
-    if (!m) continue;
-    const file = m[1].trim().replace(/\\/g, '/');
-    const rest = (m[2] ?? '').trim();
+  for (const part of cell.replace(/`/g, '').split(SPLIT)) {
+    const text = part.trim();
+    const colon = text.indexOf(':');
+    const file = (colon < 0 ? text : text.slice(0, colon)).trim();
+    const rest = colon < 0 ? null : text.slice(colon + 1).trim();
+    if (!refFile(file, rest)) continue;
+    const where = file.replace(/\\/g, '/');
     // Lines: "10", "10-42", "L10-L42", or several after one path ("3-6, 9").
-    const lines = rest.match(LINES);
+    const lines = (rest ?? '').match(LINES);
     if (lines) {
       for (const range of lines[2].split(',')) {
         const [from, to = from] = range.replace(/L/gi, '').split(/[-–]/).map((n) => Number(n.trim()));
-        refs.push({ file, symbol: (lines[1] ?? '').trim(), from, to });
+        refs.push({ file: where, symbol: (lines[1] ?? '').trim(), from, to });
       }
-    } else refs.push({ file, symbol: rest, from: null, to: null });
+    } else refs.push({ file: where, symbol: rest ?? '', from: null, to: null });
   }
   return refs;
 }

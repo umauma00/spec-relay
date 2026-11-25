@@ -106,6 +106,18 @@ test('source references outside the repository are not read', () => {
   assert.match(page, /ファイルを読めませんでした/);
 });
 
+test('the review page shows the source of a file without an extension and of a dotfile', () => {
+  const dir = repo();
+  write(dir, 'src/v1.2/Makefile', 'all:\n\tphp build_invoice.php\n');
+  write(dir, 'src/.htaccess', 'RewriteEngine On\nRewriteRule ^invoice$ invoice.php\n');
+  write(dir, `${CHANGE}/trace.md`, TRACE.replace('src/invoice.php:invoice_total:2-3', 'src\\v1.2\\Makefile:all:1-2; src/.htaccess:2'));
+  render({ root: dir, change: 'extract-billing-invoice' });
+  const page = html(dir, 'extract-billing-invoice');
+  assert.match(page, /php build_invoice\.php/);
+  assert.match(page, /RewriteRule \^invoice\$ invoice\.php/);
+  assert.doesNotMatch(page, /ファイルを読めませんでした/);
+});
+
 test('markdown subset: nested and task lists, tables, fences', () => {
   const out = markdown('- a\n  - b\n- [x] done\n- [ ] open\n\n```cs\nvar x = 1 < 2;\n```\n\n1. one\n2. two\n');
   assert.match(out, /<ul><li>a<ul><li>b<\/li><\/ul><\/li><li class="task done">/);
@@ -123,6 +135,31 @@ test('trace cells with several references', () => {
   assert.deepEqual(parseRefs('src/a.php:120-125'), [{ file: 'src/a.php', symbol: '', from: 120, to: 125 }]);
   assert.deepEqual(parseRefs('src/Billing.cs:Billing::Total:3-9'), [{ file: 'src/Billing.cs', symbol: 'Billing::Total', from: 3, to: 9 }]);
   assert.deepEqual(parseRefs('src\\請求 書\\a.php:f:4'), [{ file: 'src/請求 書/a.php', symbol: 'f', from: 4, to: 4 }]);
+});
+
+test('trace cells naming files without an extension, dotfiles and dotted folders', () => {
+  const one = (file, symbol, from, to = from) => ({ file, symbol, from, to });
+  assert.deepEqual(parseRefs('Makefile:12'), [one('Makefile', '', 12)]);
+  assert.deepEqual(parseRefs('Makefile:build:3-9'), [one('Makefile', 'build', 3, 9)]);
+  assert.deepEqual(parseRefs('docker/Dockerfile:L5-L7'), [one('docker/Dockerfile', '', 5, 7)]);
+  assert.deepEqual(parseRefs('bin/console:main'), [one('bin/console', 'main', null)]);
+  assert.deepEqual(parseRefs('artisan:Kernel::handle:3'), [one('artisan', 'Kernel::handle', 3)]);
+  assert.deepEqual(parseRefs('.gitignore:2-4'), [one('.gitignore', '', 2, 4)]);
+  assert.deepEqual(parseRefs('.gitignore'), [one('.gitignore', '', null)]);
+  assert.deepEqual(parseRefs('config/.env.example:3'), [one('config/.env.example', '', 3)]);
+  // Windows separators and folders with a dot in their name.
+  assert.deepEqual(parseRefs('src\\v1.2\\Makefile:7'), [one('src/v1.2/Makefile', '', 7)]);
+  assert.deepEqual(parseRefs('src\\jquery.ui\\tools\\run:main:4'), [one('src/jquery.ui/tools/run', 'main', 4)]);
+  assert.deepEqual(parseRefs('lib\\v2.0\\.htaccess:1'), [one('lib/v2.0/.htaccess', '', 1)]);
+  assert.deepEqual(parseRefs('src/請求 書/Makefile:4'), [one('src/請求 書/Makefile', '', 4)]);
+  // Several in a cell, after "," too, without taking a range list apart.
+  assert.deepEqual(parseRefs('src/a.php:3-6, Makefile:9; .env:1<br>bin/console:10, artisan:handle:3'),
+    [one('src/a.php', '', 3, 6), one('Makefile', '', 9), one('.env', '', 1), one('bin/console', '', 10), one('artisan', 'handle', 3)]);
+  assert.deepEqual(parseRefs('src/a.php:3-6, 9'), [one('src/a.php', '', 3, 6), one('src/a.php', '', 9)]);
+  // Not references: prose, a symbol alone, placeholders, a name with nothing after it, drive letters and URLs.
+  for (const text of ['see the invoice class', 'Billing::Total', 'TODO: fill in later', 'n/a', 'N/A: none', 'Makefile', 'Makefile:', 'C:\\src\\a.php:10', 'http://example.com/a:3', '<!-- src/...:Symbol:10-42 (every write, mail) -->']) {
+    assert.deepEqual(parseRefs(text), [], text);
+  }
 });
 
 test('network paths, rooted paths and backslashes never become links or images', () => {

@@ -37,7 +37,7 @@ const specificity = (listed, file) => (listed.toLowerCase() === file.toLowerCase
 
 const indentOf = (s) => s.replace(/\t/g, '    ').length;
 // The path an item names: its first backticked token, else its first word when
-// that looks like a path (has a "/" or a file extension). A link keeps its text.
+// that looks like a path (see barePath). A link keeps its text.
 export function itemPath(text) {
   return itemPaths(text)[0] ?? '';
 }
@@ -56,9 +56,11 @@ export function itemPaths(text) {
   return bare ? [bare] : [];
 }
 
+// A bare word is a path when it has a folder, an extension or a leading dot
+// (.gitignore, .htaccess); a file without an extension (Makefile) needs backticks.
 function barePath(t) {
   const bare = (t.trim().split(/\s+/)[0] ?? '').replace(/[,;:、。]+$/, '');
-  if (/^n\/a$/i.test(bare) || !/^[^*<>"|?]+$/.test(bare) || !(/\//.test(bare) || /\.[A-Za-z0-9]{1,8}$/.test(bare))) return '';
+  if (/^n\/a$/i.test(bare) || !/^[^*<>"|?]+$/.test(bare) || !(/[\\/]/.test(bare) || /\.[A-Za-z0-9]{1,8}$/.test(bare) || /^\.[^.\s\\/]/.test(bare))) return '';
   return repoPath(bare);
 }
 
