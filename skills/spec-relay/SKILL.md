@@ -274,7 +274,7 @@ not wash out these instructions.
    wave-<n>`: it saves the hashes of the files no subagent may write (every
    active change's `review.md`, `questions.md`, `crosscheck.md` and
    `verify.json` and `e2e-old.json`, every active port's `proposal.md` and `design.md`,
-   `plan.md`, `lessons.md`,
+   the finish change's `checks.md` and `leftovers.md`, `plan.md`, `lessons.md`,
    `openspec/specs/`, `openspec/config.yaml` and the source files). After the
    wave, run `gate.mjs guard --compare wave-<n>`, which lists only the paths
    that changed (exit code 1 then: read the lists). If the wave is still
@@ -312,7 +312,9 @@ not wash out these instructions.
    order allows, because they share words and data.
 10. **What stays with you.** Talking with the person, the gates, ticks and
    decisions in `review.md`, `questions.md`, `plan.md`, `lessons.md`, the
-   port's proposal, design decisions and tasks, `impact.md`, running
+   port's proposal, design decisions and tasks, `impact.md`, the finish
+   change's `checks.md` and `leftovers.md` (the flows and the classes you
+   propose), running
    `verify.mjs`, `e2e.mjs old`, `finish.mjs run` and `render.mjs`, and
    archiving. Everything that needs reading many source files or artifacts
    to write a few lines goes to a subagent, even when it is one task and
@@ -397,8 +399,9 @@ you assist. This gate is the point of the kit.
      report. Tell it to add a new requirement at the end of its spec file
      and to report every requirement or screen it added or renamed, so that
      you untick those and run `draft.mjs review --update`. Never give it
-     review.md, questions.md, impact.md, crosscheck.md or a port's proposal
-     and design: they stay yours. In extract and amend, have the checker
+     review.md, questions.md, impact.md, crosscheck.md, a port's proposal
+     and design, or the finish change's checks.md and leftovers.md: they
+     stay yours. In extract and amend, have the checker
      check the changed rows again, whoever changed them. Then write
      `  - fixed: <what you changed, in one line>` right under that fix
      line, keep the item unticked, render again and ask the person to look

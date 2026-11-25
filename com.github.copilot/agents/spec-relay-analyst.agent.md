@@ -1,6 +1,6 @@
 ---
 name: spec-relay-analyst
-description: Read part of the source code and write the spec-relay artifact files the orchestrator assigns - survey inventory rows and context evidence for a set of folders, a survey, target-design or finish artifact, the source map, specs, screens and trace of one capability, or a correction a reviewer asked for - or answer a question about the code without writing. Writes only the files it is given.
+description: Read part of the source code and write the spec-relay artifact files the orchestrator assigns - survey inventory rows and context evidence for a set of folders, a survey or target-design artifact, the finish change's handover.md, the source map, specs, screens and trace of one capability, or a correction a reviewer asked for - or answer a question about the code without writing. Writes only the files it is given.
 tools: ["read", "search", "edit", "view", "grep", "glob"]
 user-invocable: false
 disable-model-invocation: false
