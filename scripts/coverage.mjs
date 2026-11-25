@@ -285,7 +285,7 @@ export function checkSourceMap(root, dir, capability, problems) {
   capped(problems, missing, (file) => `source file assigned to ${capability} in ${from.get(capability)} is not in source-map.md: ${file} (add it, or move it to the capability it belongs to in ${PLAN})`);
 }
 
-const withoutRequirementId = (s) => norm(plain(s).replace(/^R\d+\b\s*(?:[:)]|[.-](?=\s|$))?\s*/i, ''));
+const withoutRequirementId = (s) => norm(plain(s).replace(/^R\d+\b(?:[.:)-]|\s+(?:[:)]|[.-](?=\s|$)))?\s*/i, ''));
 
 // The Source cells of trace.md by requirement name (lowercase, without its R<n>).
 export function traceSources(text) {
