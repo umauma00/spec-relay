@@ -354,20 +354,22 @@ export function parseTrace(text) {
 // A path with an extension is a reference as it always was. A file without one
 // (Makefile, bin/console, artisan) or a dotfile at the top (.gitignore) cannot be
 // told from prose ("注: 税は別") or a symbol ("btnSave_Click:10") by its text, so
-// it is a reference when it is a file in the repository (`root`), or, without
-// one or for a file not there, when its name is a well-known file name or a
-// dotfile and a location follows it.
+// it is a reference when it is a file in the repository (`root`). A file not
+// there is still one when its name is a well-known file name (Makefile) and a
+// location follows, so the gate says it is missing; a dotfile only without a
+// repository to look in (".ctor:10" and ".btn,.btn-primary" are symbols).
 const RANGE = String.raw`L?\d+(?:\s*[-–]\s*L?\d+)?`;
 const LINES = new RegExp(String.raw`^(?:(.*?):)?\s*(${RANGE}(?:\s*,\s*${RANGE})*)$`, 'i');
 const WITH_EXT = /^[^:<>"|?*]+?\.[A-Za-z0-9]+$/;
 const BAD_PATH = /[<>"|?*]/;
 const NOT_A_FILE = /^(?:n\/a|tbd|todo|tba|none|なし|無し|未定|不明|同上|該当なし|-|—|\.\.\.|…)$/i;
-const KNOWN_NAMES = String.raw`(?:GNU)?[Mm]akefile|Dockerfile|Containerfile|Rakefile|Gemfile|Procfile|Jenkinsfile|Vagrantfile|Brewfile|Podfile|Fastfile|Guardfile|Capfile|Berksfile|Justfile|justfile|Snakefile|SConstruct|SConscript|Kbuild|Kconfig`;
-const DOTFILE = String.raw`\.[A-Za-z0-9_][\w.-]*`;
-const KNOWN = new RegExp(String.raw`^(?:${KNOWN_NAMES}|${DOTFILE})$`);
+const KNOWN_NAMES = String.raw`(?:GNU)?makefile|dockerfile|containerfile|rakefile|gemfile|procfile|jenkinsfile|vagrantfile|brewfile|podfile|fastfile|guardfile|capfile|berksfile|justfile|snakefile|sconstruct|sconscript|kbuild|kconfig`;
+const KNOWN = new RegExp(String.raw`^(?:${KNOWN_NAMES})$`, 'i');
+const DOTFILE = /^\.[A-Za-z0-9_][\w.-]*$/;
+const baseOf = (file) => file.split(/[\\/]/).pop();
 // Where the next reference of a cell starts after a ",": a path with an
-// extension, or a well-known name or dotfile, then ":" (not "::").
-const NEXT_REF = String.raw`,(?=\s*(?:[^,:;<]+\.[A-Za-z0-9]+|(?:[^,:;<\s]*[\\/])?(?:${KNOWN_NAMES}|${DOTFILE}))\s*:(?!:))`;
+// extension or a well-known name, then ":" (not "::").
+const NEXT_REF = String.raw`,(?=\s*(?:[^,:;<]+\.[A-Za-z0-9]+|(?:[^,:;<\s]*[\\/])?(?:${KNOWN_NAMES}))\s*:(?!:))`;
 const SPLIT = new RegExp(String.raw`<br\s*\/?>|;|${NEXT_REF}`, 'i');
 
 // What a repository-relative path is: 'file', 'dir', 'other' (a device such as
@@ -377,19 +379,23 @@ function fileKind(root, file) {
   try { const s = fs.statSync(path.join(root, file)); return s.isFile() ? 'file' : s.isDirectory() ? 'dir' : 'other'; } catch { return null; }
 }
 
-// The file of a part without an extension, or null: a file in the repository,
-// or a well-known name or dotfile with a location after it.
+// Whether a part without an extension names a file: a file in the repository,
+// a well-known name with a location after it, or, without a repository, a
+// dotfile with a location after it.
 function bareFile(root, file, rest) {
   if (!file || BAD_PATH.test(file) || NOT_A_FILE.test(file) || /^[A-Za-z]$/.test(file) || /^[:\\/]/.test(rest ?? '')) return false;
   const kind = fileKind(root, file.replace(/\\/g, '/'));
   if (kind === 'file') return true;
-  if (kind === 'dir' || kind === 'other' || !KNOWN.test(file.split(/[\\/]/).pop())) return false;
+  if (kind === 'dir' || kind === 'other') return false;
+  if (!KNOWN.test(baseOf(file)) && !(kind === undefined && DOTFILE.test(baseOf(file)))) return false;
   return Boolean(rest) && (LINES.test(rest) || !/\s/.test(rest));
 }
 
-// Inside one reference, the "," before a file without an extension that is in
-// the repository ("bin/console:10, artisan:handle:3") starts the next one, unless
-// it is inside brackets (a parameter list).
+// Inside one reference, the "," before a file in the repository without an
+// extension, written with its folder or as a dotfile ("bin/console:10,
+// tools/run:main", "a.php:3, .env:1"), starts the next one, unless it is inside
+// brackets (a parameter list). A bare name ("install, build:10") is a symbol
+// list even when a file of that name exists.
 function splitBare(root, part) {
   if (!root || !part.includes(',')) return [part];
   const out = [];
@@ -397,12 +403,12 @@ function splitBare(root, part) {
   for (let i = 0; i < part.length; i += 1) {
     const ch = part[i];
     if ('([{<'.includes(ch)) depth += 1;
-    else if (')]}>'.includes(ch)) depth = Math.max(0, depth - 1);
+    else if (')]}'.includes(ch) || (ch === '>' && !'-='.includes(part[i - 1]))) depth = Math.max(0, depth - 1);
     else if (ch === ',' && depth === 0) {
       const next = part.slice(i + 1);
       const colon = next.indexOf(':');
       const file = (colon < 0 ? '' : next.slice(0, colon)).trim();
-      if (file && next[colon + 1] !== ':' && !WITH_EXT.test(file) && fileKind(root, file.replace(/\\/g, '/')) === 'file') { out.push(part.slice(start, i)); start = i + 1; }
+      if (file && next[colon + 1] !== ':' && !WITH_EXT.test(file) && (/[\\/]/.test(file) || DOTFILE.test(file)) && fileKind(root, file.replace(/\\/g, '/')) === 'file') { out.push(part.slice(start, i)); start = i + 1; }
     }
   }
   out.push(part.slice(start));

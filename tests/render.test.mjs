@@ -159,7 +159,8 @@ test('trace cells naming files without an extension, dotfiles and dotted folders
   assert.deepEqual(parseRefs('artisan:Kernel::handle:3', dir), [one('artisan', 'Kernel::handle', 3)]);
   assert.deepEqual(parseRefs('src\\jquery.ui\\tools\\run:main:4', dir), [one('src/jquery.ui/tools/run', 'main', 4)]);
   assert.deepEqual(parseRefs('Rakefile:task :build<br>src/a.rb:run:3', dir), [one('Rakefile', 'task :build', null), one('src/a.rb', 'run', 3)]);
-  assert.deepEqual(parseRefs('bin/console:10, artisan:handle:3', dir), [one('bin/console', '', 10), one('artisan', 'handle', 3)]);
+  assert.deepEqual(parseRefs('bin/console:10, src\\jquery.ui\\tools\\run:main', dir), [one('bin/console', '', 10), one('src/jquery.ui/tools/run', 'main', null)]);
+  assert.deepEqual(parseRefs('artisan', dir), [one('artisan', '', null)]);
   assert.deepEqual(parseRefs('bin/console:main', dir.replace(/[^/\\]+$/, 'missing')), []);
   assert.deepEqual(parseRefs('bin/console:main'), []);
   // Not references: prose, symbols, placeholders, folders, drive letters and URLs, with or without the repository.
@@ -170,9 +171,14 @@ test('trace cells naming files without an extension, dotfiles and dotted folders
 });
 
 test('a "," inside one reference does not start another', () => {
+  const one = (file, symbol, from, to = from) => ({ file, symbol, from, to });
   const dir = tempDir();
-  write(dir, 'Makefile', 'x\n');
+  for (const f of ['Makefile', 'build', 'tools/run', '.btn-primary.css']) write(dir, f, 'x\n');
   const cells = {
+    'src/a.php:install, build:10-42': [['src/a.php', 'install, build', 10, 42]],
+    'src/a.css:.btn,.btn-primary:10-20': [['src/a.css', '.btn,.btn-primary', 10, 20]],
+    'src/a.php:f($a->b, tools/run:3)': [['src/a.php', 'f($a->b, tools/run:3)', null, null]],
+    'src/a.js:run(x => y, tools/run:3)': [['src/a.js', 'run(x => y, tools/run:3)', null, null]],
     'src/a.aspx:Page_Load, btnSave_Click:10-42': [['src/a.aspx', 'Page_Load, btnSave_Click', 10, 42]],
     'src/a.ts:total(a: number, b: number):10-20': [['src/a.ts', 'total(a: number, b: number)', 10, 20]],
     'src/a.py:Invoice.total(self, rate: float):10-20': [['src/a.py', 'Invoice.total(self, rate: float)', 10, 20]],
@@ -185,6 +191,10 @@ test('a "," inside one reference does not start another', () => {
     assert.deepEqual(parseRefs(cell), got, cell);
     assert.deepEqual(parseRefs(cell, dir), got, `${cell} (in a repository)`);
   }
+  // A dotfile after "," is the next reference when the repository has it; one it lacks is a symbol.
+  write(dir, '.env', 'A=1\n');
+  assert.deepEqual(parseRefs('src/a.php:3, .env:1', dir), [one('src/a.php', '', 3), one('.env', '', 1)]);
+  assert.deepEqual(parseRefs('.ctor:10', dir), []);
 });
 
 test('network paths, rooted paths and backslashes never become links or images', () => {
