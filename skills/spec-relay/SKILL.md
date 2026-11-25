@@ -96,6 +96,14 @@ need the reasoning behind a step.
   like the source root: read-only for every agent, in the inventory, cited by
   trace.md. See the kit's `docs/DATABASE.md`.
 - **Plan**: `openspec/spec-relay/plan.md`, the capability list and order.
+- **Consistency ledger**: `openspec/spec-relay/consistency.md`, one row per
+  link between two capabilities with a spec (one uses the other, both use a
+  database object one of them writes, or both own a file), with a checker's
+  verdict on the two specs and the code of both (`<!-- pair ... -->`). Only
+  `merge.mjs` writes rows; you write only a `question <change> Q<n>`
+  verdict, keeping that code. The extract gate, `gate.mjs port-ready` and
+  the finish step need a current row with a verdict that holds for each
+  link (see step 3, item 6).
 - **Lessons**: `openspec/spec-relay/lessons.md`, what the person's corrections
   taught that later analyses and ports must follow (see Lessons).
 - **Rerun**: OpenSpec cannot archive two changes of the same name on one day,
@@ -279,8 +287,8 @@ not wash out these instructions.
 4. **One writer per file.** No two subagents of a wave write the same file.
    Analysts and checkers write only the paths you give them, the implementer
    only its capability's module. Only you write `review.md`, `plan.md`,
-   `lessons.md` and `questions.md`, merge `crosscheck.md` and
-   `walkthrough.md`, run `openspec`
+   `lessons.md` and `questions.md`, merge `crosscheck.md`,
+   `walkthrough.md` and the consistency ledger, run `openspec`
    commands and `verify.mjs`, render review pages and archive.
    Never give a subagent a path to write under the source root (when the
    source root is `.`, give only paths under `openspec/` and the target root),
@@ -290,6 +298,7 @@ not wash out these instructions.
    active change's `review.md`, `questions.md`, `crosscheck.md`,
    `walkthrough.md`, `verify.json` and `e2e-old.json`, every active port's `proposal.md` and `design.md`,
    the finish change's `checks.md` and `leftovers.md`, `plan.md`, `lessons.md`,
+   the consistency ledger,
    `openspec/specs/`, `openspec/config.yaml` and the source files). After the
    wave, run `gate.mjs guard --compare wave-<n>`, which lists only the paths
    that changed (exit code 1 then: read the lists). If the wave is still
@@ -305,7 +314,7 @@ not wash out these instructions.
    --untracked-files=all` before and after, for files outside those (such as
    kit or host folders).
 5. **Tables split across subagents** (inventory, crosscheck, coverage,
-   walkthrough): each subagent
+   walkthrough, the consistency ledger): each subagent
    writes its rows as a Markdown table to its own part file in the work folder
    (a `|` inside a cell written as `\|`),
    and `node "<kit>/scripts/merge.mjs" --into <artifact> --parts <folder>
@@ -802,7 +811,40 @@ waves.
    `- None (why)` under Entry points (definitions only), walkthrough.md keeps
    its empty table. A scenario renamed later breaks the rows
    that name it: walk those entry points again.
-6. **Questions and review.** Write questions.md from the analysts' reported
+6. **Consistency.** After the walkthrough is merged, run `node
+   "<kit>/scripts/gate.mjs" review --change extract-<capability>` once for
+   the dependency problems: the walkthrough's `other capability` rows must
+   be in source-map.md's Dependencies table, an entry point it gives must be
+   under that capability's Entry points (and an entry point another
+   capability's source map says it uses must be under this one's), and a
+   table it writes must be one the survey's context map lets its context
+   write. Have the analyst fix the source map; when the person must decide
+   who owns a table, ask them and record the answer as a row of `## Shared
+   data` in the plan (`| Data | Owner | Also written by |`, contexts by id).
+   Then run `node "<kit>/scripts/consistency.mjs" items --change
+   extract-<capability>`: it lists each link of this capability with the
+   others that have a spec (an analyzed or archived one): `uses` (one names
+   the other under Dependencies), `data <object>` (both use it and one
+   writes, calls or fires it) and `file <path>` (the plan gives the file to
+   both), each with its pair code and the spec, source map and trace of
+   both sides. Give the links whose status is not `ok` to
+   `spec-relay-checker` subagents as a **consistency check**, a few pairs
+   each, with those paths, the glossary `items` names, and
+   `openspec/spec-relay/work/extract-<capability>/consistency/<nn>.md` to
+   write; never the analysts' notes. Merge with `merge.mjs --into
+   openspec/spec-relay/consistency.md --parts
+   openspec/spec-relay/work/extract-<capability>/consistency --clean`: the
+   ledger is one file for the whole project, and merge refuses a row whose
+   pair code is not the code of both specs as they are now. For every
+   `conflict`, `duplicate` or `term`, have an analyst correct this change's
+   spec when it is the wrong side, then a checker crosscheck the changed
+   requirement and compare the pair again; when the other side is wrong
+   (an archived spec), or for `unclear`, move it to questions.md and write
+   `question extract-<capability> Q<n>` as its verdict yourself, keeping
+   the `<!-- pair ... -->` code (the person decides; an archived spec
+   changes only through its amendment). Any later change to this spec makes
+   its rows stale: compare those pairs again before the review ends.
+7. **Questions and review.** Write questions.md from the analysts' reported
    doubts and the rows moved to questions, each with the answer you recommend
    and why (`  - Recommended:` and `  - Why:` under it, as the schema says; ask
    the analyst who reported a doubt when the reason needs the code read
@@ -815,17 +857,18 @@ waves.
    check with the same code, and the person decides whether they may be left
    out. When the list changes later, run it again with `--update`: the new
    C1 words are unticked.
-7. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
+8. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
    analyst fix every error and warning. `gate.mjs review` also checks the
    coverage, so the person does not: source-map.md holds every file the plan
    assigns to the capability, and every requirement has a trace row whose
    paths exist.
-8. **Report** to the person: the number of requirements and screens, what the
+9. **Report** to the person: the number of requirements and screens, what the
    crosscheck found and fixed (`incomplete` rows are behavior the text left
    out), how many sites the omission check judged and the gaps it found and
    how they were resolved, how many entry points and behaviors the
    walkthrough checked and the gaps and vague scenarios it found and how
-   they were resolved, the questions they must
+   they were resolved, how many links to other capabilities the
+   consistency check compared and what it found, the questions they must
    decide, the path of the review page, and that step 4 is theirs. Then stop
    and wait.
 
@@ -843,8 +886,18 @@ Words); the finish step (step 6) lists it in the hand-over.
    `toolchain` warning (the target language's build tools) must be fixed
    first. `node "<kit>/scripts/gate.mjs" port-ready --capability <capability>` must
    pass before you create the port change (it also needs the archived survey
-   and target design, no open amendment, and database definitions that still
-   match the survey's hash).
+   and target design, no open amendment, database definitions that still
+   match the survey's hash, and a current row in
+   `openspec/spec-relay/consistency.md` for every link of the capability's
+   baseline spec with the other baselines). When it names links without a
+   row or with a stale one (a spec archived before kit 0.31.0, two extracts
+   reviewed at the same time, an amendment since), run `consistency.mjs
+   items --capability <capability>`, give those links to checkers as in
+   step 3, item 6 (parts under
+   `openspec/spec-relay/work/port-<capability>/consistency/`), and merge
+   them the same way. A `conflict`, `duplicate` or `term` between two
+   baselines is settled by an amendment of the wrong side (see Amend), after
+   which the pair is compared again.
 2. `node "<kit>/scripts/openspec.mjs" new change port-<capability> --schema spec-relay-port`, then write
    proposal, design and tasks with `node "<kit>/scripts/openspec.mjs" instructions <artifact> --change
    port-<capability> --json`. Record the baseline hash in the proposal from
@@ -1005,6 +1058,11 @@ fixing a bug, is never an amendment: it is follow-up work after the migration.
    requirement is removed and added again: keep every existing scenario name
    and correct its steps.
 3. Run the review (above). Archiving merges the delta into the baseline.
+   The rows of the consistency ledger that hold this capability go stale:
+   compare those pairs again before the next `gate.mjs port-ready` (step 5)
+   of either side, as in step 3, item 6 (`consistency.mjs items
+   --capability <capability>`). An amendment made to settle a `conflict`,
+   `duplicate` or `term` row is the usual case.
 4. Then do what impact.md says: an active port adds the tasks, adds the new
    scenarios' rows with `draft.mjs port-design --change <port> --update`
    (it also names rows whose scenario is gone and source cells the new trace
@@ -1020,8 +1078,12 @@ and writes the report someone takes it over with. It writes no code and
 changes no behavior.
 
 1. Run `node "<kit>/scripts/finish.mjs" ready`. It passes when every
-   capability of the plan has an archived port against its current baseline
-   and no other change is open; otherwise do what `problems` says first.
+   capability of the plan has an archived port against its current baseline,
+   no other change is open, and every link between two baselines has a
+   current row in the consistency ledger (`consistency.mjs items --all`
+   lists the rest; check them as in step 3, item 6, with parts under
+   `openspec/spec-relay/work/finish/consistency/`); otherwise do what
+   `problems` says first.
    Run `node "<kit>/scripts/gate.mjs" coverage` too: a source file that no
    capability covers was never ported, and the hand-over must not hide it.
 2. `node "<kit>/scripts/openspec.mjs" new change finish --schema

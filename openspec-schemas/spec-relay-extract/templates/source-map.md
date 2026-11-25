@@ -12,7 +12,9 @@
 - <!-- path:symbol - how callers reach it -->
 
 ## Dependencies
-- <!-- other capabilities, libraries, data stores, environment, external services -->
+| Depends on | What it uses | Entry point |
+|---|---|---|
+| <!-- `platform/auth` (a capability of the plan), or a library, data store, environment variable, external service --> | <!-- the session check --> | <!-- `src/common/auth.php:check` as that capability lists it, or - --> |
 
 ## Database
 | Table or object | Kind | Use | Definition |

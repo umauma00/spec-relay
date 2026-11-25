@@ -4,7 +4,9 @@
 //
 //   node gate.mjs review --change <change>                 before archiving a reviewed change
 //                                                          (survey, target-design, extract-*, amend-*, finish)
-//   node gate.mjs port-ready --capability <capability>     before creating a port change
+//   node gate.mjs port-ready --capability <capability>     before creating a port change (also: every link of its
+//                                                          baseline spec with the other baselines is checked in
+//                                                          openspec/spec-relay/consistency.md, see consistency.mjs)
 //   node gate.mjs port-done --change port-<capability>     before archiving a port change (tasks, baseline, the
 //                                                          verify.mjs run on the current code, a tagged test per
 //                                                          scenario, no TODO(port) left, the port crosscheck)
@@ -33,6 +35,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkFinish } from './finish.mjs';
+import { checkDependencies, checkConsistency, LEDGER } from './consistency.mjs';
 import { COMPARE_COMMAND, casesDigest, isCompareCommand, parseOptions, portOptionProblem, readCases, words as commandWords } from './compare.mjs';
 import { checkSurveyCoverage, checkSurveyCrosscheck, checkSourceMap, checkTrace, checkAmendSourceMap, checkCoverage, assignment } from './coverage.mjs';
 import { checkLedger } from './sites.mjs';
@@ -474,6 +477,14 @@ function checkExtract(root, dir, boxes, problems) {
   const plan = assignment(root).map;
   checkLedger(root, dir, { requirements: requirements.map((r) => r.name), screens, asked, assignment: plan, own: specCapabilities(dir)[0] ?? '', boxes }, problems);
   checkWalkthrough(root, dir, { requirements: requirements.map((r) => r.name), screens, asked, assignment: plan, own: specCapabilities(dir)[0] ?? '' }, problems);
+  // Where this capability meets the others: the source map's Dependencies and
+  // Database against the other source maps and the context map, then the pair
+  // check of the two specs at each link (consistency.mjs).
+  const own = specCapabilities(dir)[0];
+  if (own) {
+    checkDependencies(root, dir, own, problems);
+    checkConsistency(root, { change: path.basename(dir), own }, problems, { change: path.basename(dir), asked });
+  }
   const advice = questionAdvice(questions);
   for (const id of questions === null ? [] : questionIds(questions)) {
     // The person decides; the agent gives the answer it recommends, and why, so the person can take it.
@@ -1045,7 +1056,8 @@ export const capabilitySegments = (capability) => capability.split(/[\\/]+/).fil
 // checkers' part files) and verify.json (verify.mjs writes it), every active port's
 // proposal.md and design.md (where its commands and follow-up live), the
 // finish change's checks.md and leftovers.md (finish.mjs writes the results,
-// the person decides the classes), the plan, the lessons, the baseline specs,
+// the person decides the classes), the plan, the lessons, the consistency
+// ledger (merge.mjs writes it), the baseline specs,
 // the config and the source files.
 // The orchestrator saves a snapshot of their hashes before a wave and compares
 // after it. Git cannot show a tick in an untracked or already modified
@@ -1059,7 +1071,7 @@ export function guardFiles(root, warnings = []) {
       if (e.isDirectory() && e.name !== 'archive') files.push(...['review.md', 'questions.md', 'crosscheck.md', 'walkthrough.md', VERIFY_RECEIPT, OLD_RECEIPT, ...(/^port-/.test(e.name) ? ['proposal.md', 'design.md'] : []), ...(/^finish(?:-v\d+)?$/.test(e.name) ? ['checks.md', 'leftovers.md'] : [])].map((f) => path.join(changes, e.name, f)));
     }
   } catch { /* no changes yet */ }
-  files.push(path.join(root, PLAN), path.join(root, LESSONS), ...walk(path.join(root, 'openspec/specs')), path.join(root, 'openspec/config.yaml'));
+  files.push(path.join(root, PLAN), path.join(root, LESSONS), path.join(root, LEDGER), ...walk(path.join(root, 'openspec/specs')), path.join(root, 'openspec/config.yaml'));
   const out = {};
   for (const f of files) {
     try { if (fs.statSync(f).isFile()) out[path.relative(root, f).split(path.sep).join('/')] = crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex'); } catch { /* gone */ }
@@ -1159,6 +1171,9 @@ export function checkPortReady(root, capability) {
   if (!archivedChange(root, 'survey')) problems.push('no archived survey change: map the bounded contexts and have them reviewed first');
   if (!archivedChange(root, 'target-design')) problems.push('no archived target-design change: decide the target design and have it reviewed first');
   checkDatabaseDrift(root, problems);
+  // The spec this port implements agrees with the baselines it meets (a pair
+  // checked during either extract counts, unless a spec changed since).
+  checkConsistency(root, { capability: parts.join('/').toLowerCase() }, problems);
   return { ok: problems.length === 0, problems };
 }
 

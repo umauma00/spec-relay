@@ -38,6 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { readIf, changeSchema, plain, norm, targetHash, CODE_STAMP, inventoryRows } from './gate.mjs';
 import { surveyRowStamp, ROW_STAMP } from './coverage.mjs';
 import { WALK_HEADER, parseWalkVerdict } from './walkthrough.mjs';
+import { LEDGER, LEDGER_HEADER, LEDGER_TEMPLATE, PAIR_STAMP, pairKey, topicKey, validCodes } from './consistency.mjs';
 
 const SEPARATOR = /^\s*\|?\s*:?-{2,}/;
 const cellsOf = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
@@ -114,12 +115,20 @@ function fitted(row, columns) {
   return { row: `| ${[...raw.slice(0, columns - 1).map((c) => c.trim()), last].join(' | ')} |`, ok: true };
 }
 
+const isLedger = (root, into) => path.resolve(root, into).toLowerCase() === path.resolve(root, LEDGER).toLowerCase();
+
 function checkPaths(root, into, parts) {
   const problems = [];
+  if (isLedger(root, into)) {
+    for (const entry of parts) {
+      if (!inside(path.join(root, WORK), path.resolve(root, entry))) problems.push(`--parts must be under ${WORK}/: ${entry}`);
+    }
+    return problems;
+  }
   const rel = inside(path.join(root, 'openspec/changes'), path.resolve(root, into));
   const segs = rel ? rel.split(path.sep) : [];
   if (segs.length !== 2 || segs[0] === 'archive' || !segs[1].toLowerCase().endsWith('.md') || segs[1].toLowerCase() === 'review.md') {
-    problems.push(`--into must be an artifact of an active change, openspec/changes/<change>/<name>.md (not review.md): ${into}`);
+    problems.push(`--into must be an artifact of an active change, openspec/changes/<change>/<name>.md (not review.md), or ${LEDGER}: ${into}`);
   } else if (!fs.existsSync(path.join(root, 'openspec/changes', segs[0]))) {
     problems.push(`no active change ${segs[0]}: create it with "node <kit>/scripts/openspec.mjs new change" first`);
   } else if (fs.existsSync(path.resolve(root, into)) && !fs.statSync(path.resolve(root, into)).isFile()) {
@@ -132,6 +141,7 @@ function checkPaths(root, into, parts) {
 }
 
 function templateFor(root, into) {
+  if (isLedger(root, into)) return LEDGER_TEMPLATE;
   const schema = changeSchema(path.dirname(path.resolve(root, into)));
   return readIf(path.join(root, 'openspec/schemas', schema, 'templates', path.basename(into)), []);
 }
@@ -170,7 +180,31 @@ export function merge(root, { into, parts, clean = false }) {
   }
   if (problems.length) return { ok: false, problems };
 
-  const byId = table.names[0] === 'item' || (path.basename(into).toLowerCase() === 'crosscheck.md' && !/^(path|パス)$/.test(table.names[0]));
+  const ledger = isLedger(root, into);
+  if (ledger && !LEDGER_HEADER.test(table.names[0] ?? '')) return { ok: false, problems: [`${LEDGER} must hold the table | Pair | Topic | Verdict | Evidence |, not ${table.header}`] };
+  // The consistency ledger: a row is the link of two capabilities on one topic,
+  // judged on the specs as they were when the checker got them. The checker
+  // copies the pair code consistency.mjs items gives (<!-- pair <a> <b> -->);
+  // a code that is no longer either spec's means a spec changed since (refused).
+  if (ledger) {
+    for (const item of incoming) {
+      const cells = cellsOf(item.row);
+      const key = pairKey(cells[0] ?? '');
+      if (!key) { problems.push(`${show(item.file)}: the Pair cell must name two capabilities as "a <-> b": ${item.row}`); continue; }
+      const given = (cells[2] ?? '').match(PAIR_STAMP);
+      const [a, b] = key.split(' <-> ');
+      if (!given) { problems.push(`${show(item.file)}: the row for ${a} <-> ${b} (${visible(cells[1] ?? '')}) has no pair code; copy the code consistency.mjs items gives into the Verdict cell after the verdict`); continue; }
+      const [ca, cb] = validCodes(root, key);
+      // The code is written in the order of the sorted pair; a pair written b <-> a keeps it.
+      const codes = [given[1].toLowerCase(), given[2].toLowerCase()];
+      if (!ca.has(codes[0]) || !cb.has(codes[1])) { problems.push(`${show(item.file)}: the checker compared ${a} <-> ${b} (${visible(cells[1] ?? '')}) when ${!ca.has(codes[0]) && !cb.has(codes[1]) ? 'both specs were' : `the spec of ${!ca.has(codes[0]) ? a : b} was`} different from now; have a checker compare the pair again`); continue; }
+      cells[0] = `${a} <-> ${b}`;
+      cells[2] = `${cells[2].replace(new RegExp(PAIR_STAMP.source, 'gi'), '').trim()} <!-- pair ${codes[0]} ${codes[1]} -->`;
+      item.row = `| ${cells.join(' | ')} |`;
+    }
+    if (problems.length) return { ok: false, problems };
+  }
+  const byId = !ledger && (table.names[0] === 'item' || (path.basename(into).toLowerCase() === 'crosscheck.md' && !/^(path|パス)$/.test(table.names[0])));
   // A walkthrough lists several behaviors per entry point: rows are grouped by
   // the entry point; the rows of this merge replace the group (see writeGrouped).
   if (WALK_HEADER.test(table.names[0] ?? '')) return writeGrouped(root, { into, target, lines, table, incoming, files, parts, clean, eol });
@@ -196,7 +230,7 @@ export function merge(root, { into, parts, clean = false }) {
   }
   const rows = new Map();
   const claim = (row, where) => {
-    const { key, name } = rowKey(row, byId);
+    const { key, name } = ledger ? { key: `${pairKey(cellsOf(row)[0] ?? '')}|${topicKey(cellsOf(row)[1] ?? '')}`, name: null } : rowKey(row, byId);
     if (!key) { problems.push(`${where}: row has an empty first cell: ${row}`); return null; }
     const old = rows.get(key);
     if (old && name && old.name && old.name !== name) {
