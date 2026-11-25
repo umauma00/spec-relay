@@ -887,8 +887,10 @@ export const capabilitySegments = (capability) => capability.split(/[\\/]+/).fil
 // The files subagents must never write: every active change's review.md,
 // questions.md, crosscheck.md (merge.mjs writes it from the checkers' part
 // files) and verify.json (verify.mjs writes it), every active port's
-// proposal.md and design.md (where its commands and follow-up live), the plan, the lessons, the baseline specs, the config and the
-// source files.
+// proposal.md and design.md (where its commands and follow-up live), the
+// finish change's checks.md and leftovers.md (finish.mjs writes the results,
+// the person decides the classes), the plan, the lessons, the baseline specs,
+// the config and the source files.
 // The orchestrator saves a snapshot of their hashes before a wave and compares
 // after it. Git cannot show a tick in an untracked or already modified
 // review.md, nor an edit to an already modified or untracked source file; this
@@ -898,7 +900,7 @@ export function guardFiles(root, warnings = []) {
   const files = [];
   try {
     for (const e of fs.readdirSync(changes, { withFileTypes: true })) {
-      if (e.isDirectory() && e.name !== 'archive') files.push(...['review.md', 'questions.md', 'crosscheck.md', VERIFY_RECEIPT, OLD_RECEIPT, ...(/^port-/.test(e.name) ? ['proposal.md', 'design.md'] : [])].map((f) => path.join(changes, e.name, f)));
+      if (e.isDirectory() && e.name !== 'archive') files.push(...['review.md', 'questions.md', 'crosscheck.md', VERIFY_RECEIPT, OLD_RECEIPT, ...(/^port-/.test(e.name) ? ['proposal.md', 'design.md'] : []), ...(/^finish(?:-v\d+)?$/.test(e.name) ? ['checks.md', 'leftovers.md'] : [])].map((f) => path.join(changes, e.name, f)));
     }
   } catch { /* no changes yet */ }
   files.push(path.join(root, PLAN), path.join(root, LESSONS), ...walk(path.join(root, 'openspec/specs')), path.join(root, 'openspec/config.yaml'));

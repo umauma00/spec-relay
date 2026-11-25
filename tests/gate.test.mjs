@@ -462,6 +462,11 @@ test('guard hashes review.md of active changes, baseline specs and the config, n
   assert.equal(guardHash(dir).sha256, before.sha256, 'artifacts and archives may change');
   write(dir, 'openspec/changes/extract-a/review.md', '- [x] R1 a\n');
   assert.notEqual(guardHash(dir).sha256, before.sha256, 'a tick changes the hash');
+  // The finish change's results and leftovers are guarded; its handover is the analyst's.
+  write(dir, 'openspec/changes/finish/checks.md', 'pass\n');
+  write(dir, 'openspec/changes/finish/leftovers.md', 'L1\n');
+  write(dir, 'openspec/changes/finish/handover.md', 'v\n');
+  assert.equal(guardHash(dir).files, 6);
 });
 
 test('guard --compare counts a review.md the person changed in the canvas as theirs', async () => {
