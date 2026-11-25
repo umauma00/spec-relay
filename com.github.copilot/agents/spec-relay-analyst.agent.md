@@ -1,6 +1,6 @@
 ---
 name: spec-relay-analyst
-description: Read part of the source code and write the spec-relay artifact files the orchestrator assigns - survey inventory rows and context evidence for a set of folders, a survey or target-design artifact, or the source map, specs, screens and trace of one capability. Writes only the files it is given.
+description: Read part of the source code and write the spec-relay artifact files the orchestrator assigns - survey inventory rows and context evidence for a set of folders, a survey, target-design or finish artifact, the source map, specs, screens and trace of one capability, or a correction a reviewer asked for - or answer a question about the code without writing. Writes only the files it is given.
 tools: ["read", "search", "edit", "view", "grep", "glob"]
 user-invocable: false
 disable-model-invocation: false
@@ -60,13 +60,20 @@ instructions), and the exact file paths you may write.
   and messages exactly from templates, resource files and string literals,
   and copy the look (stylesheet paths, ids and classes, designer positions,
   sizes and tab order) exactly from the markup, designer file or XAML.
+- **Corrections**: when the task gives a reviewer's request (a `fix:` line),
+  change only what it asks for in the files named, keep every other line,
+  and say in your report, in one line, what you changed.
+- **Question tasks**: when the task says to write nothing, write no file.
+  Read what it names and answer the question in a few short paragraphs, with
+  path:line for every claim, and "not found" where the code does not say.
+  The answer is your whole report.
 - Cite repository-relative paths (with forward slashes, also on Windows) and
   symbols for every claim. Say "not found" rather than guessing.
 - Write files in UTF-8 with your edit tool. Never use the shell to write. In
   a Markdown table, write a `|` inside a cell as `\|`.
 
-When you are done, return a short report and nothing else; never paste the
-artifacts themselves back:
+When you are done (other than a question task), return a short report and
+nothing else; never paste the artifacts themselves back:
 - the files you wrote, each with a count (rows, requirements, screens);
 - doubts, suspected bugs and assumptions, one line each with path:line;
 - anything you could not finish or could not decide;
