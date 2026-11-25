@@ -55,7 +55,8 @@
    "bc46f9954c8d0a01972e9d98d0870ecc2ddc255996c8a38d7ef54ed8ea269cde",
    "ca6a256dfc3b6f6d61699c53f3bf232db35e0e9978c3bff122dac7de3d3cacc5",
    "d5ed52f8c55e10eb18cd0f0ce2a2ce1f5e5a9db071fc21cb0f58a63433aeb061",
-   "d8113cade8e108b1663ade52fbdc149232dc3fb943f3041dd4aa24157f41ec83"
+   "d8113cade8e108b1663ade52fbdc149232dc3fb943f3041dd4aa24157f41ec83",
+   "e753c7d14c923290cadd02693cc891d58d9fe946fe3d1b4c0e9f0d924d1d90e3"
   ],
   "openspec-schemas/spec-relay-extract/templates/coverage.md": [
    "0e9df4db78ad6f1791540bd0e6017241c19ade824a9e861712607ac5d3e39d40",
@@ -66,6 +67,7 @@
    "72af8e60ce45f2031e6f77a3b2f45c3e858f2632afc20290a9664bc3641de5e2"
   ],
   "openspec-schemas/spec-relay-extract/templates/questions.md": [
+   "6a01d21dddc70271c43cd82526486ff1b98c71e718cc77d776feba0a4a099637",
    "b6972ee29434182ab4b4f96c66ce9c5e26174b63cdb83b2b7058955949d5bbb5"
   ],
   "openspec-schemas/spec-relay-extract/templates/review.md": [
@@ -223,6 +225,9 @@
   ],
   "openspec-schemas/spec-relay-target/templates/data.md": [
    "f1fae5ff77b0b8cc619976e37e192edda88ce167a2596fde9623382672246d5d"
+  ],
+  "openspec-schemas/spec-relay-target/templates/proposals.md": [
+   "ea8efae6a7518d1ac7a0992ef2a5d4850b6a9bf13b6339d73b4ec71adcbe3269"
   ],
   "openspec-schemas/spec-relay-target/templates/review.md": [
    "24e35ab633dd385d58cb0fe4cceb0337665dd8bb4c79faa3353d631ae0ca2c85",

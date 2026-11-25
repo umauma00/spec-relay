@@ -122,6 +122,33 @@ export function reviewRemarks(text) {
   return items;
 }
 
+// How far the person's part of a review is, from review.md alone: what is not
+// ticked, the change requests the agent has not answered, the items on hold, the
+// questions without a decision, and whether a reviewer is named. `ready` when
+// nothing is left: the page then offers "review complete". The gate still checks
+// everything else (the artifacts) before an archive.
+export function reviewProgress(text) {
+  const review = String(text ?? '');
+  const boxes = checkboxes(review);
+  const idOf = (b) => { const k = b.plain.match(ITEM_ID); return k ? `${k[1].toUpperCase()}${Number(k[2])}` : b.plain.slice(0, 40); };
+  const notes = reviewRemarks(review);
+  const reviewer = stripComments(review).match(/^Reviewer:[ \t]*(.*)$/m);
+  const undecided = boxes.filter((b) => /^Q\d+\b/i.test(b.plain)).filter((b) => {
+    const decision = b.plain.match(/decision:\s*(.*)$/i);
+    return !decision || PLACEHOLDER.test(decision[1].trim());
+  }).map(idOf);
+  const left = {
+    unticked: boxes.filter((b) => !b.done).map(idOf),
+    fix: notes.filter((i) => i.openFix).map((i) => i.id),
+    hold: notes.filter((i) => i.state === 'hold').map((i) => i.id),
+    undecided,
+    reviewer: !reviewer || PLACEHOLDER.test(reviewer[1].trim()),
+  };
+  const total = boxes.length;
+  const ready = total > 0 && !left.unticked.length && !left.fix.length && !left.hold.length && !left.undecided.length && !left.reviewer;
+  return { ready, total, left, reviewer: left.reviewer ? '' : reviewer[1].trim() };
+}
+
 // A fix is open until a fixed line follows it.
 export function openFix(remarks) {
   const kinds = (remarks ?? []).map((r) => r.kind);
@@ -148,6 +175,59 @@ export function questionIds(text) {
     for (const m of line.matchAll(/\bQ(\d+)\b/gi)) ids.add(`Q${Number(m[1])}`);
   }
   return [...ids];
+}
+
+// The answer the agent recommends for each question of questions.md, and why:
+// Map id -> { recommended, why }. Written as two list lines under the question,
+// "  - Recommended: ..." and "  - Why: ..." (推奨 / 理由 are read too), or as the
+// Recommended and Why columns of a table that lists the questions. The person
+// still decides; the review shows the recommendation beside the decision.
+export const ADVICE = /^\s*(?:[-*+]|\d+[.)])\s+(?:\*\*|__)?(recommended|recommendation|推奨|why|reason|理由)(?:\*\*|__)?\s*[:：](?:\*\*|__)?\s*(.*)$/i;
+const adviceKind = (word) => (/^(recommended|recommendation|推奨)$/i.test(word) ? 'recommended' : 'why');
+export function questionAdvice(text) {
+  const map = new Map();
+  let current = null;
+  let header = null;
+  for (const line of unfencedLines(stripComments(text ?? ''))) {
+    const advice = line.match(ADVICE);
+    if (advice) {
+      if (current) {
+        const entry = map.get(current);
+        const kind = adviceKind(advice[1]);
+        entry[kind] ||= advice[2].trim();
+      }
+      continue;
+    }
+    if (/^\s*\|/.test(line)) {
+      const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
+      if (/^\s*\|?\s*:?-{2,}/.test(line)) continue;
+      const id = cells.map((c) => plain(c).match(/^Q(\d+)\b/i)).find(Boolean);
+      if (!id) { header = cells.map((c) => norm(c)); current = null; continue; }
+      current = `Q${Number(id[1])}`;
+      if (!map.has(current)) map.set(current, { recommended: '', why: '' });
+      const entry = map.get(current);
+      (header ?? []).forEach((h, i) => {
+        if (/^(recommended|recommendation|推奨)/.test(h)) entry.recommended ||= cells[i] ?? '';
+        else if (/^(why|reason|理由)/.test(h)) entry.why ||= cells[i] ?? '';
+      });
+      continue;
+    }
+    header = null;
+    // A question starts on a heading or an unindented line that names it, or a
+    // line that begins with its id; an indented line that only mentions another
+    // question ("see Q1") does not move the advice to that one.
+    const id = line.match(/\bQ(\d+)\b/i);
+    const starts = id && (/^(?:#{1,6}\s|\S)/.test(line) || /^Q\d/i.test(plain(line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, ''))));
+    if (starts) {
+      current = `Q${Number(id[1])}`;
+      if (!map.has(current)) map.set(current, { recommended: '', why: '' });
+    } else if (/^#{1,6}\s/.test(line)) current = null;
+  }
+  for (const entry of map.values()) {
+    entry.recommended = entry.recommended.trim();
+    entry.why = entry.why.trim();
+  }
+  return map;
 }
 
 // Drops Markdown emphasis, brackets and comment markers so "**Q1**" and "[Q1]" read as "Q1".
@@ -326,7 +406,13 @@ function checkExtract(root, dir, boxes, problems) {
   const asked = new Set((questions === null ? [] : questionIds(questions)).filter((id) => qItems.has(id)));
   checkCrosscheck(dir, requirements.map((r) => r.name), screens, problems, asked);
   checkLedger(root, dir, { requirements: requirements.map((r) => r.name), screens, asked, assignment: assignment(root).map, own: specCapabilities(dir)[0] ?? '', boxes }, problems);
+  const advice = questionAdvice(questions);
   for (const id of questions === null ? [] : questionIds(questions)) {
+    // The person decides; the agent gives the answer it recommends, and why, so the person can take it.
+    const given = advice.get(id);
+    if (!given || PLACEHOLDER.test(plain(given.recommended)) || PLACEHOLDER.test(plain(given.why))) {
+      problems.push(`question has no recommended answer and reason: ${id} (write "  - Recommended: <answer>" and "  - Why: <reason>" under it in questions.md)`);
+    }
     const item = qItems.get(id);
     if (!item) { problems.push(`question has no review item: ${id}`); continue; }
     const decision = item.match(/decision:\s*(.*)$/i);

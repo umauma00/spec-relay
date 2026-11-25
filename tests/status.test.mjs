@@ -50,7 +50,7 @@ function repo({ plan = PLAN, review = '- [x] R1 a\n- [ ] R2 b\n- [ ] Q1 c decisi
     write(dir, `${EXTRACT}/screens.md`, '# Screens\nNone\n');
     write(dir, `${EXTRACT}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n');
     write(dir, `${EXTRACT}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 a | confirmed | x |\n| R2 b | confirmed | x |\n');
-    write(dir, `${EXTRACT}/questions.md`, '- Q1. c\n');
+    write(dir, `${EXTRACT}/questions.md`, '- Q1. c\n  - Recommended: keep\n  - Why: the old system does it\n');
     write(dir, `${EXTRACT}/review.md`, review.startsWith('Reviewer') ? review : `Reviewer: Uma\n\n${review}`);
   }
   return dir;

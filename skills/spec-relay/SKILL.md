@@ -106,7 +106,9 @@ need the reasoning behind a step.
   person in the spec-relay canvas about the page or item it names. Answer it
   here (see Code questions under Working in parallel). It is a question, never an approval or a decision: do not tick
   `review.md`, write a `decision:`, or archive because of it. Ask in the chat
-  when it sounds like one.
+  when it sounds like one. The other `[canvas]` messages are the person's
+  change requests ("send the change requests") and "review complete" (see
+  Reviews, step 4); neither is an approval either.
 - **Review note**: a sub-list line under a review item in `review.md`:
   `  - fix: <what should change>` (the person says the item is wrong),
   `  - hold: <why>` (the person cannot decide yet), and your answer to a fix,
@@ -341,6 +343,29 @@ not wash out these instructions.
    real files, and pass it on in your own words. Answer from what you
    already know when that is enough.
 
+## Asking the person
+
+Every question you put to the person (at setup, in the target design, in a
+review, before an archive, after a stop) says which answer you recommend and
+why, so that they can take it in one step:
+
+1. Put the situation, your recommendation and its reason in the question, in
+   one or two everyday sentences (the evidence: a survey file, a source path,
+   what the code shows). Never a bare "what do you want?".
+2. Use the host's question tool (`ask_user` in Copilot CLI,
+   `vscode/askQuestions` in VS Code) when it is there, one question at a time:
+   the recommended choice first, marked 「（推奨）」 in Japanese or
+   "(recommended)" in English, then the other choices, each saying what follows
+   from it, and room for the person's own answer. Without the tool, number the
+   same choices in the chat.
+3. When only the person can know the answer (who uses the screens, whether the
+   old system still runs, a business rule), recommend what the code suggests
+   and say that it is a guess from the code; when nothing suggests anything,
+   say so instead of recommending.
+4. A recommendation is never the answer: wait for theirs. Never recommend what
+   the kit leaves to the person alone (a `new` screen look, leaving a file out),
+   and never present a choice the kit forbids (skipping a gate).
+
 ## Reviews: what every human review shares
 
 Steps 1, 2 and 4 and every amendment end in a human review. The person decides;
@@ -375,6 +400,14 @@ you assist. This gate is the point of the kit.
    In the last two, tell them how to say an item is wrong in the file: a line
    `  - fix: <what should change>` under it, or `  - hold: <why>` when they
    cannot decide yet (the page shows the same under "Check" on every item).
+   Every question item shows the recommended answer and its reason from
+   questions.md: in the HTML view the person takes it with 「推奨どおりにする」
+   ("Take the recommendation"); in the file they copy it after `decision:`; in
+   the chat ask it as Asking the person says, the recommendation first.
+   Tell them also how to finish: when everything is confirmed, the HTML view
+   has a 「レビュー完了をチャットに知らせる」 button, and in a browser the
+   end of the page gives one line to send in the chat
+   (「<change> のレビュー完了」).
 3. Follow the change's apply instruction (`node "<kit>/scripts/openspec.mjs" instructions apply --change
    <change> --json`). Tick a box only when the person accepts that item in this
    conversation, or when they ticked it in the file or the canvas themselves.
@@ -418,12 +451,16 @@ you assist. This gate is the point of the kit.
      artifacts: say why in the chat and let the person withdraw or keep it.
    - A `hold:` note waits for the person. Do not answer it by ticking; ask
      whether someone else must be asked, and note what they decide.
-4. When every box is ticked, run `node "<kit>/scripts/gate.mjs" review --change
+4. When every box is ticked, or the person says the review is complete (a
+   `[canvas] ... のレビューが終わりました` / `[canvas] The review of ... is
+   complete` message from the HTML view's button, or 「<change> のレビュー完了」
+   in the chat), read `review.md` again and run `node "<kit>/scripts/gate.mjs" review --change
    <change>`. `node "<kit>/scripts/openspec.mjs" archive --yes` checks none of what the gate checks, so
    never archive while the gate fails; report the failure as When something
-   stops says. Then ask whether to archive, and archive only on an explicit
-   yes in this conversation (boxes ticked in the file or the canvas are not
-   that yes): `node "<kit>/scripts/openspec.mjs" archive <change> --yes`. Extract and amend changes also need
+   stops says. Then ask whether to archive, recommending it when the gate
+   passes (Asking the person), and archive only on an explicit
+   yes in this conversation (boxes ticked in the file or the canvas, and the
+   canvas's "review complete" message, are not that yes): `node "<kit>/scripts/openspec.mjs" archive <change> --yes`. Extract and amend changes also need
    the archived survey with the capability in its list or in the plan.
 5. When the person corrects something that could recur, propose the lesson
    (below) right then, not after the review.
@@ -536,8 +573,11 @@ the domain, not the folders.
    never specified or ported, so that box (C1) is theirs, and the gate fails
    on an excluded row with no reason in Notes. The template's M1-M5 and C1
    items stay in review.md even when one has nothing to decide (tell the
-   person so when you reach it): the gate fails when one is missing. While the person reviews, ask the questions the
-   target design needs (step 2) so that it can start right after the archive.
+   person so when you reach it): the gate fails when one is missing. While the person reviews, run the
+   target design's proposals and questions (step 2, items 2 and 3) on the
+   survey under review, so that the target design can start right after the
+   archive; when the review changes a context, the inventory or database.md,
+   have the analyst update the entries that depend on it and ask those again.
 4. After archiving, write the plan: copy capabilities.md's lists under a
    `## Capabilities` heading in `openspec/spec-relay/plan.md`, keeping the
    `### <context>` headings and the indented source paths under each
@@ -569,48 +609,45 @@ the domain, not the folders.
 ## 2. Target design: decide how the new system is built
 
 1. `node "<kit>/scripts/openspec.mjs" new change target-design --schema spec-relay-target`.
-2. Write architecture, conventions, ui, verification and data from their instructions.
-   The default architecture is a modular monolith in the manner of Spring
-   Modulith: one module per context, public API and events only, one owner per
-   table, an automated boundary check. Ask the person about anything the code
-   cannot tell you: frameworks they prefer, whether the source program can
-   still be run, and which verification levels each context needs (A scenario
-   tests always; B1 logic comparison, B2 screen tests, C screenshots by
-   choice). Suggest B2 for every context with web screens whose old system
-   can run here as a test copy: each screen scenario becomes a Playwright
-   test that passes on the old system first and then judges the new one
-   (docs/E2E.md); C adds screenshots to the same tests. Desktop screens
-   (WinForms, WPF) cannot have B2: their scenarios get unit tests. Ask how
-   both test databases are put back to the starting state, best as one
-   command. Suggest B1 for contexts with calculations or business rules
-   whenever the source code can be built and run here or records of its real
-   runs exist (batch input and output, report data): it is the level that
-   compares with what the old system did (docs/COMPARE.md). When the logic
-   cannot be called by itself (code at the top of a PHP page, WebForms event
-   handlers), B1 still works over HTTP if the person can run a test copy of
-   the old system: ask for its address, its encoding and how its test
-   database is reset, and write them in verification.md. Only the person
-   names a system on another machine, and never production. For the screens (ui.md), ask who uses them, whether manuals,
-   training or printed forms show them, and the target UI technology, then
-   propose a policy per context (`same`, `layout`, `new`, `none`; the
-   instruction says which fits which source); the person decides, and you
-   never pick `new` yourself. Tell the person plainly that a context with A only is
-   reported as "inferred" at every port: the source program never runs, so
-   the new code is checked against specs and code that AIs read, not against
-   what the old system does. Never write a password, token or connection
-   string into a file; sign-in for B2 and C comes from environment variables
-   the person sets. For data.md, ask how old and new will run during the
-   switch (all at once, or side by side on the same database), whether the
-   database product stays, and whether the defaults for the logic in the
-   database (keep triggers, constraints, views, procedures and functions in
-   the database) fit; never ask for a connection string. Give
-   architecture.md to one analyst first (it reads the archived survey's
-   context map, inventory and database.md), then conventions.md, ui.md and
-   data.md to three analysts in one wave, then verification.md (it suggests
-   level C from ui.md's policies), with the person's answers in each task.
-   Read only what the person must decide on (the Modules table, the
-   policies, the levels) to ask them.
-3. Write review.md with `node "<kit>/scripts/draft.mjs" review --change
+2. **Proposals first.** The survey already shows how the system is built
+   today, so every question of the target design comes with a
+   recommendation. Give one `spec-relay-analyst` a proposal task: it reads
+   the archived survey, or the survey under review (context map, inventory,
+   database.md, glossary, capabilities), the source's build and
+   configuration files and `openspec/schemas/spec-relay-target/schema.yaml`,
+   and fills `openspec/schemas/spec-relay-target/templates/proposals.md`
+   into `openspec/spec-relay/work/<change>/proposals.md` (the only file it
+   writes). Its entries P1 to P7 are the questions the code cannot answer:
+   the architecture style and modules, the runtime and frameworks, whether
+   the old system runs here as a test copy, the verification levels of each
+   context, resetting the test databases, the screens (users, look,
+   technology, a policy per context) and the data during the switch. Each
+   gives the recommended answer, why (the survey file or source path it rests
+   on, or "a guess from the code"), and the other choices.
+3. **Ask, one question at a time.** Read proposals.md and ask P1 to P7 as
+   Asking the person says: the situation, the recommendation and its reason,
+   the recommended choice first with 「（推奨）」, the other choices, and room
+   for their own answer (frameworks they prefer, a system to compare with).
+   Skip nothing because a recommendation looks obvious, and never answer for
+   them. For P3 and B1 over HTTP, ask for the test copy's address, its
+   encoding and how its test database is reset; only the person names a
+   system on another machine, and never production. Tell the person plainly
+   that a context with A only is reported as "inferred" at every port: the
+   source program never runs, so the new code is checked against specs and
+   code that AIs read, not against what the old system does. Never ask for or
+   write a password, token or connection string; sign-in for B2 and C comes
+   from environment variables the person sets. Write each answer after
+   `- Answer:` in proposals.md (their words, and whether they took the
+   recommendation) as you go, so that a compaction loses none.
+4. **Write the artifacts.** Give architecture.md to one analyst first (it
+   reads the archived survey's context map, inventory and database.md), then
+   conventions.md, ui.md and data.md to three analysts in one wave, then
+   verification.md (it suggests level C from ui.md's policies). Each task
+   names proposals.md: the analysts follow the answers, and write the reason
+   from the entry for each decision the artifact records. Read only what the
+   person must decide on (the Modules table, the policies, the levels) to
+   check that it matches their answers.
+5. Write review.md with `node "<kit>/scripts/draft.mjs" review --change
    <change>`, validate, and run the review (above). While the person
    reviews the target design, start analyzing (step 3) the capabilities in
    `nextToAnalyze`: an extract change needs the archived survey, not the target
@@ -688,7 +725,10 @@ waves.
    delete from coverage.md. When sites.mjs writes no group (the files hold no
    code), coverage.md keeps its empty table.
 5. **Questions and review.** Write questions.md from the analysts' reported
-   doubts and the rows moved to questions, then run `node
+   doubts and the rows moved to questions, each with the answer you recommend
+   and why (`  - Recommended:` and `  - Why:` under it, as the schema says; ask
+   the analyst who reported a doubt when the reason needs the code read
+   again), then run `node
    "<kit>/scripts/draft.mjs" review --change extract-<capability>`. It writes
    review.md: one item per requirement, screen and question, and, when sites
    with marker lines are judged `no behavior` or `no effect`, `## 4.
@@ -1095,7 +1135,8 @@ to get past a stop.
    else in the reply:
    - **What stopped**: the check or command, and why in one line.
    - **What I need from you**: the `next.person` sentences, or "nothing, I am
-     fixing it". When the person must decide, ask one question at a time.
+     fixing it". When the person must decide, ask one question at a time,
+     with your recommendation (Asking the person).
    - **What I do next**: the fixes from `next.agent`, then the same check again.
    Put the TODO `checklist` (Progress in the TODO list) after it.
 3. A tool call denied with a reason starting `spec-relay:` came from the kit's
