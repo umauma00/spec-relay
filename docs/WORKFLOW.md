@@ -153,12 +153,12 @@ flowchart LR
 | 誰が | やること |
 |---|---|
 | 解析担当 | source-map.md の Dependencies を表（`\| Depends on \| What it uses \| Entry point \|`）にし、使うほかの機能ごとに、呼ぶ相手の入口を `path:symbol` で書く。Database の表の Use に、読むか書くかを書く。ほかの機能の動作に頼るときは、使う要件にそう書き、その動作はもう一度書かない |
-| gate（機械） | 入口からの見直しで `other capability` とした機能が Dependencies にあること、Dependencies に書いた入口が、相手の archive 済みの source-map の入口にあること（相手に本当に入口が抜けていたら、人に聞いて相手を amend で直す）、書き込むテーブルが、調査のコンテキストの地図でそのコンテキストに属するか、ほかに書き込むコンテキストとして書かれていること（あとで人が決めたことは plan の `## Shared data` に書く）を確かめる。2つのコンテキストが書き込むのに持ち主のないテーブルでも止まる |
+| gate（機械） | 入口からの見直しで `other capability` とした機能が Dependencies にあること、Dependencies に書いた入口が、相手の archive 済みの source-map の入口にあるか、少なくとも plan が相手に割り当てたファイルにあること（相手の一覧にないだけの入口は、下の照合担当が見る）、Database の表の Use が read・write・calls などと読めること、書き込むテーブルが、調査のコンテキストの地図でそのコンテキストに属するか、ほかに書き込むコンテキストとして書かれていること（あとで人が決めたことは plan の `## Shared data` に書く）を確かめる。2つのコンテキストが書き込むのに持ち主のないテーブルでも止まる |
 | `consistency.mjs items` | この機能と、ベースライン（archive 済みの仕様）のある機能との組ごとに、つながり（`uses`：一方の Dependencies が他方を名指しする、`data <オブジェクト>`：同じ DB のオブジェクトを使い、一方が書き込む・呼ぶ・発火させる、`file <パス>`：plan が同じファイルを両方に割り当てる）と、両方の仕様の符号を出す |
 | 照合担当（AI） | つながりごとに両方の仕様（と source-map、必要なら元コード）を読み、`consistent`（合っている。元コード自体が2か所で違うことをしているなら、それも合っている）、`conflict`（同じ動作やデータについて違うことを書いている。元コードがどちらを支えるか。呼ぶ側が使うと書いた入口が相手の入口にないときも）、`duplicate`（同じコードの同じ動作を両方が書いている）、`term`（1つのものに2つの名前、1つの言葉に2つの意味）、`unclear` を判定する |
 | merge.mjs | 部品をプロジェクトで1つの台帳 `openspec/spec-relay/consistency.md` にまとめる。照合担当が写した符号が今の両方の仕様の符号でない行、判定の言葉が違う行、照合担当が書いた `question`・`accepted` は受け付けない |
-| オーケストレーター | `conflict`・`duplicate`・`term` は、解析中の仕様が誤りなら解析担当に直させて照合し直す。ベースラインの方が誤りのときと `unclear` は質問に回し、判定を `question <change> Q<n>` にする（人が決める。ベースラインは amend でだけ直す）。archive のあと、人の答えどおりに、相手の amend か、違いを残す決定（plan の `## Consistency decisions` に `D<n>` として書き、判定を `accepted D<n>` にする）に置き換える |
-| gate | つながりごとに、今の両方の仕様の符号を持つ行があり、判定が成り立つことを確かめる。`consistent` は、両側の要件の名前を引用符で書いたもの（何も書いていない側は `<機能>: nothing`）だけ。`question` はその解析のレビュー中だけ、`accepted D<n>` は plan に同じ組・話題の決定があるときだけ通る。解析の `gate.mjs review`（ベースラインとの組）、`gate.mjs port-ready` と `port-done`（その機能とほかのベースライン）、仕上げ（すべての組）で止まる |
+| オーケストレーター | `conflict`・`duplicate`・`term` は、解析中の仕様が誤りなら解析担当に直させて照合し直す。ベースラインの方が誤りのときと `unclear` は質問に回し、判定を `question <change> Q<n>` にする（人が決める。ベースラインは amend でだけ直す）。archive のあと、人の答えどおりに、相手の amend か、違いを残す決定（plan の `## Consistency decisions` に `D<n>` として、台帳の行の符号を付けて書き、判定を `accepted D<n>` にする）に置き換える。違いがなかったと分かったら、行を消して照合し直す |
+| gate | つながりごとに、今の両方の仕様の符号を持つ行があり、判定が成り立つことを確かめる。`consistent` は、両側の要件の名前を引用符で書いたもの（何も書いていない側は `<機能>: nothing`）だけ。`question` はその解析のレビュー中だけ、`accepted D<n>` は plan に同じ組・話題・符号の決定があるときだけ通る（amend で仕様が変わると、人がもう一度決める）。解析の `gate.mjs review`（ベースラインとの組）、`gate.mjs port-ready` と `port-done`（その機能とほかのベースライン）、仕上げ（すべての組）で止まる |
 | 人 | 質問に回った組を、いつもの質問として判断する。ベースラインどうしの `duplicate`・`term`・`unclear` は、amend するか、違いを残すかを決める |
 
 - 符号は要件のブロックから作るので、解析中の仕様（ADDED の差分）と、archive 後のベースラインで同じになります（OpenSpec 2.1.1 で確かめました）。archive しただけでは照合し直しになりません。amend で仕様が変わると、その機能の組はすべて照合し直しになり、両側の port-ready と仕上げが止まります。

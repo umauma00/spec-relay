@@ -234,9 +234,11 @@ For every link decide:
 - `unclear`: the specs and the code do not settle it. Say what would.
 Be strict: a caller that expects a value, an error or an order the callee's
 spec never states is a `conflict` (or `unclear` when the code does not
-settle it), not `consistent`. So is an entry point the caller's
-Dependencies row names that the callee's source map does not list under
-Entry points: say which of the two the code supports.
+settle it), not `consistent`. When the caller's Dependencies row names an
+entry point the callee's source map does not list under Entry points, read
+it in the code: if the callee's spec states what it does, say so in the
+evidence (the list only misses it); if not, that is a `conflict` (the
+callee's spec lacks behavior the caller relies on).
 
 Write your verdict file as one Markdown table, `| Pair | Topic | Verdict |
 Evidence |`, one row per link you were given, with the pair and the topic

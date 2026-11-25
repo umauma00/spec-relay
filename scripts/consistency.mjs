@@ -195,10 +195,12 @@ export function dependencies(text, capabilities) {
     const caps = tokensOf(cells[0] ?? '').map(capName).filter((t) => known.has(t));
     if (!caps.length) continue;
     const at = header.findIndex((h, i) => i > 0 && ENTRY_COLUMN.test(h));
-    const cell = at < 0 ? '' : stripComments(cells[at] ?? '').trim();
+    // A note in parentheses after an entry point (`a.php:f` (`Auth.f`)) names nothing.
+    const cell = at < 0 ? '' : stripComments(cells[at] ?? '').replace(/\s+[(（][^)）]*[)）]/g, '').trim();
     const quoted = [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim());
     const entries = (quoted.length ? quoted : cell.split(/\s*(?:<br\s*\/?>|[,、;；])\s*/i).map((e) => e.trim())).filter((e) => e && placeLike(e));
-    for (const capability of new Set(caps)) out.push({ capability, entries, line: cells.join(' | ') });
+    const row = [...new Set(caps)];
+    for (const capability of row) out.push({ capability, entries, line: cells.join(' | '), row });
   }
   let fenced = false;
   for (const line of stripComments(body).split(/\r?\n/)) {
@@ -208,24 +210,33 @@ export function dependencies(text, capabilities) {
     if (!item) continue;
     const quoted = [...item[1].matchAll(/`([^`]+)`/g)].map((m) => capName(m[1]));
     const first = capName(item[1].split(/\s+/)[0]);
-    for (const capability of new Set([...quoted, first].filter((t) => known.has(t)))) out.push({ capability, entries: [], line: item[1].trim() });
+    for (const capability of new Set([...quoted, first].filter((t) => known.has(t)))) out.push({ capability, entries: [], line: item[1].trim(), row: [capability] });
   }
   return out;
 }
 
-// A database object as the specs and the context map name it: no quotes,
-// brackets, backticks or bold, only its last name (dbo.Orders, [dbo].[Orders]
-// and Orders are one), lowercase.
-export const objectKey = (name) => stripComments(name).replace(/\*\*|__/g, '').replace(/["'\[\]`]/g, '').trim().split(/[\s,、;；]+/)[0].split('.').filter(Boolean).pop()?.toLowerCase() ?? '';
+// A database object as the specs and the context map name it: only its last
+// name (dbo.Orders, [dbo].[Orders] and Orders are one), lowercase. A name in
+// brackets, quotes or backticks is kept whole ([Order Details]); otherwise
+// the first word is the name (Orders table, Orders (legacy)).
+export function objectKey(name) {
+  const s = stripComments(name).replace(/\*\*|__/g, '').trim();
+  const m = s.match(/`([^`]+)`|"([^"]+)"|((?:\[[^\]]+\]\s*\.\s*)*\[[^\]]+\])/);
+  const core = m ? (m[1] ?? m[2] ?? m[3]).replace(/[\[\]]/g, '') : s.split(/[\s,、;；]+/)[0].replace(/^'|'$/g, '');
+  return core.split(/\s*\.\s*/).filter(Boolean).pop()?.replace(/\s+/g, ' ').trim().toLowerCase() ?? '';
+}
 
 // What the Use cell says, before a note in parentheses or after a ";" or " - ".
-const useOf = (cell) => plain(stripComments(cell)).split(/\s*(?:[(（;；]|\s[-–—]\s)/)[0];
-const WRITES = /(?<![A-Za-z0-9_])(write|writes|written|insert|inserts|update|updates|delete|deletes|upsert|upserts|merge|merges|truncate|truncates)(?![A-Za-z0-9_])|書き込|書込|書く|更新する|削除する|登録する|追加する|挿入/i;
-const CALLS = /(?<![A-Za-z0-9_])(call|calls|fire|fires|exec|execs|execute|executes|run|runs)(?![A-Za-z0-9_])|呼ぶ|呼び出|実行|発火/i;
+// The cell is cut before plain(), which drops the parentheses.
+const useOf = (cell) => plain(stripComments(cell).split(/\s*(?:[(（;；]|\s[-–—]\s)/)[0]);
+const WRITES = /(?<![A-Za-z0-9_])(writes?|written|wrote|inserts?|inserted|updates?|updated|deletes?|deleted|upserts?|upserted|merges?|merged|truncates?|truncated|saves?|saved|modif(?:y|ies|ied)|creates?|created|crud|r\/w|rw)(?![A-Za-z0-9_])|読み書き|書き込|書込|書く|(?:更新|削除|登録|追加|挿入|作成)(?!済|日|者)/i;
+const CALLS = /(?<![A-Za-z0-9_])(call|calls|called|fire|fires|fired|exec|execs|execute|executes|executed|run|runs)(?![A-Za-z0-9_])|呼ぶ|呼び出|実行|発火/i;
+const READS = /(?<![A-Za-z0-9_])(reads?|select|selects|selected|references?|lookups?|look up|looks up|views?)(?![A-Za-z0-9_])|参照|読む|読み|読込|取得|検索|照会/i;
 
-// The Database table of a source map: Map<object key, { name, kind, writes, effect }>.
+// The Database table of a source map: Map<object key, { name, kind, writes, effect, unread }>.
 // writes: the Use cell says the capability changes it (a table's rows);
-// effect: that, or it calls or fires it (a procedure, a trigger).
+// effect: that, or it calls or fires it (a procedure, a trigger), or the cell
+// says nothing the kit can read (unread: then it is compared as an effect).
 export function databaseObjects(text) {
   const body = section(text ?? '', DATABASE);
   const out = new Map();
@@ -239,9 +250,11 @@ export function databaseObjects(text) {
     const useAt = header.findIndex((h) => /^(use|使い方|用途|access)/i.test(h));
     const kind = plain(cells[kindAt < 0 ? 1 : kindAt] ?? '').toLowerCase();
     const use = useOf(cells[useAt < 0 ? 2 : useAt] ?? '');
-    const old = out.get(key) ?? { name: plain(name), kind, writes: false, effect: false };
+    const unread = useAt >= 0 && !WRITES.test(use) && !CALLS.test(use) && !READS.test(use);
+    const old = out.get(key) ?? { name: plain(name), kind, writes: false, effect: false, unread: false, use: '' };
     old.writes ||= WRITES.test(use);
-    old.effect ||= WRITES.test(use) || CALLS.test(use);
+    old.effect ||= WRITES.test(use) || CALLS.test(use) || unread;
+    if (unread) { old.unread = true; old.use = use; }
     if (!old.kind) old.kind = kind;
     out.set(key, old);
   }
@@ -259,7 +272,7 @@ const OWNED_LABEL = /^\s*(?:[-*+]\s+)?(?:\*\*|__)?\s*(owned data|持っている
 // orders" names nothing).
 function ownedNames(text) {
   const t = stripComments(text);
-  const quoted = [...t.matchAll(/`([^`]+)`/g)].map((m) => objectKey(m[1]));
+  const quoted = [...t.matchAll(/`([^`]+)`/g)].map((m) => objectKey(`\`${m[1]}\``));
   if (quoted.length) return quoted.filter(Boolean);
   return t.split(/[,、;；\n]+/).map((p) => p.replace(/^\s*(?:[-*+]\s+)?/, '').replace(/\*\*|__/g, '').replace(/\s*(tables?|テーブル)\s*$/i, '').trim())
     .filter((p) => p && !/\s/.test(p) && !NOTHING.test(p)).map(objectKey).filter(Boolean);
@@ -311,7 +324,7 @@ export function dataOwners(root) {
 }
 
 const contextOfCapability = (capability) => capability.split('/')[0];
-const isTable = (kind) => !kind || /table|テーブル/i.test(kind);
+const isTable = (kind) => !kind || /table|テーブル|表|マスタ|master/i.test(kind);
 
 // ---------------------------------------------------------------- mechanical checks (extract and amend gates)
 
@@ -355,13 +368,19 @@ export function checkDependencies(root, dir, own, problems) {
   }
   for (const dep of deps.filter((d) => d.capability === own)) bad.push(`source-map.md's "## Dependencies" names its own capability ${own}: ${dep.line}`);
   // An entry point this capability uses must be one the other capability's
-  // reviewed source map lists. (One still under analysis is not compared: its
-  // list may still change, and the pair check reads both source maps.)
+  // reviewed source map lists, or at least in a file the plan gives it: a
+  // symbol its list misses is the pair check's (a conflict, settled on the
+  // side the code supports); a file it does not own is a mistake here. (One
+  // still under analysis is not compared: its list may still change.)
   for (const dep of deps.filter((d) => d.capability !== own && d.entries.length)) {
-    const theirs = entryList(root, dep.capability);
-    if (!theirs) continue;
+    const named = dep.row.filter((c) => c !== own);
+    const lists = named.map((c) => entryList(root, c));
+    if (lists.some((l) => !l)) continue;
+    const theirs = lists.flat();
     for (const id of dep.entries.filter((e) => !entryListed(e, theirs))) {
-      bad.push(`source-map.md says ${own} uses ${id} of ${dep.capability}, which ${dep.capability}'s archived source map does not list under "## Entry points": correct the entry point here (path:symbol as ${dep.capability} lists it), or, when ${dep.capability} really misses it (its walkthrough never followed it), amend ${dep.capability} with a source-map.md that lists it and the requirements it needs`);
+      const file = pathOf(entryKey(id));
+      if (named.some((c) => ownersOf(plan, file).map(capName).includes(c))) continue;
+      bad.push(`source-map.md says ${own} uses ${id} of ${named.join(' or ')}, which is neither under "## Entry points" of ${named.length > 1 ? 'their' : 'its'} archived source map nor in a file the plan gives ${named.length > 1 ? 'them' : 'it'}: correct the entry point here (path:symbol as ${named.join(' or ')} lists it) or the capability that owns it`);
     }
   }
   // Who may write a table: the survey's context map, and the plan's Shared data.
@@ -377,6 +396,7 @@ export function checkDependencies(root, dir, own, problems) {
   }
   const record = `ask the person, and record the answer as a row of "## Shared data" in ${PLAN} (| Data | Owner | Also written by |, contexts by id): in the new system only the owner's module writes the table, so another context's write becomes a call to it`;
   for (const [key, o] of databaseObjects(mapText)) {
+    if (o.unread) bad.push(`source-map.md's "## Database" row ${o.name}: the Use cell "${o.use}" says neither read, write nor calls; write read, write, read / write, calls or fires (a note in parentheses after it)`);
     if (!o.writes || !isTable(o.kind)) continue;
     const who = owners(key);
     if (who.owners.size && !who.writers.has(context)) {
@@ -398,7 +418,7 @@ export function pairKey(cell) {
 }
 // A topic as rows are compared: lowercase, one space, forward slashes.
 export const topicKey = (cell) => plain(stripComments(cell)).replace(/\\/g, '/').replace(/\s+/g, ' ').trim().toLowerCase();
-export const TOPIC = /^(uses|data \S+|file \S+)$/i;
+export const TOPIC = /^(uses|data \S.*|file \S.*)$/i;
 
 // The links between capabilities with a spec. `scope`: { change, own } (the
 // extract gate: the links of `own`, its draft against the baselines),
@@ -407,9 +427,9 @@ export const TOPIC = /^(uses|data \S+|file \S+)$/i;
 // Each link: { pair, a, b, topic, key, code, sides: [sideA, sideB] }.
 // - uses: one side's Dependencies names the other;
 // - data <object>: both use it and one writes, calls or fires it; when the
-//   context map names its owner, only pairs with a capability of the owner's
-//   context (a table everybody writes links each writer to its owner, not to
-//   every other writer);
+//   context map names its owner and a capability of the owner's context uses
+//   it, only pairs with that capability (a table everybody writes links each
+//   writer to its owner, not to every other writer);
 // - file <path>: the plan lists the same file or folder under both (one link
 //   per listing, not per file under a folder).
 export function links(root, scope) {
@@ -463,8 +483,11 @@ export function links(root, scope) {
       for (const [k, o] of objects.get(a) ?? []) {
         const p = objects.get(b)?.get(k);
         if (!p || !(o.effect || p.effect)) continue;
+        // When a capability of the owner's context uses it, each writer meets
+        // that one; when none does, the users meet each other.
         const who = owners(k).owners;
-        if (who.size && !who.has(contextOfCapability(a)) && !who.has(contextOfCapability(b))) continue;
+        const ownerUses = who.size && [...sides.keys()].some((c) => who.has(contextOfCapability(c)) && objects.get(c)?.has(k));
+        if (ownerUses && !who.has(contextOfCapability(a)) && !who.has(contextOfCapability(b))) continue;
         topics.push(`data ${k}`);
       }
       for (const listing of [...(sharedListings().get(pair) ?? [])].sort()) topics.push(`file ${listing}`);
@@ -523,12 +546,29 @@ export function parseVerdict(cell) {
 const DECISIONS = /^(consistency decisions|整合性の判断)/i;
 // The person's decisions about links, in the plan's "## Consistency decisions"
 // table (| Id | Pair | Topic | Decision |): Map<D<n>, { key, decision }>.
+// The Decision cell carries the pair code of the specs it was decided on
+// (<!-- pair <a> <b> -->, copied from the ledger row): a decision holds only
+// for those specs, so after an amendment the person decides again.
 export function decisions(root) {
   const out = new Map();
-  for (const { cells } of headedRows(section(readIf(path.join(root, PLAN), []) ?? '', DECISIONS) ?? '')) {
+  const text = readIf(path.join(root, PLAN), []) ?? '';
+  const body = section(text, DECISIONS) ?? '';
+  // section() drops comments, so the codes are read from the raw lines.
+  const stamps = new Map();
+  let inside = false;
+  for (const line of text.split(/\r?\n/)) {
+    const h = line.match(/^##\s+(.*?)\s*#*\s*$/);
+    if (h) { inside = DECISIONS.test(h[1].replace(/^\d+[.)]?\s*/, '')); continue; }
+    if (!inside) continue;
+    const id = line.match(/^\s*\|\s*D0*(\d+)\s*\|/i);
+    const stamp = line.match(PAIR_STAMP);
+    if (id && stamp) stamps.set(`D${Number(id[1])}`, [stamp[1].toLowerCase(), stamp[2].toLowerCase()]);
+  }
+  for (const { cells } of headedRows(body)) {
     const id = plain(cells[0] ?? '').match(/^D0*(\d+)$/i);
     if (!id) continue;
-    out.set(`D${Number(id[1])}`, { key: `${pairKey(cells[1] ?? '')}|${topicKey(cells[2] ?? '')}`, decision: plain(stripComments(cells[3] ?? '')) });
+    const d = `D${Number(id[1])}`;
+    out.set(d, { key: `${pairKey(cells[1] ?? '')}|${topicKey(cells[2] ?? '')}`, decision: plain(stripComments(cells[3] ?? '')), stamp: stamps.get(d) ?? null });
   }
   return out;
 }
@@ -540,22 +580,23 @@ export function askedOf(dir) {
 }
 
 // What the spec names look like when an evidence cell names them.
-const loose = (s) => stripComments(s).replace(/\\\|/g, '|').replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-const QUOTED = /["“”「『`]([^"“”」』`]+)["“”」』`]/g;
-// Whether the evidence names a requirement of the side in quotes, or says the
-// side states nothing about the topic ("platform/auth: nothing").
+const loose = (s) => stripComments(s).replace(/\\\|/g, '|').replace(/\*\*|__/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+const QUOTES = [['"', '"'], ['“', '”'], ['「', '」'], ['『', '』'], ['`', '`']];
+// How the evidence names a side: 'quoted' (a requirement of it in quotes, the
+// title whole, so a title holding 「」 or quotes itself counts), 'nothing'
+// ("platform/auth: nothing", it states nothing about the topic) or null.
 function namesSide(evidence, side) {
-  const said = new Set([...evidence.matchAll(QUOTED)].map((m) => loose(m[1])));
-  if (requirementNames(side.text ?? '').some((n) => said.has(loose(n)))) return true;
+  const text = loose(evidence);
+  if (requirementNames(side.text ?? '').some((n) => QUOTES.some(([o, c]) => text.includes(`${o}${loose(n)}${c}`)))) return 'quoted';
   const cap = side.capability.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`${cap}\\s*[:：]\\s*(nothing|none|なし|記載なし)`, 'i').test(loose(evidence));
+  return new RegExp(`${cap}\\s*[:：]\\s*(nothing|none|なし|記載なし)`, 'i').test(text) ? 'nothing' : null;
 }
 
 // Each link's state: ok, missing, stale or open, with a problem when not ok.
 // `change` and `asked` (the question ids with a review item) are the change
 // under review in the extract gate: only there does a question count.
-export function judge(root, list, { change = null, asked = new Set() } = {}) {
-  const rows = ledgerRows(readIf(path.join(root, LEDGER), []) ?? '');
+export function judge(root, list, { change = null, asked = new Set(), problems = [] } = {}) {
+  const rows = list.length ? ledgerRows(readIf(path.join(root, LEDGER), problems) ?? '') : new Map();
   let decided = null;
   return list.map((link) => {
     const row = rows.get(link.key);
@@ -568,8 +609,10 @@ export function judge(root, list, { change = null, asked = new Set() } = {}) {
     }
     const v = row.parsed;
     if (v.kind === 'consistent') {
-      const missing = link.sides.filter((s) => !namesSide(row.evidence, s)).map((s) => s.capability);
+      const named = link.sides.map((s) => namesSide(row.evidence, s));
+      const missing = link.sides.filter((s, i) => !named[i]).map((s) => s.capability);
       if (missing.length) return { ...link, status: 'open', problem: `the row for ${where} is consistent, but its evidence does not name in quotes a requirement of ${missing.join(' and ')} (or say "<capability>: nothing" for a side that states nothing about it); have the checker name the requirements it compared` };
+      if (!named.includes('quoted')) return { ...link, status: 'open', problem: `the row for ${where} is consistent, but its evidence says both sides state nothing about it: then the link compares nothing; have the checker name in quotes the requirement of the side that states it, or judge it unclear` };
       return { ...link, status: 'ok' };
     }
     if (v.kind === 'question') {
@@ -580,7 +623,10 @@ export function judge(root, list, { change = null, asked = new Set() } = {}) {
     if (v.kind === 'accepted') {
       decided ??= decisions(root);
       const d = decided.get(v.decision);
-      if (d && d.key === link.key && d.decision && !PLACEHOLDER.test(d.decision)) return { ...link, status: 'ok' };
+      if (d && d.key === link.key && d.decision && !PLACEHOLDER.test(d.decision)) {
+        if (d.stamp && d.stamp[0] === now[0] && d.stamp[1] === now[1]) return { ...link, status: 'ok' };
+        return { ...link, status: 'open', problem: `the row for ${where} is accepted ${v.decision}, but ${v.decision} in "## Consistency decisions" of ${PLAN} ${d.stamp ? 'was decided on other specs: have a checker compare the pair again, and ask the person again when the difference is still there (a new D<n>)' : `has no pair code: copy the row's <!-- pair ${link.code} --> into its Decision cell`}` };
+      }
       return { ...link, status: 'open', problem: `the row for ${where} is accepted ${v.decision}, but "## Consistency decisions" in ${PLAN} has no ${v.decision} with this pair, this topic and a decision` };
     }
     const fix = {
@@ -596,7 +642,7 @@ export function judge(root, list, { change = null, asked = new Set() } = {}) {
 
 // The gate: every link of the scope has a current row with a verdict that holds.
 export function checkConsistency(root, scope, problems, extra = {}) {
-  const judged = judge(root, links(root, scope), extra).filter((l) => l.status !== 'ok');
+  const judged = judge(root, links(root, scope), { ...extra, problems }).filter((l) => l.status !== 'ok');
   capped(problems, judged, (l) => l.problem);
   return judged;
 }

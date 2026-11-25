@@ -37,8 +37,9 @@ artifacts:
         in backticks the way that capability's source map lists it (`-` when
         it calls none, such as a table it only reads). `gate.mjs review`
         fails when the walkthrough leaves behavior to a capability this table
-        does not name, and when an entry point given here is not under the
-        Entry points of that capability's archived source map. Each
+        does not name, and when an entry point given here is neither under the
+        Entry points of that capability's archived source map nor in a file
+        the plan gives it. Each
         capability named here with a baseline spec is checked against this
         spec afterwards (consistency.mjs).
       - **Database**: the tables it reads and writes, and the database objects
@@ -49,8 +50,9 @@ artifacts:
         act on the same tables. "None" when it uses no database. This table
         names objects; the files that define them are rows of Source files.
         Write the Use cell as `read`, `write` (or `read / write`), `calls` or
-        `fires on write`: `gate.mjs review` fails when this capability writes
-        a table that the survey's context map gives to another context
+        `fires on write` (a note in parentheses after it): `gate.mjs review`
+        fails on a Use cell that says none of these, and when this capability
+        writes a table that the survey's context map gives to another context
         without listing this context as also writing it, and every object
         another capability also uses, where one of them writes, calls or fires
         it, is checked between the two specs afterwards.
