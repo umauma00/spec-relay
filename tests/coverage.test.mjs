@@ -134,14 +134,19 @@ test('trace references to files without an extension, dotfiles, dotted folders a
   // Together: none is dropped beside another.
   trace('`src/billing/Makefile:build:2-3`<br>src/billing/.gitignore:1-2; src\\billing\\v1.2\\Dockerfile:4, src/billing/bin/console:main');
   assert.deepEqual(problems(dir), []);
-  assert.deepEqual(traceRefs(path.join(dir, CHANGE)).get('total').map((r) => r.file), files);
+  assert.deepEqual(traceRefs(path.join(dir, CHANGE), dir).get('total').map((r) => r.file), files);
   trace('src/billing/Makefile:2-9');
   assert.deepEqual(problems(dir), ['the trace of "Total" gives src/billing/Makefile the lines 2-9, but the file has 4 lines']);
   trace('src/billing/.gitignore');
   assert.deepEqual(problems(dir), ['the trace of "Total" names only the file src/billing/.gitignore; add the symbol or the lines (path:symbol:lines)']);
   trace('src/billing/GNUmakefile:1');
   assert.deepEqual(problems(dir), ['the trace of "Total" points to src/billing/GNUmakefile, which does not exist']);
-  for (const prose of ['see the Makefile', 'Billing::Total', 'TODO: fill in later', 'n/a']) {
+  // A "," or a note inside a cell is not a file: cells that passed before still pass.
+  for (const source of ['src/billing/invoice.php:Page_Load, btnSave_Click:3-9', 'src/billing/invoice.php:total(int $qty, \\App\\Money $rate):3-9', 'src/billing/invoice.php:Invoice.total:3<br>注: 税は別']) {
+    trace(source);
+    assert.deepEqual(problems(dir), [], source);
+  }
+  for (const prose of ['see the Makefile', '注: 税は別', 'InvoiceController:index', 'src/billing:Invoice.total', 'Billing::Total', 'TODO: fill in later', 'n/a']) {
     trace(prose);
     assert.deepEqual(problems(dir), ['the trace row of "Total" names no source location (path:symbol:lines)'], prose);
   }
@@ -152,9 +157,9 @@ test('reading listings: first path of an item, tabs, items that end a capability
   assert.deepEqual([...capabilitySources(text)], [['billing/invoice', ['src/common/God.php', 'src/tabbed/', 'src/linked.php', 'src/print/']]]);
 });
 
-test('reading listings: dotfiles, backslashes and backticked files without an extension', () => {
-  const text = '1. `ops/build`\n   - .gitignore\n   - src\\tools\\\n   - `Makefile` (build)\n   - `docker\\Dockerfile`\n   - Makefile and friends\n   - .. and more\n';
-  assert.deepEqual([...capabilitySources(text)], [['ops/build', ['.gitignore', 'src/tools/', 'Makefile', 'docker/Dockerfile']]]);
+test('reading listings: dotfiles and backticked files without an extension', () => {
+  const text = '1. `ops/build`\n   - .gitignore\n   - .editorconfig (root)\n   - `Makefile` (build)\n   - `docker\\Dockerfile`\n   - Makefile and friends\n   - .. and more\n   - Billing\\Invoice 名前空間のクラス\n';
+  assert.deepEqual([...capabilitySources(text)], [['ops/build', ['.gitignore', '.editorconfig', 'Makefile', 'docker/Dockerfile']]]);
 });
 
 test('source maps: the Source files table only, any letter case, rows marked out of scope do not count', () => {

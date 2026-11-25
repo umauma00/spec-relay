@@ -56,11 +56,11 @@ export function itemPaths(text) {
   return bare ? [bare] : [];
 }
 
-// A bare word is a path when it has a folder, an extension or a leading dot
-// (.gitignore, .htaccess); a file without an extension (Makefile) needs backticks.
+// A bare word is a path when it has a "/", an extension or is a dotfile
+// (.gitignore, .editorconfig); a file without an extension (Makefile) needs backticks.
 function barePath(t) {
   const bare = (t.trim().split(/\s+/)[0] ?? '').replace(/[,;:、。]+$/, '');
-  if (/^n\/a$/i.test(bare) || !/^[^*<>"|?]+$/.test(bare) || !(/[\\/]/.test(bare) || /\.[A-Za-z0-9]{1,8}$/.test(bare) || /^\.[^.\s\\/]/.test(bare))) return '';
+  if (/^n\/a$/i.test(bare) || !/^[^*<>"|?]+$/.test(bare) || !(/\//.test(bare) || /\.[A-Za-z0-9]{1,8}$/.test(bare) || /^\.[a-z0-9_][a-z0-9_.-]*$/.test(bare))) return '';
   return repoPath(bare);
 }
 
@@ -301,10 +301,11 @@ export function traceSources(text) {
 
 // The source references of every requirement in a change's trace.md:
 // Map<requirement name (lowercase, without R<n>), [{ file, symbol, from, to }]>.
-export function traceRefs(dir) {
+// With the repository root, a file without an extension (Makefile) is read too.
+export function traceRefs(dir, root = null) {
   const refs = new Map();
   for (const [key, sources] of traceSources(readIf(path.join(dir, 'trace.md'), []))) {
-    refs.set(key, sources.flatMap((source) => parseRefs(source)).map((ref) => ({ ...ref, file: repoPath(ref.file) })));
+    refs.set(key, sources.flatMap((source) => parseRefs(source, root)).map((ref) => ({ ...ref, file: repoPath(ref.file) })));
   }
   return refs;
 }
@@ -343,7 +344,7 @@ export function checkTrace(root, dir, requirements, problems) {
   for (const name of requirements) {
     const sources = rows.get(norm(name));
     if (sources === undefined) { problems.push(`requirement has no trace row: "${name}"`); continue; }
-    const refs = sources.flatMap((source) => parseRefs(source));
+    const refs = sources.flatMap((source) => parseRefs(source, root));
     if (refs.length === 0) { problems.push(`the trace row of "${name}" names no source location (path:symbol:lines)`); continue; }
     for (const ref of refs) {
       const file = repoPath(ref.file);
@@ -371,7 +372,7 @@ export function checkAmendSourceMap(root, dir, requirements, problems) {
   const wanted = new Set(requirements.map(norm));
   const cited = tableRows(readIf(path.join(dir, 'trace.md'), []) ?? '')
     .filter(([name = '']) => wanted.has(withoutRequirementId(name)))
-    .flatMap(([, source = '']) => parseRefs(source).map((ref) => repoPath(ref.file)));
+    .flatMap(([, source = '']) => parseRefs(source, root).map((ref) => repoPath(ref.file)));
   for (const p of listed) {
     if (p.split('/').includes('..') || !fs.existsSync(path.join(root, p))) problems.push(`source-map.md lists ${p}, which does not exist`);
     else if (!cited.some((file) => covers(p, file))) problems.push(`source-map.md lists ${p}, but no requirement of this amendment traces to it; specify what it does, or leave it out`);

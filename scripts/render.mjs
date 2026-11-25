@@ -349,39 +349,74 @@ export function parseTrace(text) {
 // references may share a cell, separated by <br>, ";" or ",".
 // The path ends at the first ":" (no file name holds one on Windows), so paths
 // may hold spaces, non-ASCII letters, backslashes or dotted folders, and symbols
-// may hold "::". A path with an extension or a dotfile (.gitignore) may stand
-// alone; a file without one (Makefile, bin/console, artisan) is a path only when
-// a symbol or lines follow it, so prose such as "see the invoice class" or a
-// symbol such as "Billing::Total" is not read as a file.
+// may hold "::" and parameter lists.
+//
+// A path with an extension is a reference as it always was. A file without one
+// (Makefile, bin/console, artisan) or a dotfile at the top (.gitignore) cannot be
+// told from prose ("注: 税は別") or a symbol ("btnSave_Click:10") by its text, so
+// it is a reference when it is a file in the repository (`root`), or, without
+// one or for a file not there, when its name is a well-known file name or a
+// dotfile and a location follows it.
 const RANGE = String.raw`L?\d+(?:\s*[-–]\s*L?\d+)?`;
 const LINES = new RegExp(String.raw`^(?:(.*?):)?\s*(${RANGE}(?:\s*,\s*${RANGE})*)$`, 'i');
+const WITH_EXT = /^[^:<>"|?*]+?\.[A-Za-z0-9]+$/;
 const BAD_PATH = /[<>"|?*]/;
-const NOT_A_FILE = /^(?:n\/a|tbd|todo|tba|none|なし|無し|-|—|\.\.\.|…)$/i;
-// A file without an extension: a name, or a path with a folder ("bin/console").
-const BARE_FILE = /^(?:[\p{L}\p{N}_.\-]+|[^\s\\/][^\\/]*(?:[\\/][^\\/]+)+)$/u;
-// Where the next reference of a cell starts after a ",": a path, then ":".
-const NEXT_REF = String.raw`,(?=\s*(?:[^,:;<]+\.[A-Za-z0-9]+|[^,:;<\s]*[\\/][^,:;<]*|[\p{L}\p{N}_.\-]+)\s*:(?!:))`;
-const SPLIT = new RegExp(String.raw`<br\s*\/?>|;|${NEXT_REF}`, 'iu');
+const NOT_A_FILE = /^(?:n\/a|tbd|todo|tba|none|なし|無し|未定|不明|同上|該当なし|-|—|\.\.\.|…)$/i;
+const KNOWN_NAMES = String.raw`(?:GNU)?[Mm]akefile|Dockerfile|Containerfile|Rakefile|Gemfile|Procfile|Jenkinsfile|Vagrantfile|Brewfile|Podfile|Fastfile|Guardfile|Capfile|Berksfile|Justfile|justfile|Snakefile|SConstruct|SConscript|Kbuild|Kconfig`;
+const DOTFILE = String.raw`\.[A-Za-z0-9_][\w.-]*`;
+const KNOWN = new RegExp(String.raw`^(?:${KNOWN_NAMES}|${DOTFILE})$`);
+// Where the next reference of a cell starts after a ",": a path with an
+// extension, or a well-known name or dotfile, then ":" (not "::").
+const NEXT_REF = String.raw`,(?=\s*(?:[^,:;<]+\.[A-Za-z0-9]+|(?:[^,:;<\s]*[\\/])?(?:${KNOWN_NAMES}|${DOTFILE}))\s*:(?!:))`;
+const SPLIT = new RegExp(String.raw`<br\s*\/?>|;|${NEXT_REF}`, 'i');
 
-function refFile(file, rest) {
-  if (!file || BAD_PATH.test(file) || NOT_A_FILE.test(file)) return false;
-  if (/\.[A-Za-z0-9]+$/.test(file)) return true;
-  const name = file.split(/[\\/]/).pop();
-  if (/^\.[^.\s]/.test(name)) return true; // .gitignore, .env, .htaccess
-  // Without an extension the text after ":" has to be a location: lines, or a
-  // symbol with no spaces. "C:\\src", "http://x" and "Billing::Total" are not.
-  if (rest === null || !rest || /^[:\\/]/.test(rest) || !BARE_FILE.test(file)) return false;
-  return LINES.test(rest) || !/\s/.test(rest);
+// What a repository-relative path is: 'file', 'dir', 'other' (a device such as
+// NUL), null when nothing is there, or undefined without a repository.
+function fileKind(root, file) {
+  if (!root) return undefined;
+  try { const s = fs.statSync(path.join(root, file)); return s.isFile() ? 'file' : s.isDirectory() ? 'dir' : 'other'; } catch { return null; }
 }
 
-export function parseRefs(cell) {
+// The file of a part without an extension, or null: a file in the repository,
+// or a well-known name or dotfile with a location after it.
+function bareFile(root, file, rest) {
+  if (!file || BAD_PATH.test(file) || NOT_A_FILE.test(file) || /^[A-Za-z]$/.test(file) || /^[:\\/]/.test(rest ?? '')) return false;
+  const kind = fileKind(root, file.replace(/\\/g, '/'));
+  if (kind === 'file') return true;
+  if (kind === 'dir' || kind === 'other' || !KNOWN.test(file.split(/[\\/]/).pop())) return false;
+  return Boolean(rest) && (LINES.test(rest) || !/\s/.test(rest));
+}
+
+// Inside one reference, the "," before a file without an extension that is in
+// the repository ("bin/console:10, artisan:handle:3") starts the next one, unless
+// it is inside brackets (a parameter list).
+function splitBare(root, part) {
+  if (!root || !part.includes(',')) return [part];
+  const out = [];
+  let depth = 0; let start = 0;
+  for (let i = 0; i < part.length; i += 1) {
+    const ch = part[i];
+    if ('([{<'.includes(ch)) depth += 1;
+    else if (')]}>'.includes(ch)) depth = Math.max(0, depth - 1);
+    else if (ch === ',' && depth === 0) {
+      const next = part.slice(i + 1);
+      const colon = next.indexOf(':');
+      const file = (colon < 0 ? '' : next.slice(0, colon)).trim();
+      if (file && next[colon + 1] !== ':' && !WITH_EXT.test(file) && fileKind(root, file.replace(/\\/g, '/')) === 'file') { out.push(part.slice(start, i)); start = i + 1; }
+    }
+  }
+  out.push(part.slice(start));
+  return out;
+}
+
+export function parseRefs(cell, root = null) {
   const refs = [];
-  for (const part of cell.replace(/`/g, '').split(SPLIT)) {
+  for (const part of cell.replace(/`/g, '').split(SPLIT).flatMap((p) => splitBare(root, p))) {
     const text = part.trim();
     const colon = text.indexOf(':');
     const file = (colon < 0 ? text : text.slice(0, colon)).trim();
     const rest = colon < 0 ? null : text.slice(colon + 1).trim();
-    if (!refFile(file, rest)) continue;
+    if (!(WITH_EXT.test(file) || bareFile(root, file, rest))) continue;
     const where = file.replace(/\\/g, '/');
     // Lines: "10", "10-42", "L10-L42", or several after one path ("3-6, 9").
     const lines = (rest ?? '').match(LINES);
@@ -704,7 +739,7 @@ ${oneLine(req.body) ? `<div class="statement">${markdown(req.body.join('\n'))}</
 ${scenariosHtml(req, old, c)}`;
   }
   const t = c.trace.get(norm(req.name));
-  const refs = t ? parseRefs(t.source) : [];
+  const refs = t ? parseRefs(t.source, c.root) : [];
   let evidence = '';
   if (t) {
     evidence += refs.map((ref) => snippet(root, ref, L)).join('\n');

@@ -139,26 +139,51 @@ test('trace cells with several references', () => {
 
 test('trace cells naming files without an extension, dotfiles and dotted folders', () => {
   const one = (file, symbol, from, to = from) => ({ file, symbol, from, to });
+  // Well-known names and dotfiles are read from the text alone.
   assert.deepEqual(parseRefs('Makefile:12'), [one('Makefile', '', 12)]);
   assert.deepEqual(parseRefs('Makefile:build:3-9'), [one('Makefile', 'build', 3, 9)]);
   assert.deepEqual(parseRefs('docker/Dockerfile:L5-L7'), [one('docker/Dockerfile', '', 5, 7)]);
-  assert.deepEqual(parseRefs('bin/console:main'), [one('bin/console', 'main', null)]);
-  assert.deepEqual(parseRefs('artisan:Kernel::handle:3'), [one('artisan', 'Kernel::handle', 3)]);
   assert.deepEqual(parseRefs('.gitignore:2-4'), [one('.gitignore', '', 2, 4)]);
-  assert.deepEqual(parseRefs('.gitignore'), [one('.gitignore', '', null)]);
   assert.deepEqual(parseRefs('config/.env.example:3'), [one('config/.env.example', '', 3)]);
-  // Windows separators and folders with a dot in their name.
   assert.deepEqual(parseRefs('src\\v1.2\\Makefile:7'), [one('src/v1.2/Makefile', '', 7)]);
-  assert.deepEqual(parseRefs('src\\jquery.ui\\tools\\run:main:4'), [one('src/jquery.ui/tools/run', 'main', 4)]);
   assert.deepEqual(parseRefs('lib\\v2.0\\.htaccess:1'), [one('lib/v2.0/.htaccess', '', 1)]);
   assert.deepEqual(parseRefs('src/請求 書/Makefile:4'), [one('src/請求 書/Makefile', '', 4)]);
-  // Several in a cell, after "," too, without taking a range list apart.
-  assert.deepEqual(parseRefs('src/a.php:3-6, Makefile:9; .env:1<br>bin/console:10, artisan:handle:3'),
-    [one('src/a.php', '', 3, 6), one('Makefile', '', 9), one('.env', '', 1), one('bin/console', '', 10), one('artisan', 'handle', 3)]);
+  assert.deepEqual(parseRefs('src/a.php:3-6, Makefile:9; .env:1'), [one('src/a.php', '', 3, 6), one('Makefile', '', 9), one('.env', '', 1)]);
   assert.deepEqual(parseRefs('src/a.php:3-6, 9'), [one('src/a.php', '', 3, 6), one('src/a.php', '', 9)]);
-  // Not references: prose, a symbol alone, placeholders, a name with nothing after it, drive letters and URLs.
-  for (const text of ['see the invoice class', 'Billing::Total', 'TODO: fill in later', 'n/a', 'N/A: none', 'Makefile', 'Makefile:', 'C:\\src\\a.php:10', 'http://example.com/a:3', '<!-- src/...:Symbol:10-42 (every write, mail) -->']) {
+  // Any other file without an extension is a reference when it is a file in the repository.
+  const dir = tempDir();
+  for (const f of ['bin/console', 'artisan', 'src/jquery.ui/tools/run', 'Rakefile']) write(dir, f, 'x\n');
+  fs.mkdirSync(path.join(dir, 'src/billing'), { recursive: true });
+  assert.deepEqual(parseRefs('bin/console:main', dir), [one('bin/console', 'main', null)]);
+  assert.deepEqual(parseRefs('bin\\console:Sub Main:3', dir), [one('bin/console', 'Sub Main', 3)]);
+  assert.deepEqual(parseRefs('artisan:Kernel::handle:3', dir), [one('artisan', 'Kernel::handle', 3)]);
+  assert.deepEqual(parseRefs('src\\jquery.ui\\tools\\run:main:4', dir), [one('src/jquery.ui/tools/run', 'main', 4)]);
+  assert.deepEqual(parseRefs('Rakefile:task :build<br>src/a.rb:run:3', dir), [one('Rakefile', 'task :build', null), one('src/a.rb', 'run', 3)]);
+  assert.deepEqual(parseRefs('bin/console:10, artisan:handle:3', dir), [one('bin/console', '', 10), one('artisan', 'handle', 3)]);
+  assert.deepEqual(parseRefs('bin/console:main', dir.replace(/[^/\\]+$/, 'missing')), []);
+  assert.deepEqual(parseRefs('bin/console:main'), []);
+  // Not references: prose, symbols, placeholders, folders, drive letters and URLs, with or without the repository.
+  for (const text of ['see the invoice class', 'Billing::Total', 'TODO: fill in later', 'n/a', 'N/A: none', 'Makefile', 'Makefile:', '注: 税は別', '未定: あとで', 'InvoiceController:index', 'localhost:8080', '.NET Framework: 4.8', 'src:3', 'src/billing:Invoice.total', 'C:\\src\\a.php:10', 'http://example.com/a:3', '<!-- src/...:Symbol:10-42 (every write, mail) -->']) {
     assert.deepEqual(parseRefs(text), [], text);
+    assert.deepEqual(parseRefs(text, dir), [], `${text} (in a repository)`);
+  }
+});
+
+test('a "," inside one reference does not start another', () => {
+  const dir = tempDir();
+  write(dir, 'Makefile', 'x\n');
+  const cells = {
+    'src/a.aspx:Page_Load, btnSave_Click:10-42': [['src/a.aspx', 'Page_Load, btnSave_Click', 10, 42]],
+    'src/a.ts:total(a: number, b: number):10-20': [['src/a.ts', 'total(a: number, b: number)', 10, 20]],
+    'src/a.py:Invoice.total(self, rate: float):10-20': [['src/a.py', 'Invoice.total(self, rate: float)', 10, 20]],
+    'src/a.php:Invoice::total(int $qty, \\App\\Money $rate):10-20': [['src/a.php', 'Invoice::total(int $qty, \\App\\Money $rate)', 10, 20]],
+    'src/a.sql:usp_Total, dbo/usp_Tax:3-9': [['src/a.sql', 'usp_Total, dbo/usp_Tax', 3, 9]],
+    'src/a.cs:Total:10-42<br>注: 税は別': [['src/a.cs', 'Total', 10, 42]],
+  };
+  for (const [cell, want] of Object.entries(cells)) {
+    const got = want.map(([file, symbol, from, to]) => ({ file, symbol, from, to }));
+    assert.deepEqual(parseRefs(cell), got, cell);
+    assert.deepEqual(parseRefs(cell, dir), got, `${cell} (in a repository)`);
   }
 });
 
