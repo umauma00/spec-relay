@@ -77,7 +77,10 @@ need the reasoning behind a step.
   `spec-relay-port`). Implements the baseline spec (step 5).
 - **Amend change**: `openspec/changes/amend-<capability>` (schema
   `spec-relay-amend`). Corrects a baseline spec that misread or left out what
-  the source code does.
+  the source code does. An amendment has no screens.md: when its capability's
+  extract says it has no screens and the correction is behaviour a user sees
+  on a screen, extract the capability again (`extract-<capability>-v<n>`)
+  so the person reviews the screen, instead of amending.
 - **Finish change**: `openspec/changes/finish` (schema `spec-relay-finish`).
   Once every capability is ported: the whole-system checks, the leftovers and
   the hand-over report (step 6). Archiving it completes the migration.
@@ -786,7 +789,13 @@ Words); the finish step (step 6) lists it in the hand-over.
    or B2 command, choose each scenario's check in the Check column the
    script left open: `e2e` for what a user does on a web screen (B2),
    `compare` for what a recorded case covers (B1), `unit` for the rest
-   (without B1, B2 or C the script writes `unit` everywhere). If the archived
+   (without B1, B2 or C the script writes `unit` everywhere). When the
+   capability's archived extract says it has no screens (screens.md `None`,
+   which the person confirmed as S0), B2 and C do not apply to its port,
+   whatever verification.md chose for the context: the script reports them
+   as `notApplicable`, design.md gives them no row and no scenario is `e2e`.
+   Never write screen tests for such a capability; if it does have a screen,
+   it is extracted again so the person reviews the screen. If the archived
    target design has no ui.md (it was made before kit 0.8.0), ask the person
    for each screen's policy and record the answers under Decisions; never
    choose one yourself.
@@ -844,6 +853,8 @@ Words); the finish step (step 6) lists it in the hand-over.
    are written `{{env:NAME}}` in the requests; the recording puts the
    placeholder back where an answer repeats a value, and leaves out values
    under names like token or session id.
+   A capability whose extract says it has no screens has no B2 or C command
+   and no old run (`e2e.mjs old` refuses it).
    A B2 (or C) command `spec-relay-e2e --base <address> --start '<command>'`
    runs the screen tests in `tests/e2e/<capability with - for />/` against
    the new system it starts, and only when exactly those tests passed on the
@@ -966,7 +977,10 @@ changes no behavior.
    run leaves that cell open (or writes `fail` when the level failed in
    another port) and names the port in `problems`: ask the person whether to
    add the command through a port change. Write not-run only when the level
-   truly cannot run, never over a failure in another port. A context without a
+   truly cannot run, never over a failure in another port. A capability
+   whose extract says it has no screens runs no B2 or C, and a context
+   whose every capability has none gets `-` for them in the draft (with a
+   note); leave that `-` as it is. A context without a
    capability of its own gets the Test command's result as its A. For each
    cross-context flow, name the test that covers it, or `none`. A
    failure is fixed, never accepted: show it to the person and fix it through

@@ -31,6 +31,11 @@ const GUIDE = {
         wrong: '違う動きや抜けている条件を書く。元コードのほうがバグだと思うときも、そう書く',
       },
       S: { check: ['画面の項目・操作・メッセージ・遷移が、実際の画面と同じか', 'スクリーンショットがあれば見比べる'], against: 'スクリーンショットと screens.md の記述' },
+      S0: {
+        check: ['この機能に、利用者が見る画面（Web ページ、フォーム、ダイアログ、印刷する帳票）が本当にないか', '画面なしで確定すると、この機能の実装では画面のテスト（B2）とスクリーンショットの比較（C）を行わない。シナリオは単体テストか記録との比較で確かめる'],
+        against: '元のシステムの画面と、要件の根拠に出る元コード',
+        wrong: '画面があるときは、どの画面かを書く（AI が screens.md に書き足し、画面ごとの項目に置き換わる）',
+      },
       Q: { check: ['AI の推奨と理由を読み、新しいシステムでどうするかを決める', '推奨でよければ「推奨どおりにする」（review.md では推奨の文を decision: の後に写す）。違うときは自分の判断を書く'], against: '質問の本文、AI の推奨と理由、元コード', wrong: '質問そのものがおかしいときは「修正を依頼」。決められないときは「保留にする」で、誰に聞くかを書く' },
       C: { check: ['目印（DB への書き込み、例外など）があるのに「動作なし」とした箇所が、本当に仕様に要らないか'], against: '抜けの確認（箇所台帳）' },
     },
@@ -76,6 +81,11 @@ const GUIDE = {
         wrong: 'Write the behavior that differs or the condition that is missing; also when you think the source is the bug',
       },
       S: { check: ['Are the fields, actions, messages and transitions those of the real screen?', 'Compare with the screenshot when there is one'], against: 'The screenshot and screens.md' },
+      S0: {
+        check: ['Does this capability really have no screen a user sees (web page, form, dialog, printed report)?', 'Once confirmed, its port skips the screen tests (B2) and the screenshot comparison (C); its scenarios are checked by unit tests or recorded cases'],
+        against: 'The screens of the source program and the source code the requirements cite',
+        wrong: 'Name the screens it has; the agent adds them to screens.md and they replace this item',
+      },
       Q: { check: ["Read the agent's recommendation and its reason, and decide what the new system does", 'If the recommendation is right, "Take the recommendation" (in review.md, copy it after decision:); if not, write your own decision'], against: "The question, the agent's recommendation and reason, and the source", wrong: 'Write when the question itself is wrong. When you cannot decide yet, put it on hold and say whom to ask' },
       C: { check: ['Are the sites with markers (a database write, an error) that were judged "no behavior" really not part of the spec?'], against: 'The omission check (site ledger)' },
     },
@@ -113,6 +123,7 @@ const TITLES = {
     'Every file marked excluded may be left out of the migration': 'excluded のファイルは移行しなくてよい',
     'The missing definitions are understood': '読めなかった定義を理解した',
   },
+  'spec-relay-extract': { 'This capability has no screens': 'この機能には画面がない' },
   'spec-relay-amend': { 'The port updates in impact.md are right': 'impact.md の実装の直し方が正しい' },
   'spec-relay-target': {
     'The style': '方式', 'Data ownership': 'データの所有', 'The boundary check': '境界の確認',

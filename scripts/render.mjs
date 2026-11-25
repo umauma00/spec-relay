@@ -935,6 +935,8 @@ function reviewView({ root, dir, schema, L, outDir, lang = 'en', archived = fals
     if (item.letter === 'R' && specFiles.length) {
       item.data = take(reqs, (r) => norm(r.name) === item.key);
       if (item.data) item.kind = 'req'; else item.notes.push(L.noReq);
+    } else if (item.letter === 'S' && item.id === 'S0') {
+      item.kind = 'noScreens';
     } else if (item.letter === 'S' && screensText !== null) {
       item.data = take(screens, (s) => norm(s.name) === item.key);
       if (item.data) item.kind = 'screen'; else item.notes.push(L.noScreen);

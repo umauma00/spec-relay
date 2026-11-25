@@ -177,6 +177,12 @@ artifacts:
         policy `same` in ui.md, and consider it for `layout`. For desktop
         screens the kit has no tool: a port task captures and compares them.
 
+      B2 and C apply to the capabilities that have screens. A capability
+      whose reviewed extract says it has none (screens.md `None`, confirmed
+      as S0) skips them in its port, mechanically, whatever this table says
+      for its context. So choose B2 and C for a context when any of its
+      capabilities has web screens; never split a context by screens.
+
       Each scenario of a port is then checked one way, decided in the port's
       design.md: `e2e` (B2, screens), `compare` (B1, logic and outputs such
       as APIs, batches and reports) or `unit` (a test in the target language,

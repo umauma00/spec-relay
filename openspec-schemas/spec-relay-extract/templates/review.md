@@ -7,6 +7,7 @@ Reviewer: <!-- name -->
 
 ## 2. Screens
 - [ ] S1 <!-- screen name -->
+<!-- When screens.md says None: the single item "- [ ] S0 This capability has no screens" instead. -->
 
 ## 3. Questions
 - [ ] Q1 <!-- short title -->: decision:

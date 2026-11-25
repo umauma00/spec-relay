@@ -192,6 +192,13 @@ function archiveDenial(root, { name, literal, flags }, subagent) {
   const dir = path.join(root, 'openspec/changes', name);
   if (!fs.existsSync(dir)) return null;
   const schema = changeSchema(dir);
+  // A change with a kit step's name is that step: the kit reads its archive
+  // (an extract's screens.md decides whether a port compares screens), so it
+  // may not slip past the step's gate under another schema.
+  const base = name.replace(/-v\d+$/, '');
+  const named = { survey: 'spec-relay-survey', 'target-design': 'spec-relay-target', finish: 'spec-relay-finish' }[base]
+    ?? (/^extract-/.test(base) ? 'spec-relay-extract' : /^amend-/.test(base) ? 'spec-relay-amend' : /^port-/.test(base) ? 'spec-relay-port' : null);
+  if (named && schema !== named) return `${name} has the name of a spec-relay step but the schema ${schema}: create it with the schema ${named}, so its gate runs before the archive`;
   if (!REVIEWED.has(schema) && schema !== 'spec-relay-port') return null;
   if ((schema === 'spec-relay-extract' || schema === 'spec-relay-amend') && flags.some((f) => f === '--skip-specs' || f === '--no-validate')) {
     return `${name} must be archived with its specs and validation: drop --skip-specs and --no-validate`;

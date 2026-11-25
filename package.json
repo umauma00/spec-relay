@@ -1,6 +1,6 @@
 {
   "name": "spec-relay",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "private": true,
   "license": "MIT",
   "description": "Spec-driven language migration kit for GitHub Copilot, built on OpenSpec.",

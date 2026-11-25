@@ -32,7 +32,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   readIf, tableRows, plain, norm, contextIds, archivedChange, baseName,
-  baselineHash, capabilitySegments, configValue, cleanValue, language, PLAN,
+  baselineHash, capabilitySegments, capabilityScreens, configValue, cleanValue, language, PLAN, SCREEN_LEVELS,
 } from './gate.mjs';
 // The plan is read exactly as status.mjs reads it, so "all ported" there and here agree.
 import { parsePlan } from './status.mjs';
@@ -200,6 +200,19 @@ export function chosenLevels(text, contexts = null) {
     }));
 }
 
+// The levels each context's ports run: the screen levels (B2, C) leave a
+// context whose every planned capability has no screens (the screens.md of its
+// archived extract says None), as each of its ports skips them (gate.mjs
+// portLevels). A context with one capability that has screens keeps them.
+export function withoutScreens(root, levels, capabilities) {
+  return levels.map((l) => {
+    const own = capabilities.filter((c) => capabilitySegments(c)[0]?.toLowerCase() === l.context);
+    if (!own.length || !l.chosen.some((level) => SCREEN_LEVELS.includes(level))) return l;
+    if (!own.every((c) => capabilityScreens(root, c).none)) return l;
+    return { ...l, chosen: l.chosen.filter((level) => !SCREEN_LEVELS.includes(level)), notApplicable: l.chosen.filter((level) => SCREEN_LEVELS.includes(level)) };
+  });
+}
+
 // The relationships of the context map: its Relationships section, or any table
 // row whose first two cells are both context ids.
 function relationsOf(map, contexts) {
@@ -243,7 +256,7 @@ export function collect(root) {
     followUps: planFollowUps(plan),
     risks,
     contexts,
-    levels: chosenLevels(verification, contexts),
+    levels: withoutScreens(root, chosenLevels(verification, contexts), planCapabilities(plan)),
     relations,
     commands,
     problems,
@@ -431,7 +444,8 @@ function draftChecks(facts) {
   const chosen = new Map(facts.levels.map((l) => [l.context, l.chosen]));
   for (const context of facts.contexts) {
     const wanted = chosen.get(context) ?? ['A'];
-    lines.push(`| ${context} | ${LEVELS.map((level) => (wanted.includes(level) ? '<!-- pass / fail / not-run: reason -->' : '-')).join(' | ')} | |`);
+    const skipped = facts.levels.find((l) => l.context === context)?.notApplicable ?? [];
+    lines.push(`| ${context} | ${LEVELS.map((level) => (wanted.includes(level) ? '<!-- pass / fail / not-run: reason -->' : '-')).join(' | ')} |${skipped.length ? ` ${skipped.join(', ')}: no capability has screens ` : ' '}|`);
   }
   lines.push('', '## Cross-context flows', '| Upstream -> downstream | Covered by |', '|---|---|');
   for (const r of facts.relations) lines.push(`| ${r.upstream} -> ${r.downstream} | <!-- test (${r.channel || r.pattern || 'relation'}), or none --> |`);

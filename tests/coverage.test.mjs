@@ -30,7 +30,7 @@ function project({ capabilities = CAPABILITIES, sourceMap = ['src/billing/invoic
   write(dir, `${CHANGE}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Total | confirmed | src/billing/invoice.php:3 |\n');
   write(dir, `${CHANGE}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| R1 Total | src/billing/invoice.php:Invoice.total:3-9 | none |\n');
   write(dir, `${CHANGE}/source-map.md`, `# Source map\n\n## Source files\n| Path | Role | In scope |\n|---|---|---|\n${sourceMap.map((p) => `| \`${p}\` | x | full |`).join('\n')}\n\n## Dependencies\n| Dependency | Use |\n|---|---|\n| MySQL invoices table | reads |\n`);
-  write(dir, `${CHANGE}/review.md`, 'Reviewer: Uma\n- [x] R1 Total\n');
+  write(dir, `${CHANGE}/review.md`, 'Reviewer: Uma\n- [x] R1 Total\n- [x] S0 This capability has no screens\n');
   write(dir, `${CHANGE}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n');
   return dir;
 }

@@ -8,6 +8,20 @@
 
 そのうえで、更新する前に使っていた版の節（「X から更新するとき」）と、それより上の節をすべて読んでください（上ほど新しい版です）。進行中の change で起きることと、手で決めることが書いてあります。
 
+## 0.28.0 から更新するとき
+
+0.29.0 で、画面のない機能（capability）の実装が、コンテキストで選んだ B2・C（画面のテストとスクリーンショットの比較）で止まらないようにしました。解析・移行先の設計・port のスキーマの説明文が変わりました。導入スクリプトをもう一度実行すれば置き換わります（先頭の説明）。archive 済みの change はそのままです。
+
+| 変わったこと | 進行中の change で起きること |
+|---|---|
+| 解析の screens.md が `None` の機能は、レビュー済み（archive 済み）なら、その機能の port で B2・C を適用しない。verification.md でコンテキストに B2・C を選んでいても、`verify.mjs` は実行せず、`gate.mjs port-done` も求めない。完了時に「B2・C（画面の比較）は行っていません」と理由つきで知らせる。決めるのは、いちばん新しい archive 済みの解析の screens.md だけ（ファイルがないときは画面ありとみなす） | 0.28.0 で「機能専用のフォルダーに画面のテストがない」と止まっていた port は、そのまま進められる。`draft.mjs port-design --change port-<capability> --update` は表を書き換えないので、design.md の Verification に B2・C の行を書いていたら消し、Scenario checks の `e2e` を `unit` か `compare` にする。`tests/e2e/<capability>/` に画面のテストを作っていたら、そのテストも消す（どれかが残っていると、`verify.mjs` は実行せず、port-done も止まる。`e2e-old.json` は残っていてかまわない） |
+| 画面のない機能の port で、design.md に B2・C の行がある、Scenario checks に `e2e` がある、`tests/e2e/<capability>/` に画面のテストがある、のどれかで止まる（`verify.mjs` も実行しない）。画面があるなら、解析をやり直して（`extract-<capability>-v2`）画面をレビューしてもらう。`e2e.mjs old` もその機能では実行しない | 上の行のとおり、消してから進める |
+| 解析を archive できるのは、名前と同じスキーマの change だけ（`extract-*` は spec-relay-extract、`port-*` は spec-relay-port など。フックが有効なとき）。B2・C を外すかどうかを決める screens.md も、解析のスキーマで、レビュー（承認者の名前があり、すべての項目にチェック）を終えて archive されたものだけを信じる | なし（キットの手順どおりに作った change は、もともと満たしている） |
+| archive 済みの port（仕上げで再実行するもの）で、画面のない機能に B2・C の行や画面のテストが残っていても止めず、その機能の B2・C は実行しない | なし |
+| 仕上げ（finish）で、すべての機能に画面がないコンテキストは、checks.md の B2・C が `-` になり、結果を求めない（Notes に理由）。画面のある機能が1つでもあれば、これまでどおり | 作成済みの checks.md は書き換わらない。そのコンテキストの B2・C の欄が空なら `-` にする |
+| 解析で screens.md が `None` のとき、review.md の「2. Screens」に `S0 This capability has no screens` の項目を置き、人が確かめる（`draft.mjs review` が作る）。これがないと `gate.mjs review` が止まる。screens.md に画面があるのに S0 があっても止まる | レビュー中の解析で screens.md が `None` なら、`draft.mjs review --change <change> --update` で S0 を足し、人に確かめてもらう。archive 済みの解析には求めない |
+| レビュー画面の S0 に、何を確かめるか（利用者が見る画面が本当にないか、確定すると B2・C を行わないこと）が出る | なし |
+
 ## 0.27.0 から更新するとき
 
 0.28.0 で、trace.md などの元コードの参照（`パス:シンボル:行`）の読み取りを直しました。スキーマは変わっていないので、導入スクリプトを実行し直す必要はありません（実行してもかまいません）。

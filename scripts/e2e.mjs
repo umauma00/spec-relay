@@ -47,7 +47,7 @@ import { fileURLToPath } from 'node:url';
 import { runCommand, MAX_TIMEOUT_MS, stopAllOnSignal } from './run.mjs';
 import { answers, baseUrl, startSystem } from './http.mjs';
 import { words } from './compare.mjs';
-import { archivedChange, chainProblem, changeSchema, cleanValue, configValue, portCapability, readIf, scenarioList, tagMatches, titleTag } from './gate.mjs';
+import { archivedChange, capabilityScreens, chainProblem, changeSchema, cleanValue, configValue, portCapability, readIf, scenarioList, tagMatches, titleTag } from './gate.mjs';
 import { ignoreLocal } from './metrics.mjs';
 
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -228,6 +228,11 @@ export function loosenings(target, capability) {
   return [...new Set(out)];
 }
 
+// The screen tests of a capability, as paths under its own folder of tests/e2e/.
+export function screenTestFiles(target, capability) {
+  return listFiles(path.join(target, E2E_DIR, capabilityFolder(capability))).filter((f) => TEST_FILE.test(f));
+}
+
 // What keeps the tests of a capability from running: { problems, cli, testDir }.
 export function setupProblems(target, capability) {
   const dir = path.join(target, E2E_DIR);
@@ -236,7 +241,7 @@ export function setupProblems(target, capability) {
   const cli = path.join(dir, 'node_modules', '@playwright', 'test', 'cli.js');
   if (!fs.existsSync(path.join(dir, 'package.json'))) problems.push(`${E2E_DIR}/ has no package.json: run node "<kit>/scripts/e2e.mjs" init, then npm ci in ${E2E_DIR}`);
   else if (!fs.existsSync(cli)) problems.push(`@playwright/test is not installed in ${E2E_DIR}/: run npm ci there`);
-  const tests = listFiles(testDir).filter((f) => TEST_FILE.test(f));
+  const tests = screenTestFiles(target, capability);
   if (!tests.length) problems.push(`no screen tests in ${E2E_DIR}/${capabilityFolder(capability)}/ (files named *.e2e.mjs)`);
   problems.push(...selectorProblems(target, capability));
   return { problems, cli, testDir };
@@ -344,6 +349,8 @@ export async function recordOld(root, opts, { run = runCommand, send = fetch } =
   if (!target) return fail(['openspec/config.yaml names no target root ("Target root ...:")']);
   const scenarios = spec(root, capability);
   if (!scenarios.length) return fail([`the baseline spec of ${capability} has no scenarios`]);
+  const screens = capabilityScreens(root, capability);
+  if (screens.none) return fail([`${capability} has no screens (the screens.md of ${screens.extract} says None), so the screen levels B2 and C do not apply to its port: verify.mjs skips them, and its scenarios are checked by unit or compare`]);
   const setup = setupProblems(target, capability);
   if (setup.problems.length) return fail(setup.problems);
   // The old system is the test copy the person named in the reviewed target

@@ -11,7 +11,8 @@ import { verify, runLevel } from '../scripts/verify.mjs';
 import { runCommand } from '../scripts/run.mjs';
 import { decide } from '../scripts/hook.mjs';
 import { tempDir, write } from './helpers.mjs';
-import { PORT, PORT_SPEC, checksTable, crosscheck, portRepo } from './port-fixture.mjs';
+import { PORT, PORT_SPEC, RUNS, checksTable, crosscheck, portRepo, receipt } from './port-fixture.mjs';
+import { portDesign } from '../scripts/draft.mjs';
 
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const node = (args) => `node ${args}`;
@@ -308,6 +309,82 @@ test('every scenario needs a row in Scenario checks and the evidence of its kind
   // Without the table, a port with screen tests stops.
   fs.writeFileSync(design, text.replace(/\n## Scenario checks[\s\S]*$/, '\n'));
   assert.match(problems(dir).join('\n'), /design\.md has no filled "## Scenario checks" table/);
+});
+
+test('a capability whose reviewed screens.md says None skips B2 and C, and only that file decides it', async () => {
+  const dir = portRepo({ designCommand: checksTable() });
+  const verification = 'openspec/changes/archive/2026-11-02-target-design/verification.md';
+  write(dir, verification, '## Levels\n| Context | A scenario tests | B1 logic comparison | B2 screen tests | C screenshots | Notes |\n|---|---|---|---|---|---|\n| calc | yes | no | yes | yes | |\n');
+  const screens = 'openspec/changes/archive/2026-11-03-extract-calc-add/screens.md';
+  // With a screen, the context's B2 and C apply.
+  assert.match(verifyPlan(dir, 'port-calc-add').problems.join('\n'), /verification\.md chose B2 for context calc, but design\.md's Verification table gives it no command/);
+  // A missing screens.md is not "None".
+  fs.rmSync(path.join(dir, screens));
+  assert.deepEqual(verifyPlan(dir, 'port-calc-add').levels, ['B2', 'C']);
+  write(dir, screens, '# Screens\n\nNone\n');
+  // Only a reviewed extract counts: the extract schema and a review with a reviewer and every item ticked.
+  const archived = 'openspec/changes/archive/2026-11-03-extract-calc-add';
+  assert.deepEqual(verifyPlan(dir, 'port-calc-add').levels, ['B2', 'C']);
+  write(dir, `${archived}/.openspec.yaml`, 'schema: spec-relay-extract\n');
+  write(dir, `${archived}/review.md`, 'Reviewer: Uma\n- [x] R1 Add two numbers\n- [ ] R2 Reject text\n');
+  assert.deepEqual(verifyPlan(dir, 'port-calc-add').levels, ['B2', 'C']);
+  write(dir, `${archived}/review.md`, 'Reviewer: Uma\n- [x] R1 Add two numbers\n- [x] R2 Reject text\n');
+  write(dir, `${archived}/.openspec.yaml`, 'schema: spec-driven\n');
+  assert.deepEqual(verifyPlan(dir, 'port-calc-add').levels, ['B2', 'C']);
+  write(dir, `${archived}/.openspec.yaml`, 'schema: spec-relay-extract\n');
+  const plan = verifyPlan(dir, 'port-calc-add');
+  assert.deepEqual([plan.problems, plan.levels, plan.notApplicable, plan.runs.map((r) => r.level)], [[], [], ['B2', 'C'], ['A', 'boundary']]);
+  assert.match(plan.extract, /^openspec\/changes\/archive\/2026-11-03-extract-calc-add$/);
+  const noScreen = '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/calc.py:2 vs ts/calc/add.ts:3 |\n| R2 Reject text | confirmed | src/calc.py:5 vs ts/calc/add.ts:8 |\n';
+  crosscheck(dir, noScreen);
+  receipt(dir, RUNS);
+  const done = checkPortDone(dir, 'port-calc-add');
+  assert.equal(done.ok, true, done.problems.join('\n'));
+  assert.deepEqual([done.levels, done.notApplicable, done.equivalence], [['A'], ['B2', 'C'], 'inferred']);
+  assert.match(nextSteps('port-done', done, 'ja').person.join('\n'), /B2・C（画面の比較）は行っていません。レビュー済みの解析の screens\.md で、この機能には画面がないとされているため/);
+  assert.match(nextSteps('port-done', done, 'en').person.join('\n'), /B2 and C \(comparing screens\) did not apply/);
+
+  // The port cannot bring the screen levels back, or check a scenario on a screen.
+  const design = path.join(dir, PORT, 'design.md');
+  const text = fs.readFileSync(design, 'utf8');
+  fs.writeFileSync(design, text.replace('| A scenario tests | every scenario | |\n', "| A scenario tests | every scenario | |\n| B2 screen tests | x | `spec-relay-e2e --base http://127.0.0.1:3000 --start 'node server.cjs'` |\n"));
+  assert.match(problems(dir).join('\n'), /level B2 does not apply to calc\/add: the screens\.md of its archived extract \(openspec\/changes\/archive\/2026-11-03-extract-calc-add\) says None; remove the B2 row/);
+  fs.writeFileSync(design, text.replace('| A scenario tests | every scenario | |\n', '| A scenario tests | every scenario | |\n| C screenshots | x | |\n'));
+  assert.match(verifyPlan(dir, 'port-calc-add').problems.join('\n'), /level C does not apply to calc\/add/);
+  fs.writeFileSync(design, text.replace('| Reject text | Text input | unit |', '| Reject text | Text input | e2e |'));
+  assert.match(problems(dir).join('\n'), /scenario "Text input" of requirement "Reject text" is checked by e2e, but calc\/add has no screens/);
+  assert.match(verifyPlan(dir, 'port-calc-add').problems.join('\n'), /gives e2e to 1 scenario \("Text input"\): check them by unit or compare/);
+  // An archived port cannot change any more: the finish step just skips its screen levels.
+  const archivedPort = 'openspec/changes/archive/2026-11-06-port-calc-add';
+  fs.cpSync(path.join(dir, PORT), path.join(dir, archivedPort), { recursive: true });
+  assert.deepEqual(verifyPlan(dir, 'archive/2026-11-06-port-calc-add', 'calc/add').problems, []);
+  fs.rmSync(path.join(dir, archivedPort), { recursive: true });
+  fs.writeFileSync(design, text);
+  write(dir, 'ts/tests/e2e/calc-add/add.e2e.mjs', `test('${TAGS.pos}', async ({ page }) => {});\n`);
+  assert.match(verifyPlan(dir, 'port-calc-add').problems.join('\n'), /says None, but tests\/e2e\/calc-add\/ holds screen tests \(add\.e2e\.mjs\)/);
+  // The old run refuses too: there is no screen to prove a test on.
+  write(dir, 'ts/tests/e2e/package.json', '{"private":true}\n');
+  const old = await recordOld(dir, parseE2eOptions(['--change', 'port-calc-add', '--base', 'http://127.0.0.1:9'], 'old'), { run: fakePlaywright() });
+  assert.match(old.problems.join(), /calc\/add has no screens .*so the screen levels B2 and C do not apply to its port/);
+  fs.rmSync(path.join(dir, 'ts/tests'), { recursive: true });
+
+  // Only the newest archived extract counts: one that found a screen brings B2 and C back.
+  write(dir, 'openspec/changes/archive/2026-11-05-extract-calc-add-v2/screens.md', '### Screen: Calculator\n- labels\n');
+  assert.deepEqual(verifyPlan(dir, 'port-calc-add').levels, ['B2', 'C']);
+  fs.rmSync(path.join(dir, 'openspec/changes/archive/2026-11-05-extract-calc-add-v2'), { recursive: true });
+
+  // The draft of a new port design leaves the screen levels out: every scenario is a unit test.
+  fs.rmSync(design);
+  const drafted = portDesign(dir, 'port-calc-add');
+  assert.deepEqual(drafted.notApplicable, ['B2', 'C']);
+  assert.match(fs.readFileSync(design, 'utf8'), /\| Reject text \| Text input \| unit \|/);
+  // With B1 left, the choice it offers has no e2e.
+  write(dir, verification, '## Levels\n| Context | A scenario tests | B1 logic comparison | B2 screen tests | C screenshots | Notes |\n|---|---|---|---|---|---|\n| calc | yes | yes | yes | yes | |\n');
+  fs.rmSync(design);
+  portDesign(dir, 'port-calc-add');
+  assert.match(fs.readFileSync(design, 'utf8'), /\| Reject text \| Text input \| <!-- compare \/ unit --> \|/);
+  // The extract archived before 0.29.0 has no S0 item: its reviewed screens.md alone decides.
+  assert.doesNotMatch(fs.readFileSync(path.join(dir, archived, 'review.md'), 'utf8'), /S0/);
 });
 
 test('the parsers read the Scenario checks table in English and Japanese', () => {

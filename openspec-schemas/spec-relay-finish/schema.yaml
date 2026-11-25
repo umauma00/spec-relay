@@ -35,8 +35,10 @@ artifacts:
         old system in that capability's port) and writes `pass` or `fail`.
         Write `not-run: <reason>` only for a chosen level it could not run
         (no port of the context has its command, the source program could
-        not be run). A level not chosen stays `-`. Every `not-run` needs a
-        `verification` row in leftovers.md.
+        not be run). A level not chosen stays `-`, and so do B2 and C of a
+        context whose every capability's extract says it has no screens
+        (the draft writes `-` and a note; their ports skip them). Every
+        `not-run` needs a `verification` row in leftovers.md.
       - **Cross-context flows**: for each relationship in the archived
         survey's context-map.md, the test that covers it (a test of the
         downstream module that goes through the upstream module's public API
