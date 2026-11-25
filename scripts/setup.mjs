@@ -15,13 +15,17 @@
 //      place: deleting them makes a later `openspec update` narrow the person's
 //      global OpenSpec profile (%APPDATA%\\openspec or ~/.config/openspec), which
 //      affects every project.
-// Without --apply it only prints the plan. It never overwrites a file whose
-// content differs from the kit's, and it never lets `openspec init` replace or
-// clean up files that already exist; it reports the conflict and stops instead.
+// Without --apply it only prints the plan. A schema or pinning file that an
+// earlier kit version installed (its content is listed in known-files.json) is
+// replaced with this version's, so a kit update needs no manual deletes. It
+// never overwrites any other file whose content differs from the kit's, and it
+// never lets `openspec init` replace or clean up files that already exist; it
+// reports the conflict and stops instead.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runOpenspec, probeOpenspec, findNpm, runCommand, trackedModules, TOOLS_DIR } from './openspec.mjs';
+import { isKnown, knownFiles } from './known-files.mjs';
 
 export const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SCHEMAS = ['spec-relay-survey', 'spec-relay-target', 'spec-relay-extract', 'spec-relay-amend', 'spec-relay-port', 'spec-relay-finish'];
@@ -47,6 +51,15 @@ export function stubFor(file) {
   const description = 'Disabled by spec-relay in this repository. Select the spec-relay-orchestrator agent to propose, apply, review, archive or sync OpenSpec changes.';
   const front = `---\nname: ${base}\ndescription: ${description}\n---\n`;
   return `${front}\n${STUB_MARKER}\n\nThis repository is migrated with spec-relay. Every OpenSpec workflow here (proposing, applying,\narchiving or syncing a change) goes through the \`spec-relay-orchestrator\` agent, which runs the\nhuman review gate and the OpenSpec version pinned in this repository.\nDo not perform this workflow. Tell the person to select \`spec-relay-orchestrator\` (Copilot CLI: \`/agent\`) and stop.\n`;
+}
+// The stub spec-relay 0.6.0 and earlier wrote over OpenSpec 1.x files under
+// .github/ (skills and prompts). Only a file exactly like it is removed by setup.
+export function legacyStubFor(file) {
+  const skill = path.basename(file) === 'SKILL.md';
+  const base = skill ? path.basename(path.dirname(file)) : path.basename(file, '.prompt.md');
+  const description = 'Disabled by spec-relay in this repository. Select the spec-relay-orchestrator agent to apply, review, archive or sync OpenSpec changes.';
+  const front = skill ? `---\nname: ${base}\ndescription: ${description}\n---\n` : `---\ndescription: "${description}"\n---\n`;
+  return `${front}\n${STUB_MARKER}\n\nThis repository is migrated with spec-relay. Applying, archiving or syncing an OpenSpec change here\nmust go through the \`spec-relay-orchestrator\` agent, which runs the human review gate.\nDo not perform this workflow. Tell the person to select \`spec-relay-orchestrator\` (Copilot CLI: \`/agent\`) and stop.\n`;
 }
 const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
 
@@ -249,6 +262,19 @@ export function legacyFiles(target) {
   });
 }
 
+// A legacy file (a skill folder or a prompt) that is exactly the 0.6.0 stub;
+// a skill folder holds nothing else.
+export function isLegacyStub(file) {
+  try {
+    if (fs.lstatSync(file).isDirectory()) {
+      const names = fs.readdirSync(file);
+      if (names.length !== 1 || names[0] !== 'SKILL.md' || !fs.lstatSync(path.join(file, 'SKILL.md')).isFile()) return false;
+      return readText(path.join(file, 'SKILL.md')) === legacyStubFor(path.join(file, 'SKILL.md'));
+    }
+    return fs.lstatSync(file).isFile() && readText(file) === legacyStubFor(file);
+  } catch { return false; }
+}
+
 // A SKILL.md OpenSpec wrote: up to 2.0 its frontmatter says
 // `generatedBy: "<version>"`; from 2.1 that line is gone and only
 // `metadata: author: openspec` is left (OpenSpec's skill-generation.js).
@@ -317,31 +343,47 @@ export function personalBypassFiles(home) {
   return PERSONAL_SKILL_DIRS.flatMap((rel) => openspecSkills(path.join(home, rel)));
 }
 
-// Returns [{ action: 'create' | 'keep' | 'update' | 'disable' | 'leftover' | 'conflict', path, content?, reason? }],
+// Returns [{ action: 'create' | 'keep' | 'update' | 'replace' | 'remove' | 'disable' | 'leftover' | 'conflict', path, content?, reason? }],
 // whether `openspec init` runs and whether OpenSpec is (re)installed.
 export function plan(opts) {
   const steps = [];
   const configYaml = path.join(opts.target, 'openspec/config.yaml');
   const managed = exists(configYaml) && readText(configYaml).includes(CONFIG_MARKER);
   const pending = exists(configYaml) && readText(configYaml).startsWith(PENDING_MARKER);
+  // A file an earlier kit version installed is replaced; any other content is
+  // someone's edit (or a newer kit's file), which setup never overwrites.
+  const EDITED = `differs from this kit version (${KIT_VERSION}) and from every earlier one: someone edited it, or a newer kit wrote it. If someone updated the kit for this repository, update yours first; otherwise restore it (or delete it) and run setup again`;
+  const earlier = (kitRel, dest) => isKnown(kitRel, readText(dest));
+  const shipped = new Set();
   for (const schema of SCHEMAS) {
     const from = path.join(KIT_ROOT, 'openspec-schemas', schema);
     for (const rel of listFiles(from)) {
+      const kitRel = `openspec-schemas/${schema}/${rel.replace(/\\/g, '/')}`;
+      shipped.add(kitRel);
       const dest = path.join(opts.target, 'openspec/schemas', schema, rel);
       const content = fs.readFileSync(path.join(from, rel), 'utf8');
       if (!fs.existsSync(dest)) steps.push({ action: 'create', path: dest, content });
       else if (readText(dest) === normalizeText(content)) steps.push({ action: 'keep', path: dest });
-      else steps.push({ action: 'conflict', path: dest, reason: 'differs from the kit version' });
+      else if (earlier(kitRel, dest)) steps.push({ action: 'replace', path: dest, content, reason: 'from an earlier spec-relay version' });
+      else steps.push({ action: 'conflict', path: dest, reason: EDITED, kitFile: true });
     }
+  }
+  // Schema files earlier versions had and this one does not, left as installed.
+  for (const kitRel of Object.keys(knownFiles())) {
+    if (!kitRel.startsWith('openspec-schemas/') || shipped.has(kitRel)) continue;
+    const dest = path.join(opts.target, 'openspec/schemas', ...kitRel.split('/').slice(1));
+    if (exists(dest) && earlier(kitRel, dest)) steps.push({ action: 'remove', path: dest, reason: 'from an earlier spec-relay version; this version has no such file' });
   }
   // The pinned OpenSpec: the kit's package.json and lock, compared like the schemas.
   // JSON is compared parsed, so a reformatted file is still the kit's.
   for (const rel of TOOL_FILES) {
+    const kitRel = `templates/openspec-tools/${rel}`;
     const dest = path.join(opts.target, TOOLS_DIR, rel);
-    const content = fs.readFileSync(path.join(KIT_ROOT, 'templates/openspec-tools', rel), 'utf8');
+    const content = fs.readFileSync(path.join(KIT_ROOT, kitRel), 'utf8');
     if (!fs.existsSync(dest)) steps.push({ action: 'create', path: dest, content, tool: true });
     else if (sameFile(readText(dest), normalizeText(content), rel)) steps.push({ action: 'keep', path: dest });
-    else steps.push({ action: 'conflict', path: dest, reason: 'differs from the kit version, which pins the OpenSpec the kit is tested with; if it is the previous kit version, delete it and run setup again (docs/UPGRADING.md in the kit)' });
+    else if (earlier(kitRel, dest)) steps.push({ action: 'replace', path: dest, content, tool: true, reason: `from an earlier spec-relay version; this one pins OpenSpec ${PINNED_VERSION}` });
+    else steps.push({ action: 'conflict', path: dest, reason: EDITED, kitFile: true });
   }
   for (const file of trackedModules(opts.target).slice(0, 3)) {
     steps.push({ action: 'conflict', path: path.join(opts.target, file), reason: 'git tracks files under the pinned OpenSpec\'s node_modules; setup runs OpenSpec from there, so remove them from the repository (git rm -r --cached) first' });
@@ -372,13 +414,18 @@ export function plan(opts) {
     steps.push({ action: 'conflict', path: path.join(opts.target, opts.targetRoot), reason: 'the target root already exists and is not empty' });
   }
   // Reported, not a conflict: removing them needs `openspec update`, which needs
-  // the OpenSpec this run installs.
+  // the OpenSpec this run installs. The 0.6.0 stubs among them are removed, but
+  // only once that update ran (the skills are in .agents/skills/): before it,
+  // OpenSpec reads a missing workflow as one the person turned off and narrows
+  // their global profile, which affects every project.
   if (managed) {
+    const updated = repoSkills(opts.target).length > 0;
     for (const file of legacyFiles(opts.target)) {
-      steps.push({ action: 'leftover', path: file, reason: 'left by OpenSpec 1.x or spec-relay 0.6.0; see "0.6.0 から更新するとき" in docs/UPGRADING.md of the kit' });
+      if (updated && isLegacyStub(file)) steps.push({ action: 'remove', path: file, reason: 'a stub spec-relay 0.6.0 wrote; OpenSpec 2.x keeps its skills in .agents/skills/' });
+      else steps.push({ action: 'leftover', path: file, reason: updated ? 'left by OpenSpec 1.x and not like the kit\'s stub (someone edited it); move what you need out of it and delete it' : 'left by OpenSpec 1.x or spec-relay 0.6.0; run node <kit>/scripts/openspec.mjs update, then setup again ("0.6.0 から更新するとき" in docs/UPGRADING.md of the kit)' });
     }
   }
-  const install = !opts.skipInit && !installedOk(opts.target);
+  const install = !opts.skipInit && (steps.some((s) => s.action === 'replace' && s.tool) || !installedOk(opts.target));
   const runInit = !managed && !opts.skipInit;
   if (runInit) {
     for (const file of initConflicts(opts.target)) {
@@ -390,7 +437,48 @@ export function plan(opts) {
   for (const file of bypassFiles(opts.target)) {
     steps.push({ action: 'disable', path: file, reason: 'generic OpenSpec workflow; bypasses the review gate' });
   }
+  // The kit version that last set the repository up. A newer kit's record is
+  // kept: this kit stops when it would change a kit file, and otherwise goes on.
+  const stampFile = path.join(opts.target, STAMP);
+  const stamped = stampVersion(opts.target);
+  if (stamped === undefined) {
+    steps.push({ action: 'conflict', path: stampFile, reason: 'cannot be read as the kit version that set up this repository (a merge conflict?); make it {"kit": "spec-relay", "version": "<the newer of the versions>"} and run setup again' });
+  } else if (stamped && compareKitVersions(stamped, KIT_VERSION) > 0) {
+    const touched = steps.filter((s) => ['replace', 'remove'].includes(s.action) || (s.action === 'conflict' && s.kitFile));
+    if (touched.length) {
+      for (const step of touched) steps.splice(steps.indexOf(step), 1);
+      steps.push({ action: 'conflict', path: stampFile, reason: `spec-relay ${stamped} set up this repository, a newer version than this kit (${KIT_VERSION}), and ${touched.length} kit file(s) differ from this kit; update the kit first (someone else on this repository updated it)` });
+    } else {
+      steps.push({ action: 'keep', path: stampFile, reason: `spec-relay ${stamped} set it up, a newer version than this kit (${KIT_VERSION}); update the kit soon` });
+    }
+  } else if (stamped === KIT_VERSION) {
+    steps.push({ action: 'keep', path: stampFile });
+  } else {
+    steps.push({ action: stamped ? 'update' : 'create', path: stampFile, content: stampText(), stamp: true, reason: `records spec-relay ${KIT_VERSION}, the kit that set up this repository; commit it` });
+  }
   return { steps, runInit, managed, install };
+}
+
+// The kit version that last set the repository up, so an older kit run by
+// someone who has not updated yet stops instead of taking the newer files for edits.
+export const KIT_VERSION = JSON.parse(fs.readFileSync(path.join(KIT_ROOT, 'package.json'), 'utf8')).version;
+export const STAMP = 'openspec/spec-relay/kit.json';
+// The recorded version, null when there is no record, or undefined when the
+// file cannot be read as one (a merge conflict, a hand edit).
+export function stampVersion(target) {
+  let text;
+  try { text = fs.readFileSync(path.join(target, STAMP), 'utf8'); } catch { return null; }
+  try {
+    const { version } = JSON.parse(normalizeText(text));
+    return typeof version === 'string' && /^\d+(\.\d+){0,2}([+-].*)?$/.test(version) ? version : undefined;
+  } catch { return undefined; }
+}
+const stampText = () => `${JSON.stringify({ kit: 'spec-relay', version: KIT_VERSION, note: 'Written by setup.mjs: the kit version that last set up this repository. Commit it.' }, null, 2)}\n`;
+export function compareKitVersions(a, b) {
+  const parts = (v) => { const p = String(v).split(/[+-]/)[0].split('.').map((n) => Number.parseInt(n, 10) || 0); while (p.length < 3) p.push(0); return p.slice(0, 3); };
+  const [x, y] = [parts(a), parts(b)];
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+  return 0;
 }
 
 const PINNED_VERSION = JSON.parse(fs.readFileSync(path.join(KIT_ROOT, 'templates/openspec-tools/package.json'), 'utf8')).dependencies['@fission-ai/openspec'];
@@ -468,9 +556,18 @@ export function main(argv) {
     return 3;
   }
   if (!opts.apply) { console.log('\nDry run. Add --apply to make these changes.'); return 0; }
-  const created = steps.filter((s) => s.action === 'create');
+  const created = steps.filter((s) => s.action === 'create' && !s.stamp);
+  // Replaced files keep their old content here, so a failed run puts them back.
+  const replaced = steps.filter((s) => s.action === 'replace').map((s) => ({ ...s, previous: fs.readFileSync(s.path) }));
   const modules = path.join(opts.target, TOOLS_DIR, 'node_modules');
+  // npm ci deletes node_modules first, so the OpenSpec that ran before is moved
+  // aside and put back if this run fails (named node_modules so the tools
+  // folder's .gitignore covers it). A run killed in between left it there.
+  const previous = path.join(opts.target, TOOLS_DIR, '.previous/node_modules');
+  if (exists(previous) && !exists(modules)) { try { fs.renameSync(previous, modules); } catch { /* reinstalled below */ } }
   const hadModules = exists(modules);
+  let movedAside = false;
+  let npmStarted = false;
   const write = (step, content = step.content) => {
     fs.mkdirSync(path.dirname(step.path), { recursive: true });
     fs.writeFileSync(step.path, content);
@@ -483,22 +580,44 @@ export function main(argv) {
     for (const step of [...created.filter((s) => s.config), ...created.filter((s) => !s.config)]) {
       try { fs.rmSync(step.path, { force: true, maxRetries: 5, retryDelay: 200 }); } catch { left.push(path.relative(opts.target, step.path)); }
     }
-    if (!hadModules) {
-      try { fs.rmSync(modules, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { left.push(path.relative(opts.target, modules)); }
+    for (const step of replaced) {
+      try { fs.writeFileSync(step.path, step.previous); } catch { left.push(path.relative(opts.target, step.path)); }
     }
-    return new Error(`${error.message}. The files this run created were removed${left.length ? `, except ${left.join(', ')}` : ''}; fix the problem and run setup again.`);
+    let gone = false;
+    if (movedAside) {
+      try {
+        fs.rmSync(modules, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        fs.renameSync(previous, modules);
+        fs.rmSync(path.dirname(previous), { recursive: true, force: true });
+      } catch { left.push(path.relative(opts.target, modules)); gone = true; }
+    } else if (!hadModules) {
+      try { fs.rmSync(modules, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { left.push(path.relative(opts.target, modules)); }
+    } else if (npmStarted) gone = true;
+    const reinstall = gone ? ' The OpenSpec that was installed in the tools folder could not be kept, so the kit cannot run OpenSpec until setup succeeds.' : '';
+    return new Error(`${error.message}. The files this run created were removed and the ones it replaced were put back${left.length ? `, except ${left.join(', ')}` : ''}.${reinstall} Fix the problem and run setup again.`);
   };
   // The pinned OpenSpec first, then the rest. A new config is written with a
   // pending first line and marked as managed only after init, so a run that
   // stops on the way (a lost network, a closed terminal) is a first run again.
   const config = created.find((s) => s.config);
+  // Best effort: what an interrupted run left there is only disk space (git ignores it).
+  const dropPrevious = () => { try { fs.rmSync(path.dirname(previous), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* left for the next run */ } };
+  if (!opts.skipInit) dropPrevious();
   try {
-    for (const step of created.filter((s) => s.tool)) write(step);
-    if (install) runInstall(opts);
+    for (const step of [...created, ...replaced].filter((s) => s.tool)) write(step);
+    if (install && hadModules) {
+      try {
+        fs.mkdirSync(path.dirname(previous), { recursive: true });
+        fs.renameSync(modules, previous);
+        movedAside = true;
+      } catch { dropPrevious(); /* held open (a virus scanner): npm ci replaces it in place */ }
+    }
+    if (install) { npmStarted = true; runInstall(opts); }
     for (const step of created.filter((s) => !s.tool)) write(step, step.config ? step.content.replace(/^.*\n/, `${PENDING_MARKER}\n`) : step.content);
+    for (const step of replaced.filter((s) => !s.tool)) write(step);
     if (willInit) runInit(opts);
     if (config) write(config);
-    for (const step of steps.filter((s) => s.action === 'update')) write(step);
+    for (const step of steps.filter((s) => s.action === 'update' && !s.stamp)) write(step);
   } catch (error) {
     throw undo(error);
   }
@@ -506,8 +625,29 @@ export function main(argv) {
     fs.writeFileSync(file, stubFor(file));
     if (willInit) console.log(`disabled ${path.relative(opts.target, file)}`);
   }
+  if (movedAside) dropPrevious();
+  // Files of earlier versions go last, after the skills are disabled.
+  const stuck = [];
+  for (const step of steps.filter((s) => s.action === 'remove')) {
+    try {
+      fs.rmSync(step.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch { stuck.push(path.relative(opts.target, step.path)); continue; }
+    console.log(`removed  ${path.relative(opts.target, step.path)}`);
+    // Folders this emptied (.github/prompts/, then .github/ itself; a schema's
+    // templates/), never openspec/schemas/ or anything above it.
+    for (let dir = path.dirname(step.path); dir.startsWith(opts.target + path.sep) && dir !== path.join(opts.target, 'openspec/schemas'); dir = path.dirname(dir)) {
+      try { if (fs.readdirSync(dir).length) break; fs.rmdirSync(dir); } catch { break; }
+    }
+  }
+  for (const step of steps.filter((s) => s.stamp)) write(step);
+  if (stuck.length) {
+    console.error(`\nNot finished: could not remove ${stuck.join(', ')} (a program may hold it open). Close it or delete it yourself, then run setup again.`);
+    return 2;
+  }
   if (leftovers.length) {
-    console.error('\nNot finished: OpenSpec is installed, but the files listed as leftover are still under .github/. Follow "0.6.0 から更新するとき" in docs/UPGRADING.md of the kit, then run setup again.');
+    console.error(steps.some((s) => s.action === 'leftover' && !/someone edited/.test(s.reason))
+      ? '\nNot finished: OpenSpec is installed, but OpenSpec 1.x left the files listed as leftover under .github/. In this repository run node "<kit>/scripts/openspec.mjs" update, then run setup again: it removes what update leaves of the kit\'s old stubs ("0.6.0 から更新するとき" in docs/UPGRADING.md of the kit).'
+      : '\nNot finished: the files listed as leftover are still under .github/. Move what you need out of them, delete them, then run setup again ("0.6.0 から更新するとき" in docs/UPGRADING.md of the kit).');
     return 2;
   }
   console.log('\nspec-relay is set up. Select the spec-relay orchestrator agent to start with the survey (step 1).');

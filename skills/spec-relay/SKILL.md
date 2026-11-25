@@ -155,15 +155,24 @@ stop halfway on something the machine or the host lacks.
 2. If `openspec/config.yaml` already contains `# spec-relay: managed`, setup is
    done: read its context, run the trial (step 6) if the check reported `trial`
    as `warn`, and go to the first unfinished step. When the check reports
-   `openspec`, `workflows` or `skills-scope` as `fail` with "run setup again"
-   (common right after a clone, after an OpenSpec update, or after a kit
+   `openspec`, `schemas`, `workflows` or `skills-scope` as `fail` with "run setup
+   again" (common right after a clone, after an OpenSpec update, or after a kit
    update), run `node "<kit>/scripts/setup.mjs" --target .` (the values come
    from the config), show the plan, run it again with `--apply` after the
    person agrees, then run the check again.
-   - If the plan shows a `conflict` on `openspec/spec-relay/tools/package.json`
-     or `package-lock.json`, the kit was updated and pins a new OpenSpec: tell
-     the person to delete those two files (docs/UPGRADING.md of the kit, the
-     section for the version they updated from), then run setup again.
+   - After a kit update the plan shows `replace` for the schemas and the
+     OpenSpec pinning files an earlier kit version installed: setup puts this
+     version's in their place, and that is expected. Then tell the person, in
+     a few lines, what docs/UPGRADING.md of the kit says changes for changes in
+     progress (the sections above the version they updated from).
+   - A `conflict` on one of those files means someone edited it or a newer
+     kit wrote it: show it and ask the person whether someone updated the kit
+     (then they update theirs) or to restore or delete it; never do it yourself.
+   - `kit-version` (`fail`): a newer kit set this repository up. Tell the
+     person to update the kit (the plugin) first; never run setup with this one.
+   - `legacy` (`fail`, a repository set up with 0.6.0 or earlier): after the
+     person agrees, run `node "<kit>/scripts/openspec.mjs" update` in the
+     repository, then setup as above; setup removes the old stubs update leaves.
    - `repo-skills` (`fail`): the OpenSpec skills left the repository. After the
      person agrees, run `node "<kit>/scripts/openspec.mjs" init --tools
      github-copilot --scope project .` in the repository, then setup as above.
