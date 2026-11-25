@@ -34,6 +34,7 @@ scripts/canvas.mjs             canvas の画面を出すサーバー（拡張か
 scripts/review-edit.mjs        canvas から review.md への書き込み（チェック・判断・レビュー担当）と、その記録
 scripts/guide.mjs              コードガイド（任意）の準備・ハッシュの記録・確認と、画面の部品（図は設計から描く）
 scripts/doctor.mjs             最初の環境チェックとサブエージェントの試運転
+scripts/known-files.mjs        過去の版のスキーマと OpenSpec を固定するファイルのハッシュ一覧（known-files.json）を git の履歴から作る
 scripts/openspec.mjs           リポジトリに固定した OpenSpec CLI の起動（`node <キット>/scripts/openspec.mjs <引数>`、シェルを通さない）
 templates/openspec-tools/      リポジトリに置く、OpenSpec の版を固定する package.json と package-lock.json
 templates/e2e/                 移行先の tests/e2e/ に置く、Playwright の版を固定した package.json・設定・補助関数
@@ -58,6 +59,16 @@ docs/GUIDE.md                  コードガイド（任意）
 npm test
 ```
 
-通しのテストは、一時フォルダーに `npm ci` で OpenSpec を入れて動かします（npm のレジストリへの接続が必要です）。npm がない端末では、その部分だけ skip と表示されます（CI では skip せず失敗にします）。OpenSpec の版を上げるときは、`templates/openspec-tools/package.json` の版を変えて、そのフォルダーで `npm install --package-lock-only --ignore-scripts` を実行し、lock ファイルを作り直します。`scripts/openspec.mjs` の `OPENSPEC_VERSION` と `scripts/doctor.mjs` の `OPENSPEC_TESTED` も合わせます（テストが3つの一致を確かめます）。新しい版の `engines`（OpenSpec と依存パッケージ）が変わったときは、Node.js の最低版も合わせます（`scripts/doctor.mjs` の `NODE_MIN` と `NODE_DEPS`、package.json の `engines`、`skills/spec-relay/SKILL.md`、`scripts/setup.mjs` の npm がないときの案内、README・docs/SETUP.md・docs/WINDOWS.md。これはテストでは確かめません）。移行中のリポジトリでは、新しいキットの導入スクリプトが古い package.json と package-lock.json を衝突として止めるので、その2つを消してから導入スクリプトを実行し直すよう、更新の手順に書いてください。テストは一時フォルダーの設定を使うので、手元の OpenSpec の設定は変わりません。CI は Windows と Ubuntu の Node.js 22・24 で実行しています。
+通しのテストは、一時フォルダーに `npm ci` で OpenSpec を入れて動かします（npm のレジストリへの接続が必要です）。npm がない端末では、その部分だけ skip と表示されます（CI では skip せず失敗にします）。OpenSpec の版を上げるときは、`templates/openspec-tools/package.json` の版を変えて、そのフォルダーで `npm install --package-lock-only --ignore-scripts` を実行し、lock ファイルを作り直します。`scripts/openspec.mjs` の `OPENSPEC_VERSION` と `scripts/doctor.mjs` の `OPENSPEC_TESTED` も合わせます（テストが3つの一致を確かめます）。新しい版の `engines`（OpenSpec と依存パッケージ）が変わったときは、Node.js の最低版も合わせます（`scripts/doctor.mjs` の `NODE_MIN` と `NODE_DEPS`、package.json の `engines`、`skills/spec-relay/SKILL.md`、`scripts/setup.mjs` の npm がないときの案内、README・docs/SETUP.md・docs/WINDOWS.md。これはテストでは確かめません）。移行中のリポジトリでは、導入スクリプトを実行し直すと古い package.json と package-lock.json が置き換わります（下の「過去の版のファイル」）。テストは一時フォルダーの設定を使うので、手元の OpenSpec の設定は変わりません。CI は Windows と Ubuntu の Node.js 22・24 で実行しています。
+
+### 過去の版のファイル
+
+導入スクリプトは、移行中のリポジトリのスキーマ（`openspec/schemas/spec-relay-*`）と `openspec/spec-relay/tools/` の3つのファイルが、キットの過去のどれかの版と同じ中身なら、衝突にせずにこの版のものに置き換えます（変更の予定には `replace` と出ます）。過去の版の中身は `scripts/known-files.json` に SHA-256 で持ちます（改行コードと BOM は無視、JSON は解析して比べる）。`openspec-schemas/` か `templates/openspec-tools/` を変えたら、キットのリポジトリ（浅い clone ではないもの）で次を実行し、known-files.json も一緒にコミットしてください。今の中身が一覧にないとテストが失敗します。
+
+```powershell
+node scripts/known-files.mjs
+```
+
+一覧から中身を消すと、その版から更新する人の導入スクリプトが衝突で止まるので、消さないでください。
 
 画面のテストの通しの確認（Playwright を実際に入れてブラウザを動かす）は、`SPEC_RELAY_E2E_REAL=1` を付けたときだけ実行します（Windows は Edge、ほかは `SPEC_RELAY_E2E_CHANNEL=chrome` か `SPEC_RELAY_E2E_EXECUTABLE=<ブラウザのパス>`）。CI では Windows（Edge）と Ubuntu（Chrome）で実行しています。Playwright の版を上げるときは、`templates/e2e/package.json` の版を変えて、そのフォルダーで `npm install --package-lock-only --ignore-scripts` を実行します。

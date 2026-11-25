@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { main, parseArgs, plan, renderConfig, skillsScope, CONFIG_MARKER, KIT_ROOT, STUB_MARKER } from '../scripts/setup.mjs';
+import { main, parseArgs, plan, renderConfig, skillsScope, legacyStubFor, CONFIG_MARKER, KIT_ROOT, STUB_MARKER } from '../scripts/setup.mjs';
+import { contentHash, knownFiles, TRACKED } from '../scripts/known-files.mjs';
 import { findOpenspec, runOpenspec, findNpm, runCommand, OPENSPEC_VERSION } from '../scripts/openspec.mjs';
 import { tempDir, write, quiet, isolateOpenspec, crlf } from './helpers.mjs';
 
@@ -177,7 +178,7 @@ test('running the script through a symlink still runs it', { skip: process.platf
 // A stand-in for npm: `--version` works, and `ci` "installs" an OpenSpec that
 // answers `--version` and fails everything else. Run by absolute node, since
 // PATH holds only this folder.
-function fakeNpm(version = OPENSPEC_VERSION) {
+function fakeNpm(version = OPENSPEC_VERSION, { ciFails = false } = {}) {
   const bin = tempDir('spec-relay-bin-');
   // Every call is logged to <bin>/calls.jsonl with the skills scope it got.
   const log = JSON.stringify(path.join(bin, 'calls.jsonl'));
@@ -189,6 +190,7 @@ if (process.argv[2] === '--version') { console.log(${JSON.stringify(version)}); 
   const script = process.platform === 'win32' ? 'node_modules/npm/bin/npm-cli.js' : 'fake-npm.js';
   write(bin, script, `const fs = require('fs'); const path = require('path');
 if (process.argv[2] === '--version') { console.log('10.9.0'); process.exit(0); }
+if (${JSON.stringify(ciFails)}) { console.error('fake npm: network down'); process.exit(1); }
 const dir = path.join(process.cwd(), 'node_modules/@fission-ai/openspec');
 fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
 fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: ${JSON.stringify(version)} }));
@@ -437,3 +439,124 @@ test('the pinned version is the same in the template, the launcher and doctor', 
   assert.equal(lock.packages[''].dependencies['@fission-ai/openspec'], OPENSPEC_VERSION);
   assert.equal(OPENSPEC_TESTED, OPENSPEC_VERSION);
 });
+
+// --- updating from an earlier kit version ---------------------------------
+
+const actions = (opts, action) => plan(opts).steps.filter((s) => s.action === action).map((s) => path.relative(opts.target, s.path).replace(/\\/g, '/')).sort();
+// Pretends `text` was the content of a kit file in an earlier version, for one test.
+function asEarlier(kitRel, text) {
+  const known = knownFiles();
+  const before = known[kitRel];
+  known[kitRel] = [...(before || []), contentHash(kitRel, text)];
+  return () => { if (before) known[kitRel] = before; else delete known[kitRel]; };
+}
+
+test('known-files.json lists the current content of every schema and pinning file', () => {
+  const listFiles = (dir, base = dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? listFiles(path.join(dir, e.name), base) : [path.relative(base, path.join(dir, e.name)).replace(/\\/g, '/')]));
+  const missing = [];
+  for (const top of TRACKED) {
+    for (const rel of listFiles(path.join(KIT_ROOT, top))) {
+      const kitRel = `${top}/${rel}`;
+      if (!(knownFiles()[kitRel] || []).includes(contentHash(kitRel, fs.readFileSync(path.join(KIT_ROOT, kitRel), 'utf8')))) missing.push(kitRel);
+    }
+  }
+  assert.deepEqual(missing, [], 'run node scripts/known-files.mjs in the kit repository and commit scripts/known-files.json');
+  // CRLF, a BOM and reformatted JSON are the same content.
+  assert.equal(contentHash('a.yaml', '﻿x: 1\r\n'), contentHash('a.yaml', 'x: 1\n'));
+  assert.equal(contentHash('a.json', '{"b":1,"a":2}'), contentHash('a.json', '{\n    "a": 2,\n    "b": 1\n}\n'));
+  assert.notEqual(contentHash('a.yaml', 'x: 1\n'), contentHash('a.yaml', 'x: 2\n'));
+});
+
+test('files an earlier kit version installed are replaced; edited ones are still conflicts', () => {
+  const dir = tempDir();
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
+  const schemaRel = 'openspec-schemas/spec-relay-port/schema.yaml';
+  const schema = path.join(dir, 'openspec/schemas/spec-relay-port/schema.yaml');
+  const pkg = path.join(dir, 'openspec/spec-relay/tools/package.json');
+  const oldSchema = 'name: spec-relay-port\nversion: 0\n';
+  const oldPkg = JSON.stringify({ name: 'spec-relay-openspec', private: true, dependencies: { '@fission-ai/openspec': '2.0.0' } });
+  const restore = [asEarlier(schemaRel, oldSchema), asEarlier('templates/openspec-tools/package.json', oldPkg)];
+  try {
+    // Checked out on Windows: CRLF and reformatted JSON are still the earlier version.
+    fs.writeFileSync(schema, crlf(oldSchema));
+    fs.writeFileSync(pkg, JSON.stringify(JSON.parse(oldPkg), null, 4));
+    const opts = parseArgs(['--target', dir, ...BASE]);
+    assert.deepEqual(conflicts(opts), []);
+    assert.deepEqual(actions(opts, 'replace'), ['openspec/schemas/spec-relay-port/schema.yaml', 'openspec/spec-relay/tools/package.json']);
+    // A replaced package.json reinstalls OpenSpec even when the installed one runs.
+    assert.equal(plan(opts).install, true);
+    // A dry run changes nothing.
+    assert.equal(quiet(() => main(['--target', dir, ...BASE])), 0);
+    assert.equal(fs.readFileSync(schema, 'utf8'), crlf(oldSchema));
+    // One more edit and it is no kit version: a conflict, as before.
+    fs.appendFileSync(schema, '# local edit\n');
+    assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])), ['openspec/schemas/spec-relay-port/schema.yaml']);
+    fs.writeFileSync(schema, oldSchema);
+    assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
+    for (const [file, rel] of [[schema, schemaRel], [pkg, 'templates/openspec-tools/package.json']]) {
+      assert.equal(fs.readFileSync(file, 'utf8'), fs.readFileSync(path.join(KIT_ROOT, rel), 'utf8'), rel);
+    }
+    assert.deepEqual(actions(parseArgs(['--target', dir, ...BASE]), 'replace'), []);
+  } finally { restore.forEach((undo) => undo()); }
+});
+
+test('a schema file an earlier version had and this one has not is removed, with its emptied folder', () => {
+  const dir = tempDir();
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
+  const kitRel = 'openspec-schemas/spec-relay-port/old/notes.md';
+  const restore = asEarlier(kitRel, 'old notes\n');
+  try {
+    write(dir, 'openspec/schemas/spec-relay-port/old/notes.md', 'old notes\n');
+    write(dir, 'openspec/schemas/spec-relay-port/mine.md', 'not the kit\'s\n');
+    assert.deepEqual(actions(parseArgs(['--target', dir, ...BASE]), 'remove'), ['openspec/schemas/spec-relay-port/old/notes.md']);
+    assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
+    assert.ok(!fs.existsSync(path.join(dir, 'openspec/schemas/spec-relay-port/old')));
+    assert.ok(fs.existsSync(path.join(dir, 'openspec/schemas/spec-relay-port/schema.yaml')));
+    assert.ok(fs.existsSync(path.join(dir, 'openspec/schemas/spec-relay-port/mine.md')));
+  } finally { restore(); }
+});
+
+test('a failed install puts the replaced files back', { skip: process.platform === 'win32' && 'npm sits in node\'s folder' }, () => {
+  const dir = tempDir();
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
+  const pkg = path.join(dir, 'openspec/spec-relay/tools/package.json');
+  const schema = path.join(dir, 'openspec/schemas/spec-relay-survey/schema.yaml');
+  const oldPkg = '{"name":"spec-relay-openspec","dependencies":{"@fission-ai/openspec":"2.0.0"}}';
+  const restore = [asEarlier('templates/openspec-tools/package.json', oldPkg), asEarlier('openspec-schemas/spec-relay-survey/schema.yaml', 'old\n')];
+  const savedPath = process.env.PATH;
+  try {
+    fs.writeFileSync(pkg, oldPkg);
+    fs.writeFileSync(schema, 'old\n');
+    process.env.PATH = fakeNpm(OPENSPEC_VERSION, { ciFails: true });
+    assert.throws(() => quiet(() => main(['--target', dir, ...BASE, '--apply'])), /npm ci in openspec\/spec-relay\/tools failed[\s\S]*put back/);
+    assert.equal(fs.readFileSync(pkg, 'utf8'), oldPkg);
+    assert.equal(fs.readFileSync(schema, 'utf8'), 'old\n');
+  } finally { process.env.PATH = savedPath; restore.forEach((undo) => undo()); }
+});
+
+test('0.6.0 stubs under .github/ are removed only after openspec update moved the skills', () => {
+  const dir = tempDir();
+  quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply']));
+  const prompt = '.github/prompts/opsx-archive.prompt.md';
+  const skill = '.github/skills/openspec-sync-specs';
+  write(dir, prompt, crlf(legacyStubFor(path.join(dir, prompt))));
+  write(dir, `${skill}/SKILL.md`, legacyStubFor(path.join(dir, skill, 'SKILL.md')));
+  write(dir, '.github/prompts/opsx-apply.prompt.md', `${legacyStubFor(path.join(dir, '.github/prompts/opsx-apply.prompt.md'))}My own note\n`);
+  write(dir, '.github/prompts/opsx-propose.prompt.md', 'Run openspec instructions propose\n');
+  write(dir, '.github/copilot-instructions.md', 'mine\n');
+  // Before update: deleting them would make OpenSpec narrow the global profile.
+  const opts = parseArgs(['--target', dir, ...BASE, '--skip-init']);
+  assert.deepEqual(actions(opts, 'remove'), []);
+  assert.equal(actions(opts, 'leftover').length, 4);
+  // After update the skills are in .agents/skills/: the exact stubs go, the rest stay.
+  write(dir, '.agents/skills/openspec-propose/SKILL.md', `---\nname: openspec-propose\n---\n${STUB_MARKER}\n`);
+  assert.deepEqual(actions(opts, 'remove'), [prompt, skill]);
+  assert.deepEqual(actions(opts, 'leftover'), ['.github/prompts/opsx-apply.prompt.md', '.github/prompts/opsx-propose.prompt.md']);
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 2);
+  assert.ok(!fs.existsSync(path.join(dir, prompt)));
+  assert.ok(!fs.existsSync(path.join(dir, '.github/skills')));
+  assert.ok(fs.existsSync(path.join(dir, '.github/copilot-instructions.md')));
+  fs.rmSync(path.join(dir, '.github/prompts'), { recursive: true });
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
+});
+
