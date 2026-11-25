@@ -218,8 +218,12 @@ For every link decide:
   words for the same things (the glossary's). Where they differ only
   because the code itself does different things in the two places (two
   pages round differently today), that is consistent too: say so with both
-  lines. Name in the evidence the requirements of both sides you compared
-  (`"Issue an invoice" vs "Check the session"`).
+  lines. Name in the evidence, in double quotes and exactly as the specs
+  title them, the requirements of both sides you compared (`"Issue an
+  invoice" vs "Check the session"`); for a side that states nothing about
+  the topic and needs nothing stated (it only reads a column the other
+  defines), write `<capability>: nothing`. The gate counts a `consistent`
+  row only with both.
 - `conflict`: they state different things about the same behavior or data.
   Give both requirements and the code line that shows which one is right.
 - `duplicate`: both specify the same behavior of the same code, which only
@@ -230,7 +234,9 @@ For every link decide:
 - `unclear`: the specs and the code do not settle it. Say what would.
 Be strict: a caller that expects a value, an error or an order the callee's
 spec never states is a `conflict` (or `unclear` when the code does not
-settle it), not `consistent`.
+settle it), not `consistent`. So is an entry point the caller's
+Dependencies row names that the callee's source map does not list under
+Entry points: say which of the two the code supports.
 
 Write your verdict file as one Markdown table, `| Pair | Topic | Verdict |
 Evidence |`, one row per link you were given, with the pair and the topic

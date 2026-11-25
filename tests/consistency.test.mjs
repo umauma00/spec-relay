@@ -2,13 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { checkPortReady, guardFiles } from '../scripts/gate.mjs';
+import { checkPortReady, checkPortDone, guardFiles } from '../scripts/gate.mjs';
 import { checkFinishReady } from '../scripts/finish.mjs';
 import { protectedPath } from '../scripts/hook.mjs';
 import { merge } from '../scripts/merge.mjs';
 import {
   specCode, dependencies, databaseObjects, objectKey, links, judge, items, checkConsistency, checkDependencies,
-  ledgerRows, parseVerdict, pairKey, entryListed, dataOwners, LEDGER, main,
+  ledgerRows, parseVerdict, pairKey, entryListed, dataOwners, checkExtractLinks, LEDGER, main,
 } from '../scripts/consistency.mjs';
 import { entryPoints } from '../scripts/walkthrough.mjs';
 import { tempDir, write, crlf, quiet } from './helpers.mjs';
@@ -142,52 +142,89 @@ test('merge writes the ledger: the pair code is required and must be the code of
 
 test('the extract gate: a row per link, current, with a verdict that holds', () => {
   const dir = project();
+  write(dir, `${X}/questions.md`, '# Questions\n\n- Q1. Words\n  - Recommended: keep\n  - Why: x\n');
+  write(dir, `${X}/review.md`, '- [ ] Q1 Words: decision: \n');
   const problems = () => { const p = []; checkConsistency(dir, scope, p, { change: 'extract-billing-invoice', asked: new Set(['Q1']) }); return p; };
   assert.deepEqual(problems().map((p) => p.slice(0, 60)), [`no row in ${LEDGER} for billing/invoice <-> platform/auth (uses)`.slice(0, 60), `no row in ${LEDGER} for billing/invoice <-> platform/auth (data users)`.slice(0, 60)]);
   const [uses, data] = links(dir, scope).map((l) => l.code);
   part(dir, [
-    `| billing/invoice <-> platform/auth | uses | consistent <!-- pair ${uses} --> | Issue an invoice vs Check the session: both send a user without a session away |`,
-    `| billing/invoice <-> platform/auth | data users | consistent <!-- pair ${data} --> | looks fine |`,
+    `| billing/invoice <-> platform/auth | uses | consistent <!-- pair ${uses} --> | "Issue an invoice" vs "Check the session": both send a user without a session away |`,
+    `| billing/invoice <-> platform/auth | data users | consistent <!-- pair ${data} --> | "Issue an invoice" only reads users; looks fine |`,
   ]);
   assert.equal(doMerge(dir).ok, true);
-  assert.deepEqual(problems(), ['the row for billing/invoice <-> platform/auth (data users) is consistent, but its evidence names no requirement of billing/invoice or platform/auth; have the checker name the requirements it compared']);
+  assert.deepEqual(problems(), ['the row for billing/invoice <-> platform/auth (data users) is consistent, but its evidence does not name in quotes a requirement of platform/auth (or say "<capability>: nothing" for a side that states nothing about it); have the checker name the requirements it compared']);
+  part(dir, [`| billing/invoice <-> platform/auth | data users | consistent <!-- pair ${data} --> | "Issue an invoice" reads users; platform/auth: nothing about invoices |`]);
+  assert.equal(doMerge(dir).ok, true);
+  assert.deepEqual(problems(), []);
   part(dir, [`| billing/invoice <-> platform/auth | data users | term <!-- pair ${data} --> | "Issue an invoice" says customer for what "Check the session" calls user |`]);
   doMerge(dir);
   assert.match(problems().join('\n'), /is term: the specs name one thing with two words/);
   // The orchestrator moves it to a question of this change, keeping the code.
   const ledger = path.join(dir, LEDGER);
-  fs.writeFileSync(ledger, fs.readFileSync(ledger, 'utf8').replace(/\| term (<!-- pair [0-9a-f ]+ -->)/, '| question extract-billing-invoice Q1 $1'));
+  const edit = (from, to) => fs.writeFileSync(ledger, fs.readFileSync(ledger, 'utf8').replace(from, to));
+  edit(/\| term (<!-- pair [0-9a-f ]+ -->)/, '| question extract-billing-invoice Q1 $1');
   assert.deepEqual(problems(), []);
-  // A question of another change counts only when that change is archived and decided it.
-  fs.writeFileSync(ledger, fs.readFileSync(ledger, 'utf8').replace('question extract-billing-invoice Q1', 'question extract-platform-auth Q3'));
-  assert.match(problems().join('\n'), /Q3 of extract-platform-auth, which is not a decided question/);
-  write(dir, 'openspec/changes/archive/2026-11-02-extract-platform-auth/questions.md', '# Questions\n\n- Q3. Words\n  - Recommended: keep\n  - Why: x\n');
-  write(dir, 'openspec/changes/archive/2026-11-02-extract-platform-auth/review.md', '- [x] Q3 Words: decision: keep both words\n');
-  assert.deepEqual(problems(), []);
+  assert.equal(items(dir, { change: 'extract-billing-invoice' }).todo, 0, 'items counts the asked question like the gate');
+  // A checker's part cannot replace the person's decision on the same specs.
+  part(dir, [`| billing/invoice <-> platform/auth | data users | consistent <!-- pair ${data} --> | "Issue an invoice"; "Check the session" |`]);
+  assert.match(doMerge(dir).problems.join('\n'), /the person's decision stays/);
+  fs.rmSync(path.join(dir, 'openspec/spec-relay/work'), { recursive: true });
+  // A question of another change does not count, archived and decided or not.
+  edit('question extract-billing-invoice Q1', 'question extract-platform-auth Q3');
+  assert.match(problems().join('\n'), /still points to Q3 of extract-platform-auth: a question holds only during that change's review/);
   // A spec that changes after the check makes its rows stale.
   write(dir, `${X}/specs/billing/invoice/spec.md`, BILL_SPEC.replace('signed-in user', 'signed-in customer'));
   assert.match(problems().join('\n'), /checked when the spec of billing\/invoice was different/);
 });
 
-test('the pair code survives the archive of the extract: port-ready and finish read the baselines', () => {
+test('the pair code survives the archive of the extract: port-ready, port-done and finish read the baselines', () => {
   const dir = project();
   const [uses, data] = links(dir, scope).map((l) => l.code);
   part(dir, [
-    `| billing/invoice <-> platform/auth | uses | consistent <!-- pair ${uses} --> | Issue an invoice needs what Check the session gives |`,
-    `| billing/invoice <-> platform/auth | data users | consistent <!-- pair ${data} --> | Check the session reads users; Issue an invoice only reads them |`,
+    `| billing/invoice <-> platform/auth | uses | consistent <!-- pair ${uses} --> | "Issue an invoice" needs what "Check the session" gives |`,
+    `| billing/invoice <-> platform/auth | data users | question extract-billing-invoice Q1 <!-- pair ${data} --> | x |`,
+  ]);
+  assert.match(doMerge(dir).problems.join('\n'), /a checker writes no "question" verdict/);
+  part(dir, [
+    `| billing/invoice <-> platform/auth | uses | consistent <!-- pair ${uses} --> | "Issue an invoice" needs what "Check the session" gives |`,
+    `| billing/invoice <-> platform/auth | data users | unclear <!-- pair ${data} --> | "Check the session" writes users; "Issue an invoice" reads them, the order is unclear |`,
   ]);
   assert.equal(doMerge(dir).ok, true);
   // What OpenSpec does on archive: the delta becomes the baseline, the change moves.
   write(dir, 'openspec/specs/billing/invoice/spec.md', BILL_SPEC.replace('## ADDED Requirements', '## Requirements').replace(/\n\n### /g, '\n\n\n### '));
   fs.renameSync(path.join(dir, X), path.join(dir, 'openspec/changes/archive/2026-11-03-extract-billing-invoice'));
-  assert.deepEqual(judge(dir, links(dir, { capability: 'billing/invoice' })).map((l) => l.status), ['ok', 'ok']);
+  assert.deepEqual(judge(dir, links(dir, { capability: 'billing/invoice' })).map((l) => l.status), ['ok', 'open']);
+  assert.match(checkPortReady(dir, 'billing/invoice').problems.join('\n'), /data users\) is unclear: .* accepted D<n>/);
+  // The person keeps it as it is: the decision goes to the plan, the row cites it.
+  const plan = (id = 'D1', topic = 'data users') => write(dir, 'openspec/spec-relay/plan.md', `# Plan\n\n## Capabilities\n\n### platform\n1. \`platform/auth\`\n   - \`src/common/\`\n\n### billing\n1. \`billing/invoice\`\n   - \`src/billing/\`\n\n## Consistency decisions\n| Id | Pair | Topic | Decision |\n|---|---|---|---|\n| ${id} | platform/auth <-> billing/invoice | ${topic} | keep: the old code reads users after the session check |\n`);
+  const ledger = path.join(dir, LEDGER);
+  fs.writeFileSync(ledger, fs.readFileSync(ledger, 'utf8').replace(/\| unclear (<!-- pair [0-9a-f ]+ -->)/, '| accepted D1 $1'));
+  plan('D1', 'uses');
+  assert.match(checkPortReady(dir, 'billing/invoice').problems.join('\n'), /has no D1 with this pair, this topic and a decision/);
+  plan();
   const ready = checkPortReady(dir, 'billing/invoice').problems;
   assert.ok(!ready.some((p) => /consistency|row for/.test(p)), ready.join('\n'));
-  // An amendment of one side makes the pair stale for both ports and for the finish step.
+  // An amendment of one side makes the pair stale for both ports, port-done and the finish step.
   write(dir, 'openspec/specs/platform/auth/spec.md', AUTH_SPEC.replace('/login.php', '/signin.php'));
   assert.match(checkPortReady(dir, 'billing/invoice').problems.join('\n'), /checked when the spec of platform\/auth was different/);
   assert.match(checkPortReady(dir, 'platform/auth').problems.join('\n'), /checked when the spec of platform\/auth was different/);
   assert.match(checkFinishReady(dir).problems.join('\n'), /checked when the spec of platform\/auth was different/);
+  write(dir, 'openspec/changes/port-billing-invoice/tasks.md', '- [x] 1 done\n');
+  write(dir, 'openspec/changes/port-billing-invoice/proposal.md', `## Baseline\n- \`billing/invoice\` sha256:${'0'.repeat(64)}\n`);
+  assert.match(checkPortDone(dir, 'port-billing-invoice').problems.join('\n'), /checked when the spec of platform\/auth was different/);
+});
+
+test('an extract never waits for another extract\'s draft, and a rerun is compared after its archive', () => {
+  const dir = project();
+  // platform/auth is analyzed again at the same time: billing compares with its baseline, not its draft.
+  write(dir, 'openspec/changes/extract-platform-auth-v2/.openspec.yaml', 'schema: spec-relay-extract\n');
+  write(dir, 'openspec/changes/extract-platform-auth-v2/specs/platform/auth/spec.md', AUTH_SPEC.replace('/login.php', '/other.php'));
+  assert.equal(links(dir, scope)[0].code.split(' ')[1], specCode(AUTH_SPEC));
+  // The rerun itself has no links in its gate: its delta is not the spec the others meet.
+  const p = [];
+  checkExtractLinks(dir, path.join(dir, 'openspec/changes/extract-platform-auth-v2'), 'platform/auth', p, new Set());
+  assert.deepEqual(p, []);
+  assert.match(items(dir, { change: 'extract-platform-auth-v2' }).note, /a rerun is compared after its archive/);
 });
 
 test('items lists every link with its code, status and the files of both sides', () => {
@@ -196,27 +233,33 @@ test('items lists every link with its code, status and the files of both sides',
   assert.equal(out.ok, false);
   assert.equal(out.todo, 2);
   assert.equal(out.glossary, 'openspec/changes/archive/2026-11-01-survey/glossary.md');
-  assert.deepEqual(out.links[0].sides.map((s) => [s.capability, s.specs, s.sourceMap, s.trace]), [
-    ['billing/invoice', [`${X}/specs/billing/invoice/spec.md`], `${X}/source-map.md`, null],
-    ['platform/auth', ['openspec/specs/platform/auth/spec.md'], 'openspec/changes/archive/2026-11-02-extract-platform-auth/source-map.md', 'openspec/changes/archive/2026-11-02-extract-platform-auth/trace.md'],
+  assert.deepEqual(out.links[0].sides.map((s) => [s.capability, s.specs, s.sourceMaps, s.trace]), [
+    ['billing/invoice', [`${X}/specs/billing/invoice/spec.md`], [`${X}/source-map.md`], null],
+    ['platform/auth', ['openspec/specs/platform/auth/spec.md'], ['openspec/changes/archive/2026-11-02-extract-platform-auth/source-map.md'], 'openspec/changes/archive/2026-11-02-extract-platform-auth/trace.md'],
   ]);
   assert.match(out.links[0].code, /^<!-- pair [0-9a-f]{8} [0-9a-f]{8} -->$/);
   assert.equal(quiet(() => main(['items', '--root', dir])), 2);
   assert.equal(quiet(() => main(['check', '--all', '--root', dir])), 0, 'no link between two baselines yet');
+  assert.equal(quiet(() => main(['check', '--capability', 'platform\\auth', '--root', dir])), 0);
+  assert.equal(quiet(() => main(['check', '--change', 'extract-billing-invoice', '--root', dir])), 1);
 });
 
-test('dependencies: what the walkthrough leaves to another capability, entry points on both sides', () => {
+test('dependencies: what the walkthrough leaves to another capability, and the entry points it uses', () => {
   const dir = project({ billMap: BILL_MAP.replace('| `platform/auth` | the session check | `src/common/auth.php:check` |\n', '') });
   write(dir, `${X}/walkthrough.md`, '| Entry point | Behavior | Verdict | Evidence |\n|---|---|---|---|\n| `src/billing/invoice.php` | sign-in | other capability platform/auth | src/common/auth.php:1 |\n');
   const problems = (d = dir) => { const p = []; checkDependencies(d, path.join(d, X), 'billing/invoice', p); return p; };
   assert.match(problems().join('\n'), /walkthrough.md leaves behavior to platform\/auth .* does not name it/);
   const wrong = project({ billMap: BILL_MAP.replace('auth.php:check', 'auth.php:login') });
-  assert.match(problems(wrong).join('\n'), /uses src\/common\/auth.php:login of platform\/auth, which platform\/auth's source map does not list .* amend platform\/auth/);
+  assert.match(problems(wrong).join('\n'), /uses src\/common\/auth.php:login of platform\/auth, which platform\/auth's archived source map does not list .* amend platform\/auth/);
   assert.deepEqual(problems(project()), []);
-  // Another capability that uses an entry point this source map does not list.
-  const used = project({ billMap: BILL_MAP.replace('- `src/billing/invoice.php` - the page', '- `src/billing/invoice.php:page` - the page') });
-  write(used, 'openspec/changes/archive/2026-11-02-extract-platform-auth/source-map.md', AUTH_MAP.replace('## Dependencies\n- None', '## Dependencies\n| Depends on | What | Entry point |\n|---|---|---|\n| billing/invoice | totals | `src/billing/invoice.php:total` |'));
-  assert.match(problems(used).join('\n'), /platform\/auth's source map .* uses src\/billing\/invoice.php:total of billing\/invoice, which this source map does not list/);
+  // Only a column headed Entry point gives entry points, and only words that name code.
+  const other = project({ billMap: BILL_MAP.replace('| Depends on | What it uses | Entry point |', '| Depends on | Kind | Where used |').replace('`src/common/auth.php:check`', 'session check, role lookup') });
+  assert.deepEqual(problems(other), []);
+  const noted = project({ billMap: BILL_MAP.replace('`src/common/auth.php:check`', '`src/common/auth.php:check` (returns `false` when signed out)') });
+  assert.deepEqual(problems(noted), []);
+  // A symbol in a file the other side lists as a whole is that entry point.
+  const whole = project({ billMap: BILL_MAP, authMap: AUTH_MAP.replace('`src/common/auth.php:check` - every page calls it', '`src/common/auth.php` - included by every page') });
+  assert.deepEqual(problems(whole), []);
 });
 
 test('dependencies: a table written by a context the context map does not let write it', () => {
@@ -241,4 +284,48 @@ test('only the orchestrator writes the ledger: the wave guard and the hook', () 
   assert.ok(Object.keys(guardFiles(dir)).includes(LEDGER));
   assert.match(protectedPath(dir, path.join(dir, LEDGER), { subagent: true }) ?? '', /consistency ledger/);
   assert.equal(protectedPath(dir, path.join(dir, LEDGER), { subagent: false }), null);
+});
+
+test('reading the Use cell, Owned data and the owner cell', () => {
+  const use = (cell) => databaseObjects(`## Database\n| Table or object | Kind | Use | Definition |\n|---|---|---|---|\n| T | table | ${cell} | x |\n`).get('t');
+  for (const cell of ['請求書の一覧を読む', '登録済みの行を読む', 'read (filters on updated_at)', 'read; soft-delete flag checked', 'reads']) assert.equal(use(cell).writes, false, cell);
+  for (const cell of ['write', 'read / write', 'inserts (one row per invoice)', '書き込む', '更新する', 'update']) assert.equal(use(cell).writes, true, cell);
+  assert.equal(use('calls').effect, true);
+  assert.equal(use('fires on write').effect, true);
+  assert.equal(objectKey('Orders, OrderLines'), 'orders');
+  const map = (owned) => `# Context map\n\n### Context: platform\n${owned}\n\n### Context: billing\n- **Owned data:** \`Invoices\`\n\n## Shared data\n| Data | Owner | Also written by | Read by |\n|---|---|---|---|\n| Logs | none | billing | - |\n`;
+  const owners = (owned) => dataOwners(project({ contextMap: map(owned) }));
+  assert.deepEqual([...owners('- **Owned data**: the audit log of Invoices changes')('invoices').owners], ['billing'], 'prose names no table');
+  assert.deepEqual([...owners('- **Owned data**:\n  - `Users`\n  - `Roles`')('roles').owners], ['platform'], 'a sub-list continues the label');
+  assert.deepEqual([...owners('- **Owned data**: Users, Roles tables')('roles').owners], ['platform']);
+  assert.deepEqual([...owners('- **Owned data**: Users')('logs').owners], [], '"none" is no context');
+});
+
+test('a table everybody writes links each writer to its owner; a shared folder is one link', () => {
+  const dir = project({ authMap: AUTH_MAP.replace('| dbo.Users | table | read / write | - |', '| AuditLog | table | write | - |') });
+  write(dir, 'openspec/changes/archive/2026-11-01-survey/context-map.md', CONTEXT_MAP.replace('`dbo.Users`, sessions', '`dbo.Users`, `AuditLog`'));
+  write(dir, `${X}/source-map.md`, BILL_MAP.replace('| Users | table | read | - |', '| AuditLog | table | write | - |'));
+  write(dir, 'src/sales/order.php', '<?php\n');
+  write(dir, 'openspec/spec-relay/plan.md', '# Plan\n\n## Capabilities\n\n### platform\n1. `platform/auth`\n   - `src/common/`\n\n### billing\n1. `billing/invoice`\n   - `src/billing/`\n   - `src/common/`\n\n### sales\n1. `sales/order`\n   - `src/sales/`\n');
+  write(dir, 'openspec/specs/sales/order/spec.md', AUTH_SPEC.replace('Check the session', 'Take an order'));
+  write(dir, 'openspec/changes/archive/2026-11-02-extract-sales-order/source-map.md', '# Source map\n\n## Database\n| Table or object | Kind | Use | Definition |\n|---|---|---|---|\n| AuditLog | table | write | - |\n');
+  assert.deepEqual(links(dir, { all: true }).map((l) => `${l.pair} ${l.topic}`), ['platform/auth <-> sales/order data auditlog'], 'between baselines only');
+  const topics = links(dir, scope).map((l) => `${l.pair} ${l.topic}`);
+  assert.ok(topics.includes('billing/invoice <-> platform/auth data auditlog'));
+  assert.ok(!topics.includes('billing/invoice <-> sales/order data auditlog'), 'two writers of the owner\'s table are not linked to each other');
+  assert.deepEqual(topics.filter((t) => t.includes(' file ')), ['billing/invoice <-> platform/auth file src/common/'], 'one link for the folder both list, not one per file');
+});
+
+test('the code ignores sections OpenSpec does not carry; merge refuses unknown topics and verdicts', () => {
+  assert.equal(specCode(`${BILL_SPEC}\n## Notes\n\nTo check with the team.\n`), specCode(BILL_SPEC));
+  const dir = project();
+  const code = codeOf(dir);
+  part(dir, [`| billing/invoice <-> platform/auth | anything at all | consistent <!-- pair ${code} --> | "Issue an invoice"; "Check the session" |`]);
+  assert.match(doMerge(dir).problems.join('\n'), /the topic of .* must be one consistency.mjs items gives/);
+  part(dir, [`| billing/invoice <-> platform/auth | uses | banana <!-- pair ${code} --> | x |`]);
+  assert.match(doMerge(dir).problems.join('\n'), /must be consistent, conflict, duplicate, term or unclear/);
+  part(dir, [`| billing/invoice <-> platform/auth | uses | consistent <!-- pair ${code} --> | "Issue an invoice"; "Check the session" |`]);
+  assert.equal(doMerge(dir).ok, true);
+  const text = fs.readFileSync(path.join(dir, LEDGER), 'utf8');
+  assert.equal(text.replace(/<!--[\s\S]*?-->/g, '').includes('<change>'), false, 'the template comment is one comment');
 });

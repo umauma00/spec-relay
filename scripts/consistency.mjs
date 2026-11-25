@@ -8,13 +8,12 @@
 // split between two capabilities with a part described twice or not at all.
 //
 // Two kinds of checks:
-// - Mechanical (checkDependencies, in the extract gate): the source map's
-//   Dependencies table names every capability the walkthrough defers behavior
-//   to; an entry point it says it uses is one the other capability's source map
-//   lists (and the other way round: an entry point another capability uses is
-//   listed here); a table this capability writes belongs to its context in the
-//   survey's context map, or the context map (or the plan's "## Shared data")
-//   lists the context as also writing it.
+// - Mechanical (checkDependencies, in the extract and amend gates): the source
+//   map's Dependencies table names every capability the walkthrough defers
+//   behavior to; an entry point it says it uses is one the other capability's
+//   archived source map lists; a table this capability writes belongs to its
+//   context in the survey's context map, or the context map (or the plan's
+//   "## Shared data") lists the context as also writing it.
 // - The pair check (checkConsistency): for every pair of capabilities with a
 //   spec that are linked (one uses the other, both use one database object and
 //   one of them writes it, or the plan gives both one file), a checker reads
@@ -23,7 +22,12 @@
 //   counts for the port of either side and for the finish step. Each row holds
 //   a code of both specs (`<!-- pair <a> <b> -->`): when either spec changes
 //   (a review fix, an amendment), the row goes stale and the pair is checked
-//   again.
+//   again. The extract gate compares the spec under review with the baselines
+//   only, never with another extract's draft; port-ready (and port-done)
+//   compares a baseline with the other baselines, the finish step all of them.
+//   What the person decides about a row outside an extract's review (keep a
+//   difference as it is) is recorded in the plan's "## Consistency decisions"
+//   table and cited as `accepted D<n>`.
 //
 //   node consistency.mjs items --change extract-<capability>   the links of a capability under analysis
 //   node consistency.mjs items --capability <capability>        the links of a capability about to be ported
@@ -37,7 +41,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readIf, headedRows, section, plain, archivedChange, baseName, checkboxes, questionIds, requirementNames, PLAN, PLACEHOLDER } from './gate.mjs';
-import { assignment, ownersOf, keptFiles, inventoryRows, repoPath, extractChange } from './coverage.mjs';
+import { assignment, ownersOf, keptFiles, inventoryRows, covers } from './coverage.mjs';
 import { entryPoints, entryKey, walkthroughRows } from './walkthrough.mjs';
 
 export const LEDGER = 'openspec/spec-relay/consistency.md';
@@ -46,15 +50,15 @@ export const LEDGER_TEMPLATE = [
   '# Consistency between capabilities',
   '',
   '<!-- One row per link between two capabilities with a spec. merge.mjs writes the rows from the',
-  '     checkers\' part files and the code of both specs (<!-- pair ... -->); only the orchestrator edits a',
-  '     verdict (to question <change> Q<n>), keeping that code. See the spec-relay skill. -->',
+  '     checkers\' part files with the code of both specs ("pair" comment in the Verdict cell); only the',
+  '     orchestrator edits a verdict (to question or accepted), keeping that code. See the spec-relay skill. -->',
   '',
   '| Pair | Topic | Verdict | Evidence |',
   '|---|---|---|---|',
   '',
 ].join('\n');
 export const PAIR_STAMP = /<!--\s*pair\s+([0-9a-f]{8})\s+([0-9a-f]{8})\s*-->/i;
-export const VERDICTS = 'consistent, conflict, duplicate, term, unclear, or (written by the orchestrator) question <change> Q<n>';
+export const VERDICTS = 'consistent, conflict, duplicate, term, unclear, or (written by the orchestrator) question <change> Q<n> or accepted D<n>';
 
 const stripComments = (text) => String(text ?? '').replace(/<!--[\s\S]*?-->/g, '');
 const REQUIREMENT = /^###\s*Requirement:\s*(.+?)\s*$/i;
@@ -78,18 +82,30 @@ function walkMd(dir) {
 
 // ---------------------------------------------------------------- spec codes
 
-// The code of a spec: the requirements as written, from the first
-// "### Requirement:" on, without blank lines, trailing spaces, comments and the
-// "## ADDED Requirements" / "## Requirements" headings. The delta of an extract
-// change and the baseline OpenSpec writes from it when the change is archived
-// give the same code (OpenSpec 2.1.1 keeps the requirement blocks and drops the
-// blank lines between them), so a pair checked during the analysis stays checked
-// after the archive. Null when the text holds no requirement.
+// The code of a spec: the requirement sections as written ("## ADDED
+// Requirements" in a delta, "## Requirements" in a baseline), from the first
+// "### Requirement:" on, without the headings, blank lines, trailing spaces and
+// comments. The delta of a first extract and the baseline OpenSpec writes from
+// it when the change is archived give the same code (OpenSpec 2.1.1 keeps the
+// requirement blocks, drops the blank lines between them and does not carry
+// other "## " sections of a delta), so a pair checked during the analysis stays
+// checked after the archive. Null when the text holds no requirement.
 export function specCode(text) {
-  const lines = stripComments(text).split(/\r?\n/);
-  const start = lines.findIndex((line) => REQUIREMENT.test(line));
-  if (start < 0) return null;
-  const kept = lines.slice(start).map((line) => line.replace(/\s+$/, '')).filter((line) => line.trim() !== '' && !/^##\s/.test(line));
+  const kept = [];
+  let inRequirements = false;
+  let started = false;
+  let fenced = false;
+  for (const raw of stripComments(text).split(/\r?\n/)) {
+    const line = raw.replace(/\s+$/, '');
+    const h2 = !fenced && line.match(/^##\s+(.*)$/);
+    if (FENCE.test(line)) fenced = !fenced;
+    if (h2) { inRequirements = /requirements/i.test(h2[1]); continue; }
+    if (!inRequirements) continue;
+    if (!started && !REQUIREMENT.test(line)) continue;
+    started = true;
+    if (line.trim() !== '') kept.push(line);
+  }
+  if (!started) return null;
   return crypto.createHash('sha256').update(kept.join('\n')).digest('hex').slice(0, 8);
 }
 
@@ -100,43 +116,47 @@ const activeChange = (root, name) => {
   found.sort((a, b) => version(a) - version(b));
   return found.length ? path.join(changesDir(root), found.at(-1)) : null;
 };
+const relOf = (root, file) => path.relative(root, file).split(path.sep).join('/');
+const baselineFile = (root, capability) => path.join(root, 'openspec/specs', ...capability.split('/'), 'spec.md');
+export const hasBaseline = (root, capability) => specCode(readIf(baselineFile(root, capability), []) ?? '') !== null;
 
-// What the pair check reads of a capability. `live` (the extract gate): the
-// spec and source map of its active extract change when it has one, else its
-// baseline and archived extract. Otherwise (port-ready, finish) only the
-// baseline and the archived extract. Null when there is no spec with a
+// What the pair check reads of a capability. `live` is only for the capability
+// of an extract gate: the spec of its active extract change (a first extract,
+// with no baseline yet). Otherwise its baseline. A spec still under analysis is
+// never a side for the others, so one extract never waits for another one's
+// draft: that pair is checked by whichever extract gate comes after the other
+// is archived, else by port-ready. Null when there is no spec with a
 // requirement yet.
-export function sideOf(root, capability, live) {
+export function sideOf(root, capability, live = false) {
   const extract = `extract-${keyOf(capability)}`;
-  const active = live ? activeChange(root, extract) : null;
-  const relOf = (file) => path.relative(root, file).split(path.sep).join('/');
-  if (active) {
+  if (live) {
+    const active = activeChange(root, extract);
+    if (!active) return null;
     const files = walkMd(path.join(active, 'specs'));
     const text = files.map((f) => readIf(f, []) ?? '').join('\n');
     const code = specCode(text);
-    if (code) return { capability, code, text, specs: files.map(relOf), dir: active, change: path.basename(active), active: true };
+    return code ? { capability, code, text, specs: files.map((f) => relOf(root, f)), maps: sourceMapDirs(root, capability, true), trace: path.join(active, 'trace.md') } : null;
   }
-  const baseline = path.join(root, 'openspec/specs', ...capability.split('/'), 'spec.md');
-  const text = readIf(baseline, []);
+  const text = readIf(baselineFile(root, capability), []);
   const code = specCode(text ?? '');
   if (!code) return null;
   const archived = archivedChange(root, extract);
-  return { capability, code, text, specs: [relOf(baseline)], dir: archived, change: archived ? path.basename(archived).replace(/^\d{4}-\d{2}-\d{2}-/, '') : null, active: false };
+  return { capability, code, text, specs: [relOf(root, baselineFile(root, capability))], maps: sourceMapDirs(root, capability, false), trace: archived ? path.join(archived, 'trace.md') : null };
 }
 
-// The folders whose source-map.md describes a capability: its newest extract
-// change (active or archived; only the archived one when not live) and its
-// amendments that carry a source map.
-function sourceMapDirs(root, capability, live) {
+// The folders whose source-map.md describes a capability: its extract change
+// (the active one when live, else the archived one) and its archived
+// amendments (and, when live, its active ones) that carry a source map.
+export function sourceMapDirs(root, capability, live = false) {
   const extract = `extract-${keyOf(capability)}`;
-  const first = live ? extractChange(root, capability) : archivedChange(root, extract);
+  const first = (live && activeChange(root, extract)) || archivedChange(root, extract);
   const dirs = first && fs.existsSync(path.join(first, 'source-map.md')) ? [first] : [];
   const amend = `amend-${keyOf(capability)}`;
   const add = (base, name) => { if (fs.existsSync(path.join(base, name, 'source-map.md'))) dirs.push(path.join(base, name)); };
-  try { for (const e of fs.readdirSync(changesDir(root), { withFileTypes: true })) if (live && e.isDirectory() && e.name !== 'archive' && baseName(e.name) === amend) add(changesDir(root), e.name); } catch { /* none */ }
+  if (live) try { for (const e of fs.readdirSync(changesDir(root), { withFileTypes: true })) if (e.isDirectory() && e.name !== 'archive' && baseName(e.name) === amend) add(changesDir(root), e.name); } catch { /* none */ }
   try {
     const archive = path.join(changesDir(root), 'archive');
-    for (const e of fs.readdirSync(archive, { withFileTypes: true })) {
+    for (const e of fs.readdirSync(archive, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       const m = e.name.match(/^\d{4}-\d{2}-\d{2}-(.+)$/);
       if (e.isDirectory() && m && baseName(m[1]) === amend) add(archive, e.name);
     }
@@ -148,17 +168,20 @@ function sourceMapDirs(root, capability, live) {
 
 const DEPENDENCIES = /^(dependenc(?:y|ies)|依存)/i;
 const DATABASE = /^(database|データベース|db\b)/i;
-const ENTRY_COLUMN = /^(entry|入口|エントリ|where|呼び先|使う入口)/i;
+const ENTRY_COLUMN = /^(entry|入口|エントリ)/i;
 
 // A capability path the way the plan writes it: lowercase, no backticks or final "/".
-const capName = (token) => plain(String(token ?? '')).replace(/[:：,、.。;；]+$/, '').replace(/\/+$/, '').trim().toLowerCase();
+const capName = (token) => plain(String(token ?? '')).replace(/\\/g, '/').replace(/[:：,、.。;；]+$/, '').replace(/\/+$/, '').trim().toLowerCase();
+// A token that names a place in the code: a path, or path:symbol.
+const placeLike = (t) => /[/\\]|\.[A-Za-z0-9]+(?::|$)/.test(t) && !/\s/.test(t.trim());
 
 // The Dependencies of a source map: [{ capability, entries: [id], line }] for the
 // rows and items that name a capability of the plan (other dependencies, such
 // as libraries and services, are not read). A table's first column names what is
-// used; its Entry point column (else its third column) the entry points of that
-// capability, in backticks or separated by commas. A list item names a
-// capability in backticks or as its first word; it gives no entry points.
+// used; its Entry point column (only a column with that heading) the entry
+// points of that capability: each backticked path or path:symbol, else each
+// such word separated by commas. A list item names a capability in backticks or
+// as its first word; it gives no entry points.
 export function dependencies(text, capabilities) {
   const body = section(text ?? '', DEPENDENCIES);
   if (body === null) return [];
@@ -168,14 +191,13 @@ export function dependencies(text, capabilities) {
     const quoted = [...String(cell).matchAll(/`([^`]+)`/g)].map((m) => m[1]);
     return quoted.length ? quoted : String(cell).split(/[\s,、;；]+/);
   };
-  const rows = headedRows(body);
-  for (const { header, cells } of rows) {
+  for (const { header, cells } of headedRows(body)) {
     const caps = tokensOf(cells[0] ?? '').map(capName).filter((t) => known.has(t));
     if (!caps.length) continue;
-    let at = header.findIndex((h, i) => i > 0 && ENTRY_COLUMN.test(h));
-    if (at < 0) at = 2;
-    const cell = stripComments(cells[at] ?? '').trim();
-    const entries = NOTHING.test(cell) || PLACEHOLDER.test(cell) ? [] : (/`/.test(cell) ? [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim()) : cell.split(/\s*(?:<br\s*\/?>|[,、;；])\s*/i)).filter((e) => e && !PLACEHOLDER.test(e));
+    const at = header.findIndex((h, i) => i > 0 && ENTRY_COLUMN.test(h));
+    const cell = at < 0 ? '' : stripComments(cells[at] ?? '').trim();
+    const quoted = [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim());
+    const entries = (quoted.length ? quoted : cell.split(/\s*(?:<br\s*\/?>|[,、;；])\s*/i).map((e) => e.trim())).filter((e) => e && placeLike(e));
     for (const capability of new Set(caps)) out.push({ capability, entries, line: cells.join(' | ') });
   }
   let fenced = false;
@@ -192,12 +214,14 @@ export function dependencies(text, capabilities) {
 }
 
 // A database object as the specs and the context map name it: no quotes,
-// brackets or backticks, only its last name (dbo.Orders, [dbo].[Orders] and
-// Orders are one), lowercase.
-export const objectKey = (name) => stripComments(name).replace(/\*\*|__/g, '').replace(/["'\[\]`]/g, '').trim().split(/\s+/)[0].split('.').filter(Boolean).pop()?.toLowerCase() ?? '';
+// brackets, backticks or bold, only its last name (dbo.Orders, [dbo].[Orders]
+// and Orders are one), lowercase.
+export const objectKey = (name) => stripComments(name).replace(/\*\*|__/g, '').replace(/["'\[\]`]/g, '').trim().split(/[\s,、;；]+/)[0].split('.').filter(Boolean).pop()?.toLowerCase() ?? '';
 
-const WRITES = /(write|insert|update|delete|upsert|merge|truncate|書|更新|削除|登録|追加)/i;
-const EFFECT = /(write|insert|update|delete|upsert|merge|truncate|call|fire|exec|書|更新|削除|登録|追加|呼|実行)/i;
+// What the Use cell says, before a note in parentheses or after a ";" or " - ".
+const useOf = (cell) => plain(stripComments(cell)).split(/\s*(?:[(（;；]|\s[-–—]\s)/)[0];
+const WRITES = /(?<![A-Za-z0-9_])(write|writes|written|insert|inserts|update|updates|delete|deletes|upsert|upserts|merge|merges|truncate|truncates)(?![A-Za-z0-9_])|書き込|書込|書く|更新する|削除する|登録する|追加する|挿入/i;
+const CALLS = /(?<![A-Za-z0-9_])(call|calls|fire|fires|exec|execs|execute|executes|run|runs)(?![A-Za-z0-9_])|呼ぶ|呼び出|実行|発火/i;
 
 // The Database table of a source map: Map<object key, { name, kind, writes, effect }>.
 // writes: the Use cell says the capability changes it (a table's rows);
@@ -214,10 +238,10 @@ export function databaseObjects(text) {
     const kindAt = header.findIndex((h) => /^(kind|種類|type)/i.test(h));
     const useAt = header.findIndex((h) => /^(use|使い方|用途|access)/i.test(h));
     const kind = plain(cells[kindAt < 0 ? 1 : kindAt] ?? '').toLowerCase();
-    const use = plain(cells[useAt < 0 ? 2 : useAt] ?? '');
+    const use = useOf(cells[useAt < 0 ? 2 : useAt] ?? '');
     const old = out.get(key) ?? { name: plain(name), kind, writes: false, effect: false };
     old.writes ||= WRITES.test(use);
-    old.effect ||= EFFECT.test(use);
+    old.effect ||= WRITES.test(use) || CALLS.test(use);
     if (!old.kind) old.kind = kind;
     out.set(key, old);
   }
@@ -228,62 +252,73 @@ export function databaseObjects(text) {
 
 const CONTEXT_HEADING = /^###\s*Context:\s*([a-z0-9]+(?:-[a-z0-9]+)*)\s*$/i;
 const SHARED = /^(shared data|共有データ)/i;
+const OWNED_LABEL = /^\s*(?:[-*+]\s+)?(?:\*\*|__)?\s*(owned data|持っているデータ|所有データ)\s*(?:[:：]\s*(?:\*\*|__)|(?:\*\*|__)\s*[:：])\s*(.*)$/i;
+
+// The table names an Owned data text lists: its backticked names, else each
+// comma-separated piece that is one word (prose such as "the audit log of
+// orders" names nothing).
+function ownedNames(text) {
+  const t = stripComments(text);
+  const quoted = [...t.matchAll(/`([^`]+)`/g)].map((m) => objectKey(m[1]));
+  if (quoted.length) return quoted.filter(Boolean);
+  return t.split(/[,、;；\n]+/).map((p) => p.replace(/^\s*(?:[-*+]\s+)?/, '').replace(/\*\*|__/g, '').replace(/\s*(tables?|テーブル)\s*$/i, '').trim())
+    .filter((p) => p && !/\s/.test(p) && !NOTHING.test(p)).map(objectKey).filter(Boolean);
+}
 
 // Which contexts own and may write each table, from the archived survey's
 // context map (each context's Owned data, the Shared data table) and the plan's
 // "## Shared data" table (the person's later decisions, same columns: Data,
-// Owner, Also written by). Returns (key) => { owners: Set, writers: Set, shared }.
+// Owner, Also written by). Returns (key) => { owners: Set, writers: Set }.
 export function dataOwners(root) {
   const survey = archivedChange(root, 'survey');
   const map = survey ? readIf(path.join(survey, 'context-map.md'), []) ?? '' : '';
   const owned = new Map();
+  const known = new Set();
   let current = null;
+  let collecting = false;
   for (const line of stripComments(map).split(/\r?\n/)) {
     const h = line.trim().match(CONTEXT_HEADING);
-    if (h) { current = h[1].toLowerCase(); continue; }
-    if (/^#{1,3}\s/.test(line)) { current = null; continue; }
-    const m = line.match(/\*\*(owned data|持っているデータ|所有データ)\*\*\s*[:：]\s*(.*)$/i);
-    if (m && current) owned.set(current, `${owned.get(current) ?? ''} ${m[2]}`);
+    if (h) { current = h[1].toLowerCase(); known.add(current); collecting = false; continue; }
+    if (/^#{1,3}\s/.test(line)) { current = null; collecting = false; continue; }
+    if (!current) continue;
+    const m = line.match(OWNED_LABEL);
+    if (m) { owned.set(current, [...(owned.get(current) ?? []), ...ownedNames(m[2])]); collecting = true; continue; }
+    // A sub-list under the label continues it; the next label ends it.
+    if (collecting && /^\s{2,}(?:[-*+]|\d+[.)])\s+/.test(line)) { owned.get(current).push(...ownedNames(line)); continue; }
+    if (/^\s*(?:[-*+]|\d+[.)])\s+/.test(line) || line.trim()) collecting = false;
   }
+  const contexts = (cell) => new Set(plain(stripComments(cell)).toLowerCase().split(/[\s,、;；/]+/).filter((c) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(c) && !NOTHING.test(c) && (!known.size || known.has(c))));
   const shared = [];
   const plan = readIf(path.join(root, PLAN), []) ?? '';
   for (const text of [map, plan]) {
     for (const { header, cells } of headedRows(section(text, SHARED) ?? '')) {
-      const at = (re, fallback) => { const i = header.findIndex((h) => re.test(h)); return cells[i < 0 ? fallback : i] ?? ''; };
+      const at = (re, fallback) => { const i = header.findIndex((x) => re.test(x)); return cells[i < 0 ? fallback : i] ?? ''; };
       const key = objectKey(cells[0]);
-      if (!key) continue;
-      const contexts = (cell) => new Set(plain(cell).toLowerCase().split(/[\s,、;；/]+/).filter((c) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(c)));
+      if (!key || NOTHING.test(plain(cells[0] ?? ''))) continue;
       shared.push({ key, owners: contexts(at(/^(owner|持ち主)/i, 1)), also: contexts(at(/^(also|ほか|他)/i, 2)) });
     }
   }
-  const word = (key) => new RegExp(`(?<![A-Za-z0-9_])${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_])`, 'i');
   return (key) => {
     const owners = new Set();
     const writers = new Set();
-    let listed = false;
-    for (const [context, text] of owned) {
-      const names = stripComments(text).replace(/["'\[\]`*]/g, ' ');
-      // "dbo.Orders" and "Orders" both name the table orders.
-      if (word(key).test(names.replace(/[A-Za-z0-9_]+\./g, ''))) { owners.add(context); writers.add(context); }
-    }
+    for (const [context, names] of owned) if (names.includes(key)) { owners.add(context); writers.add(context); }
     for (const row of shared.filter((r) => r.key === key)) {
-      listed = true;
       for (const c of row.owners) { owners.add(c); writers.add(c); }
       for (const c of row.also) writers.add(c);
     }
-    return { owners, writers, shared: listed };
+    return { owners, writers };
   };
 }
 
 const contextOfCapability = (capability) => capability.split('/')[0];
 const isTable = (kind) => !kind || /table|テーブル/i.test(kind);
 
-// ---------------------------------------------------------------- mechanical checks (extract gate)
+// ---------------------------------------------------------------- mechanical checks (extract and amend gates)
 
-// The entry points of a capability, from every source map that describes it,
-// or null when none of them has an Entry points section.
-function entryList(root, capability, live) {
-  const lists = sourceMapDirs(root, capability, live).map((dir) => entryPoints(readIf(path.join(dir, 'source-map.md'), []) ?? '')).filter(Boolean);
+// The entry points of a capability from its archived source maps, or null when
+// none of them has an Entry points section.
+function entryList(root, capability) {
+  const lists = sourceMapDirs(root, capability, false).map((dir) => entryPoints(readIf(path.join(dir, 'source-map.md'), []) ?? '')).filter(Boolean);
   return lists.length ? lists.flat() : null;
 }
 
@@ -294,15 +329,17 @@ const lastSymbol = (key) => {
 const pathOf = (key) => (key.indexOf(':') < 0 ? key : key.slice(0, key.indexOf(':')));
 
 // Whether an entry point id a dependency gives is one of the listed entry points:
-// the same id, or the same path and the same last name of the symbol
-// (`src/a.php:Billing.total` and `src/a.php:total`), or only the path of a page.
+// the same id; the same path and the same last name of the symbol
+// (`src/a.php:Billing.total` and `src/a.php:total`); a page given by its path;
+// or a symbol in a file listed as a whole (a PHP page's top-level code).
 export function entryListed(id, entries) {
   const key = entryKey(id);
   return entries.some((e) => e.key === key
-    || (pathOf(e.key) === pathOf(key) && (key.indexOf(':') < 0 || (lastSymbol(key) && lastSymbol(key) === lastSymbol(e.key)))));
+    || (pathOf(e.key) === pathOf(key) && (key.indexOf(':') < 0 || e.key.indexOf(':') < 0 || (lastSymbol(key) && lastSymbol(key) === lastSymbol(e.key)))));
 }
 
-// The extract gate's mechanical checks for capability `own` (see the top).
+// The mechanical checks for capability `own` (see the top), on the source map
+// in `dir` (an extract change, or an amendment that carries one).
 export function checkDependencies(root, dir, own, problems) {
   const { map: plan } = assignment(root);
   const capabilities = [...plan.keys()].map(capName);
@@ -317,23 +354,14 @@ export function checkDependencies(root, dir, own, problems) {
     bad.push(`walkthrough.md leaves behavior to ${capability} (${walked.find((r) => r.parsed.capability === capability).entry}), but source-map.md's "## Dependencies" does not name it: add a row "| \`${capability}\` | <what it uses> | <its entry point> |"`);
   }
   for (const dep of deps.filter((d) => d.capability === own)) bad.push(`source-map.md's "## Dependencies" names its own capability ${own}: ${dep.line}`);
-  // An entry point this capability uses must be one the other capability lists.
+  // An entry point this capability uses must be one the other capability's
+  // reviewed source map lists. (One still under analysis is not compared: its
+  // list may still change, and the pair check reads both source maps.)
   for (const dep of deps.filter((d) => d.capability !== own && d.entries.length)) {
-    const theirs = entryList(root, dep.capability, true);
+    const theirs = entryList(root, dep.capability);
     if (!theirs) continue;
     for (const id of dep.entries.filter((e) => !entryListed(e, theirs))) {
-      const other = extractChange(root, dep.capability);
-      const archived = other && path.basename(path.dirname(other)) === 'archive';
-      bad.push(`source-map.md says ${own} uses ${id} of ${dep.capability}, which ${dep.capability}'s source map does not list under "## Entry points": correct the entry point here (path:symbol as ${dep.capability} lists it)${archived ? `, or, when ${dep.capability} really misses it (its walkthrough never followed it), amend ${dep.capability} with a source-map.md that lists it and the requirements it needs` : `, or have ${dep.capability}'s analyst add it there`}`);
-    }
-  }
-  // An entry point another capability uses must be listed here.
-  const mine = entryPoints(mapText) ?? [];
-  for (const other of capabilities.filter((c) => c !== own)) {
-    for (const d of sourceMapDirs(root, other, true)) {
-      for (const dep of dependencies(readIf(path.join(d, 'source-map.md'), []) ?? '', capabilities).filter((x) => x.capability === own)) {
-        for (const id of dep.entries.filter((e) => !entryListed(e, mine))) bad.push(`${other}'s source map (${path.basename(d)}) says it uses ${id} of ${own}, which this source map does not list under "## Entry points": list it (a public function other capabilities call is an entry point, and the walkthrough must follow it), or have ${other}'s row corrected`);
-      }
+      bad.push(`source-map.md says ${own} uses ${id} of ${dep.capability}, which ${dep.capability}'s archived source map does not list under "## Entry points": correct the entry point here (path:symbol as ${dep.capability} lists it), or, when ${dep.capability} really misses it (its walkthrough never followed it), amend ${dep.capability} with a source-map.md that lists it and the requirements it needs`);
     }
   }
   // Who may write a table: the survey's context map, and the plan's Shared data.
@@ -341,7 +369,7 @@ export function checkDependencies(root, dir, own, problems) {
   const context = contextOfCapability(own);
   const writtenBy = new Map();
   for (const other of capabilities.filter((c) => c !== own && contextOfCapability(c) !== context)) {
-    for (const d of sourceMapDirs(root, other, true)) {
+    for (const d of sourceMapDirs(root, other, false)) {
       for (const [key, o] of databaseObjects(readIf(path.join(d, 'source-map.md'), []) ?? '')) {
         if (o.writes && isTable(o.kind)) { if (!writtenBy.has(key)) writtenBy.set(key, new Set()); writtenBy.get(key).add(other); }
       }
@@ -368,43 +396,57 @@ export function pairKey(cell) {
   const caps = plain(stripComments(cell)).toLowerCase().split(/\s*(?:<->|<=>|↔|⇔|,|、|\s\/\s|\s+and\s+)\s*/).map(capName).filter(Boolean).sort();
   return caps.length === 2 ? caps.join(' <-> ') : '';
 }
-// A topic as rows are compared: lowercase, one space; a file path keeps its form.
+// A topic as rows are compared: lowercase, one space, forward slashes.
 export const topicKey = (cell) => plain(stripComments(cell)).replace(/\\/g, '/').replace(/\s+/g, ' ').trim().toLowerCase();
+export const TOPIC = /^(uses|data \S+|file \S+)$/i;
 
 // The links between capabilities with a spec. `scope`: { change, own } (the
-// extract gate: links of `own`, read live), { capability } (port-ready: links of
-// it with other baselines) or { all: true } (finish: every link between
-// baselines). Each link: { pair, a, b, topic, key, code, sides: [sideA, sideB] }.
+// extract gate: the links of `own`, its draft against the baselines),
+// { capability } (port-ready and port-done: the links of its baseline with the
+// other baselines) or { all: true } (finish: every link between baselines).
+// Each link: { pair, a, b, topic, key, code, sides: [sideA, sideB] }.
+// - uses: one side's Dependencies names the other;
+// - data <object>: both use it and one writes, calls or fires it; when the
+//   context map names its owner, only pairs with a capability of the owner's
+//   context (a table everybody writes links each writer to its owner, not to
+//   every other writer);
+// - file <path>: the plan lists the same file or folder under both (one link
+//   per listing, not per file under a folder).
 export function links(root, scope) {
-  const live = Boolean(scope.change);
   const { map: plan } = assignment(root);
   const capabilities = [...plan.keys()].map(capName).sort();
   const own = scope.own ?? scope.capability ?? null;
   const sides = new Map();
   for (const c of new Set([...capabilities, ...(own ? [own] : [])])) {
-    const side = sideOf(root, c, live);
+    const side = sideOf(root, c, Boolean(scope.change) && c === own);
     if (side) sides.set(c, side);
   }
-  const maps = new Map([...sides.keys()].map((c) => [c, sourceMapDirs(root, c, live).map((d) => readIf(path.join(d, 'source-map.md'), []) ?? '')]));
-  const deps = new Map([...maps].map(([c, texts]) => [c, new Set(texts.flatMap((t) => dependencies(t, capabilities)).map((d) => d.capability))]));
-  const objects = new Map([...maps].map(([c, texts]) => {
+  if (own && !sides.has(own)) return [];
+  const mapsOf = (side) => side.maps.map((d) => readIf(path.join(d, 'source-map.md'), []) ?? '');
+  const deps = new Map([...sides].map(([c, side]) => [c, new Set(mapsOf(side).flatMap((t) => dependencies(t, capabilities)).map((d) => d.capability))]));
+  const objects = new Map([...sides].map(([c, side]) => {
     const merged = new Map();
-    for (const t of texts) for (const [k, o] of databaseObjects(t)) { const old = merged.get(k); merged.set(k, old ? { ...old, writes: old.writes || o.writes, effect: old.effect || o.effect } : o); }
+    for (const t of mapsOf(side)) for (const [k, o] of databaseObjects(t)) { const old = merged.get(k); merged.set(k, old ? { ...old, writes: old.writes || o.writes, effect: old.effect || o.effect } : o); }
     return [c, merged];
   }));
+  const owners = dataOwners(root);
+  // The listings two capabilities share: Map<pair, Set<listed path>>.
   let shared = null;
-  const sharedFiles = () => {
+  const sharedListings = () => {
     if (shared) return shared;
     shared = new Map();
     const survey = archivedChange(root, 'survey');
     const inventory = inventoryRows(survey ? readIf(path.join(survey, 'inventory.md'), []) ?? '' : '');
+    const keys = new Map([...plan.keys()].map((k) => [capName(k), k]));
     for (const file of keptFiles(root, inventory) ?? []) {
-      const owners = ownersOf(plan, file).map(capName);
-      if (owners.length < 2) continue;
-      for (let i = 0; i < owners.length; i += 1) for (let j = i + 1; j < owners.length; j += 1) {
-        const k = [owners[i], owners[j]].sort().join(' <-> ');
-        if (!shared.has(k)) shared.set(k, []);
-        shared.get(k).push(file);
+      const who = ownersOf(plan, file).map(capName);
+      if (who.length < 2) continue;
+      // The owners tie on the most specific listing, so it is the same path for all of them.
+      const listing = (plan.get(keys.get(who[0])) ?? []).filter((p) => covers(p, file)).sort((x, y) => (y.toLowerCase() === file.toLowerCase()) - (x.toLowerCase() === file.toLowerCase()) || y.length - x.length)[0] ?? file;
+      for (let i = 0; i < who.length; i += 1) for (let j = i + 1; j < who.length; j += 1) {
+        const k = [who[i], who[j]].sort().join(' <-> ');
+        if (!shared.has(k)) shared.set(k, new Set());
+        shared.get(k).add(listing);
       }
     }
     return shared;
@@ -420,9 +462,12 @@ export function links(root, scope) {
       if (deps.get(a)?.has(b) || deps.get(b)?.has(a)) topics.push('uses');
       for (const [k, o] of objects.get(a) ?? []) {
         const p = objects.get(b)?.get(k);
-        if (p && (o.effect || p.effect)) topics.push(`data ${k}`);
+        if (!p || !(o.effect || p.effect)) continue;
+        const who = owners(k).owners;
+        if (who.size && !who.has(contextOfCapability(a)) && !who.has(contextOfCapability(b))) continue;
+        topics.push(`data ${k}`);
       }
-      for (const file of sharedFiles().get(pair) ?? []) topics.push(`file ${file}`);
+      for (const listing of [...(sharedListings().get(pair) ?? [])].sort()) topics.push(`file ${listing}`);
       for (const topic of [...new Set(topics)]) {
         out.push({ pair, a, b, topic, key: `${pair}|${topicKey(topic)}`, code: `${sides.get(a).code} ${sides.get(b).code}`, sides: [sides.get(a), sides.get(b)] });
       }
@@ -431,10 +476,10 @@ export function links(root, scope) {
   return out;
 }
 
-// The codes a merged row may carry for a pair: each side's live and baseline code.
+// The codes a merged row may carry for a pair: each side's baseline code, or
+// its draft's while it is in its first extract.
 export function validCodes(root, pair) {
-  const caps = pair.split(' <-> ');
-  return caps.map((c) => new Set([sideOf(root, c, true)?.code, sideOf(root, c, false)?.code].filter(Boolean)));
+  return pair.split(' <-> ').map((c) => new Set([sideOf(root, c, true)?.code, sideOf(root, c, false)?.code].filter(Boolean)));
 }
 
 // ---------------------------------------------------------------- the ledger
@@ -463,44 +508,55 @@ export function ledgerRows(text) {
   return rows;
 }
 
-// consistent | conflict | duplicate | term | unclear | question <change> Q<n>
+// consistent | conflict | duplicate | term | unclear | question <change> Q<n> | accepted D<n>
 export function parseVerdict(cell) {
   const v = stripComments(cell).replace(/\*\*|__|`/g, '').trim().replace(/[.。]$/, '');
-  const m = v.match(/^question\s*:?\s*([a-z0-9]+(?:-[a-z0-9]+)*)\s+Q0*(\d+)$/i);
+  let m = v.match(/^question\s*:?\s*([a-z0-9]+(?:-[a-z0-9]+)*)\s+Q0*(\d+)$/i);
   if (m) return { kind: 'question', change: m[1].toLowerCase(), question: `Q${Number(m[2])}` };
+  m = v.match(/^accepted\s*:?\s*D0*(\d+)$/i);
+  if (m) return { kind: 'accepted', decision: `D${Number(m[1])}` };
   const k = v.toLowerCase();
   if (['consistent', 'conflict', 'duplicate', 'term', 'unclear'].includes(k)) return { kind: k };
   return { kind: v ? 'invalid' : 'blank' };
 }
 
-// What the spec names look like when an evidence cell names them.
-const loose = (s) => stripComments(s).replace(/\\\|/g, '|').replace(/[*_`"'“”「」『』]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-
-// Whether a question of a change is asked and decided: in questions.md, with a
-// ticked review item that records a decision (the change archived, or `asked`
-// for the change under review, which its own gate checks).
-function archivedExact(root, change) {
-  const archive = path.join(changesDir(root), 'archive');
-  let names = [];
-  try { names = fs.readdirSync(archive, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); } catch { return null; }
-  const found = names.filter((n) => n.replace(/^\d{4}-\d{2}-\d{2}-/, '').toLowerCase() === change.toLowerCase()).sort();
-  return found.length ? path.join(archive, found.at(-1)) : null;
+const DECISIONS = /^(consistency decisions|整合性の判断)/i;
+// The person's decisions about links, in the plan's "## Consistency decisions"
+// table (| Id | Pair | Topic | Decision |): Map<D<n>, { key, decision }>.
+export function decisions(root) {
+  const out = new Map();
+  for (const { cells } of headedRows(section(readIf(path.join(root, PLAN), []) ?? '', DECISIONS) ?? '')) {
+    const id = plain(cells[0] ?? '').match(/^D0*(\d+)$/i);
+    if (!id) continue;
+    out.set(`D${Number(id[1])}`, { key: `${pairKey(cells[1] ?? '')}|${topicKey(cells[2] ?? '')}`, decision: plain(stripComments(cells[3] ?? '')) });
+  }
+  return out;
 }
 
-function questionDecided(root, change, question) {
-  const dir = archivedExact(root, change);
-  if (!dir) return false;
-  const ids = new Set(questionIds(readIf(path.join(dir, 'questions.md'), []) ?? ''));
-  if (!ids.has(question)) return false;
-  const box = checkboxes(readIf(path.join(dir, 'review.md'), []) ?? '').find((b) => b.plain.match(/^Q(\d+)\b/i) && `Q${Number(b.plain.match(/^Q(\d+)\b/i)[1])}` === question);
-  return Boolean(box?.done && /decision:\s*\S/i.test(box.plain) && !PLACEHOLDER.test((box.plain.match(/decision:\s*(.*)$/i)?.[1] ?? '').trim()));
+// The question ids of a change that have a review item, as its gate counts them.
+export function askedOf(dir) {
+  const items = new Set(checkboxes(readIf(path.join(dir, 'review.md'), []) ?? '').map((b) => b.plain.match(/^Q(\d+)\b/i)).filter(Boolean).map((m) => `Q${Number(m[1])}`));
+  return new Set(questionIds(readIf(path.join(dir, 'questions.md'), []) ?? '').filter((id) => items.has(id)));
+}
+
+// What the spec names look like when an evidence cell names them.
+const loose = (s) => stripComments(s).replace(/\\\|/g, '|').replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+const QUOTED = /["“”「『`]([^"“”」』`]+)["“”」』`]/g;
+// Whether the evidence names a requirement of the side in quotes, or says the
+// side states nothing about the topic ("platform/auth: nothing").
+function namesSide(evidence, side) {
+  const said = new Set([...evidence.matchAll(QUOTED)].map((m) => loose(m[1])));
+  if (requirementNames(side.text ?? '').some((n) => said.has(loose(n)))) return true;
+  const cap = side.capability.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`${cap}\\s*[:：]\\s*(nothing|none|なし|記載なし)`, 'i').test(loose(evidence));
 }
 
 // Each link's state: ok, missing, stale or open, with a problem when not ok.
 // `change` and `asked` (the question ids with a review item) are the change
-// under review in the extract gate.
+// under review in the extract gate: only there does a question count.
 export function judge(root, list, { change = null, asked = new Set() } = {}) {
   const rows = ledgerRows(readIf(path.join(root, LEDGER), []) ?? '');
+  let decided = null;
   return list.map((link) => {
     const row = rows.get(link.key);
     const where = `${link.pair} (${link.topic})`;
@@ -512,25 +568,26 @@ export function judge(root, list, { change = null, asked = new Set() } = {}) {
     }
     const v = row.parsed;
     if (v.kind === 'consistent') {
-      if (!row.evidence || PLACEHOLDER.test(row.evidence)) return { ...link, status: 'open', problem: `the row for ${where} is consistent with no evidence; the checker names the requirements of both specs it compared` };
-      const names = link.sides.flatMap((s) => requirementNames(s.text ?? ''));
-      const evidence = loose(row.evidence);
-      if (!names.some((n) => evidence.includes(loose(n)))) return { ...link, status: 'open', problem: `the row for ${where} is consistent, but its evidence names no requirement of ${link.a} or ${link.b}; have the checker name the requirements it compared` };
+      const missing = link.sides.filter((s) => !namesSide(row.evidence, s)).map((s) => s.capability);
+      if (missing.length) return { ...link, status: 'open', problem: `the row for ${where} is consistent, but its evidence does not name in quotes a requirement of ${missing.join(' and ')} (or say "<capability>: nothing" for a side that states nothing about it); have the checker name the requirements it compared` };
       return { ...link, status: 'ok' };
     }
     if (v.kind === 'question') {
-      if (change && v.change === change.toLowerCase()) {
-        if (asked.has(v.question)) return { ...link, status: 'ok' };
-        return { ...link, status: 'open', problem: `the row for ${where} points to ${v.question} of ${v.change}, which is not in questions.md with a review item` };
-      }
-      if (questionDecided(root, v.change, v.question)) return { ...link, status: 'ok' };
-      return { ...link, status: 'open', problem: `the row for ${where} points to ${v.question} of ${v.change}, which is not a decided question of an archived change: the person decides it in that change's review first` };
+      if (change && v.change === change.toLowerCase() && asked.has(v.question)) return { ...link, status: 'ok' };
+      if (change && v.change === change.toLowerCase()) return { ...link, status: 'open', problem: `the row for ${where} points to ${v.question}, which is not in questions.md with a review item` };
+      return { ...link, status: 'open', problem: `the row for ${where} still points to ${v.question} of ${v.change}: a question holds only during that change's review. Do what the person decided: an amendment of the wrong side, then compare the pair again; or, to keep the difference, record the decision as a row of "## Consistency decisions" in ${PLAN} (| D<n> | ${link.pair} | ${link.topic} | <the decision> |) and write "accepted D<n>"` };
+    }
+    if (v.kind === 'accepted') {
+      decided ??= decisions(root);
+      const d = decided.get(v.decision);
+      if (d && d.key === link.key && d.decision && !PLACEHOLDER.test(d.decision)) return { ...link, status: 'ok' };
+      return { ...link, status: 'open', problem: `the row for ${where} is accepted ${v.decision}, but "## Consistency decisions" in ${PLAN} has no ${v.decision} with this pair, this topic and a decision` };
     }
     const fix = {
-      conflict: 'the two specs state different things about the same behavior or data: have an analyst correct the spec the code does not support (in this change; an archived one through an amendment), then check the pair again, or move it to questions.md and write "question <change> Q<n>"',
-      duplicate: 'both specs specify the same behavior of the same code: keep it in the capability that owns the code and have the other spec refer to it (the requirement that uses it), then check the pair again, or move it to questions.md',
-      term: 'the specs name one thing with two words (or one word for two things): use the glossary\'s word in the spec being written (an archived one through an amendment), then check the pair again, or move it to questions.md',
-      unclear: 'the checker could not decide from the specs and the code: move it to questions.md and write "question <change> Q<n>", or give the checker what settles it',
+      conflict: 'the two specs state different things about the same behavior or data: have an analyst correct the spec the code does not support (an archived one through an amendment), then compare the pair again; in an extract\'s review, or for the person to decide, move it to questions.md and write "question <change> Q<n>"',
+      duplicate: 'both specs specify the same behavior of the same code: in an extract, have its spec refer to the capability that owns the code instead, then compare the pair again; between baselines, ask the person (a question in an extract, else a decision recorded as accepted D<n>)',
+      term: 'the specs name one thing with two words (or one word for two things): in an extract, use the glossary\'s word, then compare the pair again; between baselines, ask the person (an amendment, or a decision recorded as accepted D<n>)',
+      unclear: 'the checker could not decide from the specs and the code: give the checker what settles it, or ask the person (a question in an extract, else a decision recorded as accepted D<n>)',
     }[v.kind];
     if (fix) return { ...link, status: 'open', problem: `the row for ${where} is ${v.kind}: ${fix}` };
     return { ...link, status: 'open', problem: `the row for ${where} has the verdict "${row.verdict || 'blank'}"; write only ${VERDICTS}` };
@@ -551,23 +608,35 @@ function scopeFor(root, opts) {
   if (opts.capability) return { capability: capName(opts.capability) };
   const dir = path.join(changesDir(root), opts.change);
   const specs = walkMd(path.join(dir, 'specs')).map((f) => path.relative(path.join(dir, 'specs'), path.dirname(f)).split(path.sep).join('/'));
-  const own = specs[0] ?? opts.change.replace(/^extract-/, '').replace(/-v\d+$/, '');
-  return { change: opts.change, own: capName(own) };
+  const own = capName(specs[0] ?? opts.change.replace(/^extract-/, '').replace(/-v\d+$/, ''));
+  return { change: opts.change, own, dir };
+}
+
+// The extract gate's part, the same for gate.mjs and the CLI. A rerun
+// (extract-<capability>-v<n> of a capability with a baseline) is compared
+// after its archive, by port-ready: its delta is not the spec the others meet.
+export function checkExtractLinks(root, dir, own, problems, asked = askedOf(dir)) {
+  checkDependencies(root, dir, own, problems);
+  if (hasBaseline(root, own)) return;
+  checkConsistency(root, { change: path.basename(dir), own }, problems, { change: path.basename(dir), asked });
 }
 
 export function items(root, opts) {
   const scope = scopeFor(root, opts);
-  const judged = judge(root, links(root, scope), { change: scope.change ?? null });
+  const rerun = scope.change && hasBaseline(root, scope.own);
+  const list = rerun ? [] : links(root, scope);
+  const judged = judge(root, list, scope.change ? { change: scope.change, asked: askedOf(scope.dir) } : {});
   const survey = archivedChange(root, 'survey');
-  const rel = (p) => (p ? path.relative(root, p).split(path.sep).join('/') : null);
+  const existing = (p) => (p && fs.existsSync(p) ? relOf(root, p) : null);
   return {
     ok: judged.every((l) => l.status === 'ok'),
+    ...(rerun ? { note: `${scope.own} has a baseline: a rerun is compared after its archive (consistency.mjs items --capability ${scope.own})` } : {}),
     links: judged.map((l) => ({
       pair: l.pair, topic: l.topic, code: `<!-- pair ${l.code} -->`, status: l.status,
-      sides: l.sides.map((s) => ({ capability: s.capability, specs: s.specs, sourceMap: s.dir && fs.existsSync(path.join(s.dir, 'source-map.md')) ? rel(path.join(s.dir, 'source-map.md')) : null, trace: s.dir && fs.existsSync(path.join(s.dir, 'trace.md')) ? rel(path.join(s.dir, 'trace.md')) : null })),
+      sides: l.sides.map((s) => ({ capability: s.capability, specs: s.specs, sourceMaps: s.maps.map((d) => relOf(root, path.join(d, 'source-map.md'))), trace: existing(s.trace) })),
     })),
     todo: judged.filter((l) => l.status !== 'ok').length,
-    glossary: survey && fs.existsSync(path.join(survey, 'glossary.md')) ? rel(path.join(survey, 'glossary.md')) : null,
+    glossary: survey ? existing(path.join(survey, 'glossary.md')) : null,
     ledger: LEDGER,
   };
 }
@@ -596,7 +665,8 @@ export function main(argv) {
   else if (command === 'check') {
     const problems = [];
     const scope = scopeFor(opts.root, opts);
-    checkConsistency(opts.root, scope, problems, { change: scope.change ?? null });
+    if (scope.change) checkExtractLinks(opts.root, scope.dir, scope.own, problems);
+    else checkConsistency(opts.root, scope, problems);
     result = { ok: problems.length === 0, problems };
   } else return usage();
   console.log(JSON.stringify(result, null, 2));

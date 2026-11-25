@@ -37,11 +37,10 @@ artifacts:
         in backticks the way that capability's source map lists it (`-` when
         it calls none, such as a table it only reads). `gate.mjs review`
         fails when the walkthrough leaves behavior to a capability this table
-        does not name, when an entry point given here is not under that
-        capability's Entry points, and when another capability's source map
-        uses an entry point of this one that this source map does not list.
-        Each capability named here is checked against this spec afterwards
-        (consistency.mjs).
+        does not name, and when an entry point given here is not under the
+        Entry points of that capability's archived source map. Each
+        capability named here with a baseline spec is checked against this
+        spec afterwards (consistency.mjs).
       - **Database**: the tables it reads and writes, and the database objects
         that take part, with the path of each definition (archived survey's
         database.md): procedures and functions it calls, views it reads,

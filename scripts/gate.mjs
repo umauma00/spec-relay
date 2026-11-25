@@ -35,7 +35,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkFinish } from './finish.mjs';
-import { checkDependencies, checkConsistency, LEDGER } from './consistency.mjs';
+import { checkDependencies, checkConsistency, checkExtractLinks, LEDGER } from './consistency.mjs';
 import { COMPARE_COMMAND, casesDigest, isCompareCommand, parseOptions, portOptionProblem, readCases, words as commandWords } from './compare.mjs';
 import { checkSurveyCoverage, checkSurveyCrosscheck, checkSourceMap, checkTrace, checkAmendSourceMap, checkCoverage, assignment } from './coverage.mjs';
 import { checkLedger } from './sites.mjs';
@@ -481,10 +481,7 @@ function checkExtract(root, dir, boxes, problems) {
   // Database against the other source maps and the context map, then the pair
   // check of the two specs at each link (consistency.mjs).
   const own = specCapabilities(dir)[0];
-  if (own) {
-    checkDependencies(root, dir, own, problems);
-    checkConsistency(root, { change: path.basename(dir), own }, problems, { change: path.basename(dir), asked });
-  }
+  if (own) checkExtractLinks(root, dir, own, problems, asked);
   const advice = questionAdvice(questions);
   for (const id of questions === null ? [] : questionIds(questions)) {
     // The person decides; the agent gives the answer it recommends, and why, so the person can take it.
@@ -521,6 +518,9 @@ function checkAmend(root, dir, boxes, problems) {
   checkTrace(root, dir, kept, problems);
   checkAmendSourceMap(root, dir, kept, problems);
   checkCrosscheck(dir, kept, [], problems);
+  // A source map the amendment carries meets the others like an extract's.
+  const own = specCapabilities(dir)[0];
+  if (own && fs.existsSync(path.join(dir, 'source-map.md'))) checkDependencies(root, dir, own, problems);
 }
 
 const CONTEXT = /^###\s*Context:\s*([a-z0-9]+(?:-[a-z0-9]+)*)\s*$/;
@@ -1683,6 +1683,9 @@ export function checkPortDone(root, change) {
   checkDatabaseDrift(root, problems);
   const capability = ownRecord ? capabilitySegments(ownRecord[1]).join('/') : null;
   const evidence = capability ? checkPortEvidence(root, change, dir, capability, problems) : {};
+  // An amendment of a capability this one meets, archived while it was ported,
+  // makes their pair stale: compare it again before the port is done.
+  if (capability) checkConsistency(root, { capability: capability.toLowerCase() }, problems);
   return { ok: problems.length === 0, problems, ...evidence };
 }
 

@@ -38,7 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { readIf, changeSchema, plain, norm, targetHash, CODE_STAMP, inventoryRows } from './gate.mjs';
 import { surveyRowStamp, ROW_STAMP } from './coverage.mjs';
 import { WALK_HEADER, parseWalkVerdict } from './walkthrough.mjs';
-import { LEDGER, LEDGER_HEADER, LEDGER_TEMPLATE, PAIR_STAMP, pairKey, topicKey, validCodes } from './consistency.mjs';
+import { LEDGER, LEDGER_HEADER, LEDGER_TEMPLATE, PAIR_STAMP, TOPIC, pairKey, topicKey, validCodes, parseVerdict, ledgerRows } from './consistency.mjs';
 
 const SEPARATOR = /^\s*\|?\s*:?-{2,}/;
 const cellsOf = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
@@ -115,7 +115,9 @@ function fitted(row, columns) {
   return { row: `| ${[...raw.slice(0, columns - 1).map((c) => c.trim()), last].join(' | ')} |`, ok: true };
 }
 
-const isLedger = (root, into) => path.resolve(root, into).toLowerCase() === path.resolve(root, LEDGER).toLowerCase();
+// The ledger's path, with the letter case Windows ignores (and other systems do not).
+const fold = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
+const isLedger = (root, into) => fold(path.resolve(root, into)) === fold(path.resolve(root, LEDGER));
 
 function checkPaths(root, into, parts) {
   const problems = [];
@@ -193,6 +195,10 @@ export function merge(root, { into, parts, clean = false }) {
       if (!key) { problems.push(`${show(item.file)}: the Pair cell must name two capabilities as "a <-> b": ${item.row}`); continue; }
       const given = (cells[2] ?? '').match(PAIR_STAMP);
       const [a, b] = key.split(' <-> ');
+      if (!TOPIC.test(topicKey(cells[1] ?? ''))) { problems.push(`${show(item.file)}: the topic of ${a} <-> ${b} must be one consistency.mjs items gives (uses, data <object>, file <path>): ${visible(cells[1] ?? '')}`); continue; }
+      const verdict = parseVerdict(cells[2] ?? '').kind;
+      if (verdict === 'question' || verdict === 'accepted') { problems.push(`${show(item.file)}: a checker writes no "${verdict}" verdict (${a} <-> ${b}, ${visible(cells[1] ?? '')}); only the orchestrator writes it, in ${LEDGER} itself`); continue; }
+      if (verdict === 'invalid' || verdict === 'blank') { problems.push(`${show(item.file)}: the verdict of ${a} <-> ${b} (${visible(cells[1] ?? '')}) must be consistent, conflict, duplicate, term or unclear: ${visible(cells[2] ?? '')}`); continue; }
       if (!given) { problems.push(`${show(item.file)}: the row for ${a} <-> ${b} (${visible(cells[1] ?? '')}) has no pair code; copy the code consistency.mjs items gives into the Verdict cell after the verdict`); continue; }
       const [ca, cb] = validCodes(root, key);
       // The code is written in the order of the sorted pair; a pair written b <-> a keeps it.
@@ -201,6 +207,12 @@ export function merge(root, { into, parts, clean = false }) {
       cells[0] = `${a} <-> ${b}`;
       cells[2] = `${cells[2].replace(new RegExp(PAIR_STAMP.source, 'gi'), '').trim()} <!-- pair ${codes[0]} ${codes[1]} -->`;
       item.row = `| ${cells.join(' | ')} |`;
+      // The person's decision on the same specs stays: a check again replaces it
+      // only after a spec changed (or after the orchestrator deleted the row).
+      const old = ledgerRows([table.header, table.separator, ...table.rows].join('\n')).get(`${key}|${topicKey(cells[1] ?? '')}`);
+      if (old && (old.parsed.kind === 'question' || old.parsed.kind === 'accepted') && old.stamp && old.stamp[0] === codes[0] && old.stamp[1] === codes[1]) {
+        problems.push(`${show(item.file)}: ${LEDGER} holds "${old.verdict}" for ${a} <-> ${b} (${visible(cells[1] ?? '')}) on the same specs; the person's decision stays. Delete that row first to have the pair judged again`);
+      }
     }
     if (problems.length) return { ok: false, problems };
   }

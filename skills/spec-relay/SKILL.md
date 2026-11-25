@@ -96,14 +96,20 @@ need the reasoning behind a step.
   like the source root: read-only for every agent, in the inventory, cited by
   trace.md. See the kit's `docs/DATABASE.md`.
 - **Plan**: `openspec/spec-relay/plan.md`, the capability list and order.
+  What the person decides between capabilities goes into two tables of it:
+  `## Shared data` (`| Data | Owner | Also written by |`, which context owns
+  a table when the context map does not say) and `## Consistency decisions`
+  (`| Id | Pair | Topic | Decision |`, a difference between two baseline
+  specs the person keeps, with ids D1, D2, ...).
 - **Consistency ledger**: `openspec/spec-relay/consistency.md`, one row per
   link between two capabilities with a spec (one uses the other, both use a
   database object one of them writes, or both own a file), with a checker's
   verdict on the two specs and the code of both (`<!-- pair ... -->`). Only
-  `merge.mjs` writes rows; you write only a `question <change> Q<n>`
-  verdict, keeping that code. The extract gate, `gate.mjs port-ready` and
-  the finish step need a current row with a verdict that holds for each
-  link (see step 3, item 6).
+  `merge.mjs` writes rows; you change only a verdict, to `question <change>
+  Q<n>` (during that extract's review) or `accepted D<n>` (a decision in
+  the plan), keeping that code. The extract gate (against the baselines),
+  `gate.mjs port-ready` and `port-done`, and the finish step need a current
+  row with a verdict that holds for each link (see step 3, item 6).
 - **Lessons**: `openspec/spec-relay/lessons.md`, what the person's corrections
   taught that later analyses and ports must follow (see Lessons).
 - **Rerun**: OpenSpec cannot archive two changes of the same name on one day,
@@ -722,7 +728,10 @@ waves.
    source-map.md, then `specs/<capability>/spec.md`, screens.md and trace.md
    in the change folder, following the artifacts of schema
    `spec-relay-extract` and the glossary of the archived survey
-   (`openspec/changes/archive/*-survey*/glossary.md`). For a large capability
+   (`openspec/changes/archive/*-survey*/glossary.md`). Give it also the
+   source-map.md of every archived extract (`openspec/changes/archive/*-extract-*/source-map.md`),
+   to copy into its Dependencies table the entry points of the capabilities
+   it uses as they list them; never their specs. For a large capability
    with many screens, let one analyst write source-map.md first, then give
    specs and screens to two analysts in one wave and trace.md to one after
    them.
@@ -812,22 +821,30 @@ waves.
    its empty table. A scenario renamed later breaks the rows
    that name it: walk those entry points again.
 6. **Consistency.** After the walkthrough is merged, run `node
-   "<kit>/scripts/gate.mjs" review --change extract-<capability>` once for
+   "<kit>/scripts/consistency.mjs" check --change extract-<capability>` for
    the dependency problems: the walkthrough's `other capability` rows must
-   be in source-map.md's Dependencies table, an entry point it gives must be
-   under that capability's Entry points (and an entry point another
-   capability's source map says it uses must be under this one's), and a
-   table it writes must be one the survey's context map lets its context
-   write. Have the analyst fix the source map; when the person must decide
-   who owns a table, ask them and record the answer as a row of `## Shared
-   data` in the plan (`| Data | Owner | Also written by |`, contexts by id).
+   be in source-map.md's Dependencies table, an entry point it says it uses
+   must be under that capability's Entry points in its archived source map,
+   and a table it writes must be one the survey's context map (or the plan's
+   `## Shared data`) lets its context write. Have the analyst fix the source
+   map. When the other capability really misses the entry point (its
+   walkthrough never followed it), only an amendment of that capability
+   fixes it (see Amend): ask the person in questions.md, and on a yes, run
+   the amendment; this gate passes once it is archived. When the person
+   must decide who owns a table, ask them and record the answer as a row of
+   `## Shared data` in the plan (`| Data | Owner | Also written by |`,
+   contexts by id).
    Then run `node "<kit>/scripts/consistency.mjs" items --change
    extract-<capability>`: it lists each link of this capability with the
-   others that have a spec (an analyzed or archived one): `uses` (one names
-   the other under Dependencies), `data <object>` (both use it and one
-   writes, calls or fires it) and `file <path>` (the plan gives the file to
-   both), each with its pair code and the spec, source map and trace of
-   both sides. Give the links whose status is not `ok` to
+   capabilities that have a baseline (an archived spec; another extract still
+   under analysis is not compared, the later of the two meets the other at
+   its own extract, or at port-ready when both were reviewed together):
+   `uses` (one names the other under Dependencies), `data <object>` (both
+   use it and one writes, calls or fires it) and `file <path>` (the plan
+   gives the file to both), each with its pair code and the spec, source
+   maps and trace of both sides. For a rerun (`-v<n>` of a capability with a
+   baseline) it lists nothing: the pairs are compared after its archive, at
+   port-ready. Give the links whose status is not `ok` to
    `spec-relay-checker` subagents as a **consistency check**, a few pairs
    each, with those paths, the glossary `items` names, and
    `openspec/spec-relay/work/extract-<capability>/consistency/<nn>.md` to
@@ -835,15 +852,19 @@ waves.
    openspec/spec-relay/consistency.md --parts
    openspec/spec-relay/work/extract-<capability>/consistency --clean`: the
    ledger is one file for the whole project, and merge refuses a row whose
-   pair code is not the code of both specs as they are now. For every
-   `conflict`, `duplicate` or `term`, have an analyst correct this change's
-   spec when it is the wrong side, then a checker crosscheck the changed
-   requirement and compare the pair again; when the other side is wrong
-   (an archived spec), or for `unclear`, move it to questions.md and write
-   `question extract-<capability> Q<n>` as its verdict yourself, keeping
-   the `<!-- pair ... -->` code (the person decides; an archived spec
-   changes only through its amendment). Any later change to this spec makes
-   its rows stale: compare those pairs again before the review ends.
+   pair code is not the code of both specs as they are now. A `consistent`
+   row holds only when its evidence names in quotes a requirement of each
+   side (or says `<capability>: nothing` for a side that states nothing
+   about the topic). For every `conflict`, `duplicate` or `term`, have an
+   analyst correct this change's spec when it is the wrong side, then a
+   checker crosscheck the changed requirement and compare the pair again.
+   When the other side (a baseline) is wrong, or for `unclear`, move it to
+   questions.md and write `question extract-<capability> Q<n>` as its
+   verdict yourself, keeping the `<!-- pair ... -->` code: the person
+   decides, and a baseline changes only through its amendment. A question
+   holds only during this change's review (step 4 says what to do after the
+   archive). Any later change to this spec makes its rows stale: compare
+   those pairs again before the review ends.
 7. **Questions and review.** Write questions.md from the analysts' reported
    doubts and the rows moved to questions, each with the answer you recommend
    and why (`  - Recommended:` and `  - Why:` under it, as the schema says; ask
@@ -875,7 +896,16 @@ waves.
 ## 4. Review: the person decides
 
 Run the review (above) on `extract-<capability>`. Archiving makes the spec the
-baseline under `openspec/specs/`. A suspected bug the person chose to fix is
+baseline under `openspec/specs/`. Then settle each consistency row whose
+verdict is `question extract-<capability> Q<n>` as the person answered it:
+when this spec was the wrong side and was corrected in the review, the row
+is already stale and a checker compares the pair again; when the other
+side is wrong, amend that capability (see Amend), which makes the row stale
+too; when the person keeps the difference, record it as a row of `##
+Consistency decisions` in the plan (`| D<n> | <pair> | <topic> | <the
+decision> |`) and write `accepted D<n>` as the verdict, keeping the `<!--
+pair ... -->` code. A question row left after the archive stops `gate.mjs
+port-ready` of both sides. A suspected bug the person chose to fix is
 not fixed during the migration: add it to the plan's `## Follow-up` list (see
 Words); the finish step (step 6) lists it in the hand-over.
 
@@ -895,9 +925,12 @@ Words); the finish step (step 6) lists it in the hand-over.
    items --capability <capability>`, give those links to checkers as in
    step 3, item 6 (parts under
    `openspec/spec-relay/work/port-<capability>/consistency/`), and merge
-   them the same way. A `conflict`, `duplicate` or `term` between two
-   baselines is settled by an amendment of the wrong side (see Amend), after
-   which the pair is compared again.
+   them the same way. A `conflict` between two baselines is settled by an
+   amendment of the wrong side (see Amend), after which the pair is compared
+   again. For a `duplicate`, `term` or `unclear` between two baselines, ask
+   the person: an amendment, or a decision to keep it recorded as `accepted
+   D<n>` (step 4). `gate.mjs port-done` checks the same rows again, so a
+   spec amended during the port is compared again before it ends.
 2. `node "<kit>/scripts/openspec.mjs" new change port-<capability> --schema spec-relay-port`, then write
    proposal, design and tasks with `node "<kit>/scripts/openspec.mjs" instructions <artifact> --change
    port-<capability> --json`. Record the baseline hash in the proposal from
@@ -1061,8 +1094,11 @@ fixing a bug, is never an amendment: it is follow-up work after the migration.
    The rows of the consistency ledger that hold this capability go stale:
    compare those pairs again before the next `gate.mjs port-ready` (step 5)
    of either side, as in step 3, item 6 (`consistency.mjs items
-   --capability <capability>`). An amendment made to settle a `conflict`,
-   `duplicate` or `term` row is the usual case.
+   --capability <capability>`), with parts under
+   `openspec/spec-relay/work/amend-<capability>/consistency/`. An amendment
+   made to settle a `conflict`, `duplicate` or `term` row is the usual
+   case; an `accepted D<n>` row goes stale too and is compared again, and
+   the person decides again only when the difference is still there.
 4. Then do what impact.md says: an active port adds the tasks, adds the new
    scenarios' rows with `draft.mjs port-design --change <port> --update`
    (it also names rows whose scenario is gone and source cells the new trace
@@ -1082,8 +1118,8 @@ changes no behavior.
    no other change is open, and every link between two baselines has a
    current row in the consistency ledger (`consistency.mjs items --all`
    lists the rest; check them as in step 3, item 6, with parts under
-   `openspec/spec-relay/work/finish/consistency/`); otherwise do what
-   `problems` says first.
+   `openspec/spec-relay/work/finish/consistency/`, and settle what they find
+   as in step 5, item 1); otherwise do what `problems` says first.
    Run `node "<kit>/scripts/gate.mjs" coverage` too: a source file that no
    capability covers was never ported, and the hand-over must not hide it.
 2. `node "<kit>/scripts/openspec.mjs" new change finish --schema
