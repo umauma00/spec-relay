@@ -1,8 +1,19 @@
 # 前の版から更新するとき
 
-キットを新しい版にしたときは、更新する前に使っていた版の節（「X から更新するとき」）と、それより上の節をすべて読んでください（上ほど新しい版です）。スキーマの削除と導入スクリプトの再実行は1回で済みます。
+キットを新しい版にしたら、移行中のリポジトリで導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`。オーケストレーターに頼めば、doctor の結果を見て実行します）。何段飛ばした更新でも、この1回で済みます（0.6.0 以前から上げるときだけは、下の「0.6.0 から更新するとき」の手順です）。
 
-導入スクリプトが `openspec/spec-relay/tools/` の package.json か package-lock.json を「衝突」と表示したときは、新しいキットが固定する OpenSpec の版が変わっています。その2つを消してから、導入スクリプトをもう一度実行してください。
+- 前の版のキットが置いたスキーマ（`openspec/schemas/spec-relay-*`）と、OpenSpec の版を固定するファイル（`openspec/spec-relay/tools/` の package.json・package-lock.json・.gitignore）は、そのまま新しい版に置き換わります（変更の予定に `replace` と出ます）。0.24.0 より前のキットのときのように、先に消す必要はありません。下の節にある「`openspec/schemas/spec-relay-*` を削除してから」「package.json と package-lock.json を消してから」は飛ばしてください。
+- 置き換えるのは、中身がキットの過去のどれかの版と同じファイルだけです。誰かが書き換えたファイルは「衝突」と表示して、何も変えずに止まります。元に戻すか消してから、もう一度実行してください。
+- 導入スクリプトは、最後に導入したキットの版を `openspec/spec-relay/kit.json` に記録します。終わったら、これを含めて変わったファイルをコミットします。ほかの人は pull したあと、自分のキットも同じ版に更新してから、導入スクリプトを実行します。古いキットのままだと、新しい版がスキーマや固定する OpenSpec を変えていれば、導入スクリプトは kit.json を衝突として止まり、doctor は `kit-version` で FAIL にします（新しい版のファイルを、書き換えられたものとして扱わないためです）。変えていなければ、doctor の WARN で知らせるだけです。
+
+そのうえで、更新する前に使っていた版の節（「X から更新するとき」）と、それより上の節をすべて読んでください（上ほど新しい版です）。進行中の change で起きることと、手で決めることが書いてあります。
+
+## 0.23.0 から更新するとき
+
+0.24.0 で、導入スクリプトが前の版のスキーマと `openspec/spec-relay/tools/` のファイルを自動で置き換えるようになりました（上の説明）。スキーマと固定する OpenSpec の版は変わっていませんが、導入スクリプトを一度実行してください。キットの版が `openspec/spec-relay/kit.json` に記録されるので、コミットします。
+
+- 0.6.0 以前に導入したリポジトリでは、`openspec update` のあとに `.github/` に残る 0.6.0 の案内のファイル（キットが書いた中身のままのもの）も、導入スクリプトが消します（「0.6.0 から更新するとき」の 3）。
+- 進行中の change で起きることはありません。
 
 ## 0.23.0 から更新するとき
 
@@ -150,8 +161,8 @@ Playwright（`@playwright/test`、Apache-2.0）はキットに同梱していま
 
 1. 導入スクリプトをもう一度実行します（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。`openspec/spec-relay/tools/` にキットが固定する OpenSpec が入り、`.github/` に残ったファイルを `leftover` として表示して止まります（まだ完了ではありません）。
 2. 移行対象のリポジトリで `node "<キットのフォルダー>/scripts/openspec.mjs" update` を実行します。OpenSpec が置いた古いファイルは消え、`.agents/skills/` に新しいスキルが入ります。
-3. 0.6.0 が無効にしたファイル（`.github/skills/openspec-*` と `.github/prompts/opsx-*` のうち、`<!-- spec-relay: disabled -->` を含むもの。apply・archive・sync、広いプロファイルでは bulk-archive も）は、編集済みとして残ることがあります（OpenSpec 2.1.1 では `.github/prompts/opsx-*` が残ります）。中身はキットの案内だけなので、残ったものは手で消してください。残っていると導入スクリプトは完了せず、doctor は `legacy` で FAIL を出します（元フォルダーが `.` のときは、調査の gate も元コードとして数えます）。
-4. 導入スクリプトをもう一度実行し、`.agents/skills/` の OpenSpec 標準のスキルを無効にします。最後に doctor で FAIL がないことを確かめ、`openspec/spec-relay/tools/` の3つのファイル、`.agents/skills/`、`.github/` で消えたファイルをコミットします。
+3. 導入スクリプトをもう一度実行します。0.6.0 が無効にしたファイル（`.github/skills/openspec-*` と `.github/prompts/opsx-*` のうち、キットの案内の中身のままのもの）は update のあとも残ることがあります（OpenSpec 2.1.1 では `.github/prompts/opsx-*` が残ります）。0.24.0 からは導入スクリプトがそれを消し、`.agents/skills/` の OpenSpec 標準のスキルを無効にします。update の前に自分で消さないでください（OpenSpec がそのワークフローを使わないものと読み、ホームフォルダーの OpenSpec 全体の設定から外すので、ほかのプロジェクトにも響きます）。
+4. 案内の中身に書き足したファイルや、OpenSpec が編集済みとして残したファイルは、`leftover` と表示されて導入スクリプトが完了しません（doctor は `legacy` で FAIL を出します。元フォルダーが `.` のときは、調査の gate も元コードとして数えます）。要るものを移してから手で消し、導入スクリプトをもう一度実行してください。最後に doctor で FAIL がないことを確かめ、`openspec/spec-relay/tools/` の3つのファイル、`.agents/skills/`、`.github/` で消えたファイルをコミットします。
 
 ## 0.5.0 から更新するとき
 
