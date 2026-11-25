@@ -227,7 +227,7 @@ const HANDLING_COLUMN = /^(handling|扱い)(?![a-z0-9_])/i;
 const POLICY_COLUMN = /^(policy|方針)(?![a-z0-9_])/i;
 const NOTES_COLUMN = /^(notes?|備考|メモ|理由)(?![a-z0-9_])/i;
 
-const withoutId = (s, letter) => norm(plain(s).replace(new RegExp(`^${letter}\\d+\\s*[.:)-]?\\s*`, 'i'), ''));
+const withoutId = (s, letter) => norm(plain(s).replace(new RegExp(`^${letter}\\d+\\b(?:[.:)-]|\\s+(?:[:)]|[.-](?=\\s|$)))?\\s*`, 'i'), ''));
 
 function commonReview(dir, problems) {
   const review = readIf(path.join(dir, 'review.md'), problems);

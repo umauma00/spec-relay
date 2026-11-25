@@ -47,6 +47,11 @@ artifacts:
       conventions.md, ui.md and verification.md. Follow them; do not
       re-decide them.
 
+      Run `node "<kit>/scripts/draft.mjs" port-design --change <change>`
+      first: it writes the Screens, Scenario checks and Source references
+      tables below from the files they copy (with `--update` after an
+      amendment). Do not retype them.
+
       Sections:
       - **Structure**: The module of this capability's context (from
         architecture.md), the files inside it, its public API additions and

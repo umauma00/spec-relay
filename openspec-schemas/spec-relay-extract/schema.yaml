@@ -314,6 +314,10 @@ artifacts:
     template: review.md
     instruction: |
       Build the checklist the HUMAN reviewer works through (step 4).
+      Write it with `node "<kit>/scripts/draft.mjs" review --change <change>`,
+      which builds this list from the artifacts; after a change that adds,
+      renames or removes a subject, run it again with `--update`, which keeps
+      the reviewer's ticks, decisions and notes. Do not retype the list.
       `gate.mjs review` checks this structure before the change may be archived.
       - Keep the `Reviewer:` line; the reviewer's name goes there.
       - One checkbox per requirement: `- [ ] R<n> <requirement name>` under
