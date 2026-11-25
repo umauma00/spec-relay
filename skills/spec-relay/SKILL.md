@@ -18,6 +18,7 @@ The kit's own files are two directories above this skill:
 [scripts/status.mjs](../../scripts/status.mjs),
 [scripts/metrics.mjs](../../scripts/metrics.mjs),
 [scripts/merge.mjs](../../scripts/merge.mjs),
+[scripts/draft.mjs](../../scripts/draft.mjs),
 [scripts/verify.mjs](../../scripts/verify.mjs),
 [scripts/compare.mjs](../../scripts/compare.mjs) and
 [scripts/http.mjs](../../scripts/http.mjs) ([docs/COMPARE.md](../../docs/COMPARE.md)),
@@ -251,9 +252,16 @@ not wash out these instructions.
    return a short report. Check their work with `node "<kit>/scripts/openspec.mjs" validate`,
    `node "<kit>/scripts/openspec.mjs" status --change`, `gate.mjs` and `merge.mjs`, and read an
    artifact yourself only for what you must tell or ask the person (questions,
-   crosscheck rows that are not `confirmed`, the counts in your report). To
-   list requirement and screen names, search for lines starting with
-   `### Requirement:` and `### Screen:` instead of reading the files.
+   crosscheck rows that are not `confirmed`, the counts in your report). For
+   the numbered requirement and screen names a checker gets, run `node
+   "<kit>/scripts/draft.mjs" items --change <change>` instead of reading or
+   searching the files.
+   **Scripts, not models, for what follows from files.** Where a kit script
+   writes a part of an artifact (`draft.mjs review`, `draft.mjs port-design`,
+   `merge.mjs`, `finish.mjs draft` and `run`, `render.mjs`), run it; never
+   retype or redraw that part yourself, and never give it to a subagent. A
+   copy made by hand drops or reorders lines, and costs a model's time and
+   credits for nothing a script would not do exactly.
 4. **One writer per file.** No two subagents of a wave write the same file.
    Analysts and checkers write only the paths you give them, the implementer
    only its capability's module. Only you write `review.md`, `plan.md`,
@@ -344,7 +352,12 @@ you assist. This gate is the point of the kit.
    it in the canvas meanwhile. Write their
    decision after `decision:` and their name after `Reviewer:`. When they ask
    for a change, edit the artifacts, untick every item you changed, validate,
-   render again and ask again.
+   render again and ask again. When a change adds, renames or removes a
+   requirement, screen, question, context or leftover, run `node
+   "<kit>/scripts/draft.mjs" review --change <change> --update`: it rebuilds
+   the items, keeps the person's ticks, decisions and notes for every subject
+   that is still there, and unticks an item whose words changed. Tell the
+   person about every item in its `removed` list that was ticked or had notes.
    - A `fix:` note under an item (written in the file or the canvas, or
      sent from the canvas as "[canvas] ... change requests"), or a change
      asked for in the chat, is that request. Correct the artifacts (in
@@ -463,15 +476,17 @@ the domain, not the folders.
    Windows device name (`con`, `prn`, `aux`, `nul`, `com1`...), not ending in
    `-v<digits>`, and short, because the path repeats inside
    `openspec/changes/archive/` and Windows limits paths to 260 characters.
-3. Write review.md, validate (`node "<kit>/scripts/openspec.mjs" validate survey --strict`), then run
+3. Write review.md with `node "<kit>/scripts/draft.mjs" review --change
+   <change>` (it takes the contexts and databases from the artifacts and keeps
+   the template's fixed items), validate (`node "<kit>/scripts/openspec.mjs" validate survey --strict`), then run
    the review (above). `gate.mjs review` also fails while a source file is
    missing from the inventory, or a file that is not `excluded` belongs to no
    capability (the indented paths under each capability in capabilities.md).
    Tell the person which files are excluded and why: an excluded file is
    never specified or ported, so that box (C1) is theirs, and the gate fails
-   on an excluded row with no reason in Notes. Keep the template's M1-M5
-   and C1 items in review.md even when one has nothing to decide (say so in
-   the item): the gate fails when one is missing. While the person reviews, ask the questions the
+   on an excluded row with no reason in Notes. The template's M1-M5 and C1
+   items stay in review.md even when one has nothing to decide (tell the
+   person so when you reach it): the gate fails when one is missing. While the person reviews, ask the questions the
    target design needs (step 2) so that it can start right after the archive.
 4. After archiving, write the plan: copy capabilities.md's lists under a
    `## Capabilities` heading in `openspec/spec-relay/plan.md`, keeping the
@@ -543,7 +558,8 @@ the domain, not the folders.
    ui.md and data.md to three analysts in one wave, then
    verification.md (it suggests level C from ui.md's policies), with the
    person's answers in each task.
-3. Write review.md, validate, and run the review (above). While the person
+3. Write review.md with `node "<kit>/scripts/draft.mjs" review --change
+   <change>`, validate, and run the review (above). While the person
    reviews the target design, start analyzing (step 3) the capabilities in
    `nextToAnalyze`: an extract change needs the archived survey, not the target
    design.
@@ -569,8 +585,8 @@ waves.
 3. **Crosscheck.** Give the change's specs, screens.md and trace.md paths to
    `spec-relay-checker` subagents, and nothing else: no notes, no earlier
    drafts. Give each checker its items as numbered names (`R1 <name>`,
-   `S1 <name>`, numbered in spec and screens.md order, from your search), so
-   the numbers match review.md. For a large capability, split the items into
+   `S1 <name>`, as `draft.mjs items --change extract-<capability>` prints
+   them), so the numbers match review.md. For a large capability, split the items into
    groups (R1-R15, R16-R30, S1-S8) in one wave. Each checker writes
    `openspec/spec-relay/work/extract-<capability>/crosscheck-<nn>.md`; merge
    them with `merge.mjs --into
@@ -620,14 +636,15 @@ waves.
    delete from coverage.md. When sites.mjs writes no group (the files hold no
    code), coverage.md keeps its empty table.
 5. **Questions and review.** Write questions.md from the analysts' reported
-   doubts and the rows moved to questions, then review.md (names by search,
-   not by reading the spec). When `gate.mjs review` says that sites with
-   marker lines are judged `no behavior` or `no effect`, add `## 4.
-   Coverage` with the item `- [ ] C1 ...` in the words it gives (they end
-   with a code that names the list); the review page lists those sites
-   under the omission check with the same code, and the person decides
-   whether they may be left out. When the list changes later, the gate
-   gives new words: write them and leave the item unticked.
+   doubts and the rows moved to questions, then run `node
+   "<kit>/scripts/draft.mjs" review --change extract-<capability>`. It writes
+   review.md: one item per requirement, screen and question, and, when sites
+   with marker lines are judged `no behavior` or `no effect`, `## 4.
+   Coverage` with the C1 item in the gate's words (they end with a code that
+   names the list); the review page lists those sites under the omission
+   check with the same code, and the person decides whether they may be left
+   out. When the list changes later, run it again with `--update`: the new
+   C1 words are unticked.
 6. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
    analyst fix every error and warning. `gate.mjs review` also checks the
    coverage, so the person does not: source-map.md holds every file the plan
@@ -658,15 +675,18 @@ Words); the finish step (step 6) lists it in the hand-over.
 2. `node "<kit>/scripts/openspec.mjs" new change port-<capability> --schema spec-relay-port`, then write
    proposal, design and tasks with `node "<kit>/scripts/openspec.mjs" instructions <artifact> --change
    port-<capability> --json`. Record the baseline hash in the proposal from
-   `node "<kit>/scripts/gate.mjs" baseline --capability <capability>`. Follow
-   the target design; copy the source references for each requirement from the
-   archived extract change's `trace.md` (and any later amendment's) into
-   design.md. In design.md's Screens section, give each screen its policy from
-   ui.md, and list under Carried files the carry files this port copies;
-   `gate.mjs port-done` compares each copy with its source. With a B1 or B2
-   command, fill design.md's Scenario checks: one row per baseline scenario,
-   `e2e` for what a user does on a web screen (B2), `compare` for what a
-   recorded case covers (B1), `unit` for the rest. If the archived
+   `node "<kit>/scripts/gate.mjs" baseline --capability <capability>`. Then
+   run `node "<kit>/scripts/draft.mjs" port-design --change
+   port-<capability>`: it writes design.md's Screens table (each screen with
+   its policy from ui.md), its Scenario checks (one row per baseline
+   scenario) and its Source references (from the archived extract's
+   `trace.md`, and any later amendment's, which wins). Follow the target
+   design for the rest; list under Carried files the carry files this port
+   copies; `gate.mjs port-done` compares each copy with its source. With a B1
+   or B2 command, choose each scenario's check in the Check column the
+   script left open: `e2e` for what a user does on a web screen (B2),
+   `compare` for what a recorded case covers (B1), `unit` for the rest
+   (without B1 or B2 the script writes `unit` everywhere). If the archived
    target design has no ui.md (it was made before kit 0.8.0), ask the person
    for each screen's policy and record the answers under Decisions; never
    choose one yourself.
@@ -744,8 +764,8 @@ Words); the finish step (step 6) lists it in the hand-over.
    under `openspec/spec-relay/local/e2e/` (git ignores it); give the path to
    the person when a screenshot differs.
 7. **Port crosscheck.** Number the baseline spec's requirements (`R1 <name>`)
-   and the archived extract change's screens (`S1 <name>`) by search, as in
-   step 3, and give them to `spec-relay-checker` subagents as a **port
+   and the archived extract change's screens (`S1 <name>`) with `draft.mjs
+   items --change port-<capability>`, and give them to `spec-relay-checker` subagents as a **port
    check**: the paths of the baseline spec, the archived extract change's
    screens.md and trace.md (and any later amendment's trace.md), this change's
    design.md, the archived target design's conventions.md, the target module's
@@ -798,13 +818,16 @@ fixing a bug, is never an amendment: it is follow-up work after the migration.
    `-v<n>` for a second amendment of the same capability).
 2. Give reason, specs and trace to one `spec-relay-analyst` (schema
    `spec-relay-amend`), then the crosscheck to checkers as in step 3 (part
-   files merged by `merge.mjs`). Write impact.md and review.md yourself. A MODIFIED requirement replaces the whole block, and OpenSpec
+   files merged by `merge.mjs`). Write impact.md yourself and review.md with
+   `draft.mjs review --change amend-<capability>`. A MODIFIED requirement replaces the whole block, and OpenSpec
    refuses to archive one that drops a scenario the baseline has, also when the
    requirement is removed and added again: keep every existing scenario name
    and correct its steps.
 3. Run the review (above). Archiving merges the delta into the baseline.
-4. Then do what impact.md says: an active port adds the tasks, updates its
-   implementation and records the new baseline hash (`gate.mjs port-done`
+4. Then do what impact.md says: an active port adds the tasks, adds the new
+   scenarios' rows with `draft.mjs port-design --change <port> --update`
+   (it also names rows whose scenario is gone and source cells the new trace
+   changed), updates its implementation and records the new baseline hash (`gate.mjs port-done`
    fails until it does); an archived port gets a new port change
    (`port-<capability>-v<n>`).
 
@@ -828,21 +851,29 @@ changes no behavior.
    archived ports, the commands of conventions.md, the levels of
    verification.md and the relationships of the context map. Never retype
    these lists; run `finish.mjs collect` to see them again.
-3. **Checks.** Run every command of checks.md over the whole target root, and
-   every chosen verification level for every context, and write the results
-   as the schema says (`pass`, `fail`, `not-run: <reason>`). For each
-   cross-context flow, name the test that covers it, or `none`. A
+3. **Checks.** Tell the person which commands will run (the Commands rows
+   of checks.md and the level commands of each archived port's design.md),
+   that it may take a while, and, when a context has B2 or C, that the test
+   copy of the old system must be stopped and nothing else may answer at the
+   new system's address. Then run `node "<kit>/scripts/finish.mjs" run
+   --change finish`. It runs every command of checks.md over the whole target
+   root and every chosen level of every context with its ports' commands,
+   writes `pass` or `fail` into checks.md and the target hash, and prints the
+   last lines of each failure. Never write those cells or the hash yourself.
+   Write `not-run: <reason>` only for a level the run could not run (a level
+   no archived port has a command for, or the source program cannot run),
+   and for each cross-context flow name the test that covers it, or `none`. A
    failure is fixed, never accepted: show it to the person and fix it through
    a new port change (`port-<capability>-v<n>`; `finish.mjs ready` then
-   waits for it), then run every check again. After the last run, write the
-   hash `node "<kit>/scripts/finish.mjs" hash` prints into checks.md.
+   waits for it), then run `finish.mjs run` again.
 4. **Leftovers.** Add a `verification` row for each `not-run` level and a
    `flow` row for each flow without a test. Propose a class and a reason for
    every row: `before-release`, `after-release` or `wont-fix`. Fix nothing
    here: a `TODO(port)` the person wants fixed now goes through a port change,
    then the draft is made again (delete leftovers.md first).
-5. **Handover and review.** Write handover.md and review.md from their
-   instructions, validate (`node "<kit>/scripts/openspec.mjs" validate finish
+5. **Handover and review.** Write handover.md from its instruction and
+   review.md with `draft.mjs review --change finish` (one item per leftover,
+   with its class), validate (`node "<kit>/scripts/openspec.mjs" validate finish
    --strict`) and run the review (above). Show the leftovers grouped by
    class, so that the person can accept a whole class at once, and put the
    `before-release` items first. `gate.mjs review --change finish` also fails

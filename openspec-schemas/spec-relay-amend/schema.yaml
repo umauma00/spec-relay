@@ -98,6 +98,10 @@ artifacts:
     template: review.md
     instruction: |
       Build the checklist the HUMAN reviewer works through.
+      Write it with `node "<kit>/scripts/draft.mjs" review --change <change>`,
+      which builds this list from the artifacts; after a change that adds,
+      renames or removes a subject, run it again with `--update`, which keeps
+      the reviewer's ticks, decisions and notes. Do not retype the list.
       - Keep the `Reviewer:` line.
       - Under `## 1. Requirements`, one checkbox per requirement in the delta
         (`- [ ] R<n> <requirement name>`), in delta order, MODIFIED, ADDED and

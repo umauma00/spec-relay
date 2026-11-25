@@ -20,9 +20,10 @@ scripts/coverage.mjs           ファイル単位の網羅の確認（gate.mjs �
 scripts/sites.mjs              元コードの箇所（メソッドや関数など）と目印の一覧。照合担当が箇所ごとに仕様の抜けを判定する台帳のもと
 scripts/hook.mjs               フックの本体（gate を通らない archive と保護されたファイルへの書き込みを拒否）
 scripts/status.mjs             進捗の計算（TODO リスト・チャット用）と、次に並列で始めてよい作業
-scripts/finish.mjs             仕上げの工程（開始の確認、残りものの収集と下書き、移行先のハッシュ、仕上げの gate）
+scripts/finish.mjs             仕上げの工程（開始の確認、残りものの収集と下書き、全体のチェックの実行と記録、移行先のハッシュ、仕上げの gate）
 scripts/metrics.mjs            工程ごとにかかった時間の記録と集計
 scripts/merge.mjs              サブエージェントが分担して書いた表を1つの成果物にまとめる
+scripts/draft.mjs              ほかのファイルから決まる部分を書く（review.md の項目、照合に渡す R/S の番号、port の design.md の画面・シナリオ・元コードの表）
 scripts/verify.mjs             実装のテスト・境界チェック・比べ方を実行し、結果を記録する（port-done が読む）
 scripts/compare.mjs            比べ方 B1：元のプログラムから記録したケースと新しいコードの結果を1件ずつ比べる
 scripts/http.mjs               比べ方 B1 の HTTP 版：動いている元のシステムにリクエストを送って記録し、新しいシステムに同じリクエストを送る

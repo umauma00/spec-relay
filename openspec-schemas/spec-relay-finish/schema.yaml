@@ -13,26 +13,30 @@ artifacts:
 
       Start from the draft `node "<kit>/scripts/finish.mjs" draft --change
       <change>` writes (it never overwrites a file). Then:
+      - **Run**: `node "<kit>/scripts/finish.mjs" run --change <change>` runs
+        the Commands rows and every chosen level of every context with the
+        commands of that context's archived ports, and writes `pass` or
+        `fail` and the target hash into this file. Do not write those cells
+        yourself; run it again after every fix.
       - **Target**: keep the `Target: sha256:<hash>` line. It fingerprints
-        every file under the target root. After the last fix, run
-        `node "<kit>/scripts/finish.mjs" hash` and write the hash it prints:
+        every file under the target root; `finish.mjs run` writes it (or
+        `node "<kit>/scripts/finish.mjs" hash` prints it):
         `gate.mjs review` fails when the code changed after the checks.
       - **Commands**: one row per command in the archived target design's
         conventions.md (`## Commands`), run over the whole target root, in
-        PowerShell on Windows. Result is `pass` or `fail`; add the counts
-        (tests run, passed) and the date in Notes.
+        PowerShell on Windows. `finish.mjs run` writes Result (`pass` or
+        `fail`) and a dated note; you may add the counts (tests run, passed)
+        in Notes.
       - **Verification levels**: one row per context. For each level the
-        archived target design's verification.md chose for it (A always), run
-        it again for every capability of that context together (a B1 command
-        `spec-relay-compare <options>` from a port design.md runs as
-        `node "<kit>/scripts/compare.mjs" <options> --cwd <target root>`, and
-        a B2 or C command `spec-relay-e2e <options>` as `node
-        "<kit>/scripts/e2e.mjs" new --capability <capability> <options>`, which
-        runs the screen tests that passed on the old system in that
-        capability's port) and write
-        `pass`, `fail` or `not-run: <reason>` (the source program could not be
-        run, for example). A level not chosen stays `-`. Every `not-run`
-        needs a `verification` row in leftovers.md.
+        archived target design's verification.md chose for it (A always),
+        `finish.mjs run` runs it again for every capability of that context
+        (a B1 command `spec-relay-compare` with the kit's compare.mjs, a B2 or
+        C command `spec-relay-e2e` with the screen tests that passed on the
+        old system in that capability's port) and writes `pass` or `fail`.
+        Write `not-run: <reason>` only for a chosen level it could not run
+        (no port of the context has its command, the source program could
+        not be run). A level not chosen stays `-`. Every `not-run` needs a
+        `verification` row in leftovers.md.
       - **Cross-context flows**: for each relationship in the archived
         survey's context-map.md, the test that covers it (a test of the
         downstream module that goes through the upstream module's public API
@@ -111,6 +115,10 @@ artifacts:
     template: review.md
     instruction: |
       Build the checklist the HUMAN reviewer works through. Keep it short:
+      Write it with `node "<kit>/scripts/draft.mjs" review --change <change>`,
+      which builds this list from the artifacts; after a change that adds,
+      renames or removes a subject, run it again with `--update`, which keeps
+      the reviewer's ticks, decisions and notes. Do not retype the list.
       the person decides the leftovers' classes and accepts the verdict.
       - Keep the `Reviewer:` line.
       - Under `## 1. Checks`: `C1 The whole-system checks`.

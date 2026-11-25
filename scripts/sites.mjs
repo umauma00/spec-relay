@@ -1142,14 +1142,16 @@ export function checkLedger(root, dir, { requirements, screens, asked, assignmen
   // the new system on a checker's word alone. The review page lists these sites;
   // the person accepts them with one item that states how many there are, so the
   // item goes stale (and the gate stops) when another such site appears.
-  if (boxes && quiet.length) {
+  if (!quiet.length) return {};
+  const code = listCode(quiet);
+  const n = `${quiet.length} site${quiet.length === 1 ? '' : 's'}`;
+  const wording = `C1 The marker lines of ${n} are judged to hold nothing to migrate (list ${code})`;
+  if (boxes) {
     const item = boxes.find((b) => /^C1\b/i.test(b.plain));
-    const code = listCode(quiet);
-    const n = `${quiet.length} site${quiet.length === 1 ? '' : 's'}`;
-    const wording = `C1 The marker lines of ${n} are judged to hold nothing to migrate (list ${code})`;
     if (!item) problems.push(`review.md has no C1 item: ${n} with marker lines ${quiet.length === 1 ? 'is' : 'are'} judged "no behavior" or "no effect" (${quiet.slice(0, 3).join('; ')}${quiet.length > 3 ? '; ...' : ''}); add "- [ ] ${wording}" under "## 4. Coverage", for the person to decide`);
     else if (!new RegExp(`(^|[^0-9a-z])${code}([^0-9a-z]|$)`, 'i').test(item.plain)) problems.push(`review item C1 is not for the list as it is now (${n} with marker lines judged "no behavior" or "no effect"); write "- [ ] ${wording}" and leave it unticked, so the person sees the list again`);
   }
+  return { wording };
 }
 
 // A requirement's name as traceRefs keys it.

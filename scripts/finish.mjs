@@ -13,11 +13,18 @@
 //   node finish.mjs draft --change NAME [--root DIR]
 //        writes checks.md and leftovers.md of the finish change from `collect`
 //        (only the ones that do not exist yet), so no model retypes the lists
+//   node finish.mjs run --change NAME [--timeout-minutes N] [--root DIR]
+//        runs every command of checks.md's ## Commands and, for every context,
+//        each level verification.md chose with the commands of that context's
+//        archived ports (the same commands their verify runs used), over the
+//        whole target root; writes pass or fail into checks.md and the target
+//        hash. The cross-context flows are left to the orchestrator.
 //   node finish.mjs hash [--root DIR]
 //        the fingerprint of the target root that checks.md records
 //
 // `gate.mjs review --change finish` runs checkFinish below. Prints JSON and exits
-// 0 when ok, 1 when not, 2 on bad usage, like gate.mjs. Read-only except `draft`.
+// 0 when ok, 1 when not, 2 on bad usage, like gate.mjs. Read-only except `draft`
+// and `run`.
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -460,6 +467,173 @@ export function draft(root, change) {
   return { ok: facts.problems.length === 0, written, kept, markers: facts.markers.length, followUps: facts.followUps.length, risks: facts.risks.length, problems: facts.problems };
 }
 
+// ---------------------------------------------------------------- run
+
+const cellsOf = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
+const rowLine = (cells) => `| ${cells.join(' | ')} |`;
+// A command written in a table cell, without code marks; '' for a placeholder.
+const commandIn = (cell = '') => {
+  const text = stripComments(cell).replace(/\\\|/g, '|').trim().replace(/^`+([\s\S]*?)`+$/, '$1').trim();
+  return /^(<.*>|tbd|todo|-|none|なし|\.\.\.|…)?$/i.test(text) ? '' : text;
+};
+const RUN_NOTE = /\s*(?:;\s*)?finish\.mjs run [^;|]*/g;
+// The Notes cell with this run's note in place of an earlier one.
+const noted = (cell, note) => {
+  const kept = stripComments(cell ?? '').replace(RUN_NOTE, '').replace(/^\s*;\s*|\s*;\s*$/g, '').trim();
+  return kept ? `${kept}; ${note}` : note;
+};
+
+// The table rows of the `## <heading>` section of checks.md, with their line
+// indexes: { header, at: [index], rows: [cells] }, or null.
+function tableIn(lines, heading) {
+  let inside = false;
+  let fenced = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+    if (fenced) continue;
+    const h2 = line.match(/^##\s+(.*?)\s*#*\s*$/);
+    if (h2) { inside = heading.test(h2[1].trim()); continue; }
+    if (!inside || !/^\s*\|/.test(line) || !/^\s*\|?\s*:?-{2,}/.test(lines[i + 1] ?? '')) continue;
+    const table = { header: cellsOf(line).map((c) => plain(c).toLowerCase()), at: [], rows: [] };
+    for (i += 2; i < lines.length && /^\s*\|/.test(lines[i]); i += 1) { table.at.push(i); table.rows.push(cellsOf(lines[i])); }
+    return table;
+  }
+  return null;
+}
+
+const TAIL = 40;
+const tailOf = (text) => (text ?? '').replace(/\s+$/, '').split(/\r?\n/).slice(-TAIL).join('\n');
+const say = (line) => process.stderr.write(`finish: ${line}\n`);
+
+// Runs every check of checks.md over the whole target root and writes the
+// results into it: each command of ## Commands, and for every context each
+// level verification.md chose, with the commands of that context's archived
+// ports (A and the boundary check from their design.md or conventions.md, B1,
+// B2 and C from their design.md). A command the Commands table already ran is
+// not run again for a level. Every check runs, also after a failure, so that
+// one run shows everything to fix. Then it writes the target hash. The
+// cross-context flows stay the orchestrator's: which test covers a flow is a
+// reading of the tests, not a run.
+export async function runChecks(root, change, { timeoutMs = 60 * 60 * 1000, run = null, progress = say } = {}) {
+  if (!change || baseName(change) !== FINISH) return { ok: false, problems: [`the finish change is named ${FINISH} (or ${FINISH}-v<n>), not ${change}`] };
+  const dir = path.join(root, 'openspec/changes', change);
+  const file = path.join(dir, 'checks.md');
+  const problems = [];
+  const text = readIf(file, problems);
+  if (text === null) return { ok: false, problems: [`openspec/changes/${change}/checks.md is missing; run finish.mjs draft --change ${change} first`] };
+  if (problems.length) return { ok: false, problems };
+  const files = targetFiles(root);
+  if (files === null) return { ok: false, problems: ['the target root in openspec/config.yaml is not a folder inside the repository'] };
+  const cwd = path.resolve(root, rootValue(root, 'Target root'));
+  const { runLevel } = await import('./verify.mjs');
+  const { chainProblem, verifyPlan } = await import('./gate.mjs');
+  const runOne = run ?? runLevel;
+  const date = new Date().toISOString().slice(0, 10);
+  const crlf = /\r\n/.test(text);
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+
+  // ## Commands
+  const ran = new Map();
+  const commands = [];
+  const table = tableIn(lines, /^commands?\b|^コマンド/i);
+  if (!table) problems.push('checks.md has no table under ## Commands');
+  else {
+    const at = (pattern, fallback) => { const i = table.header.findIndex((h) => pattern.test(h)); return i >= 0 ? i : fallback; };
+    const [cCommand, cResult, cNotes] = [at(/^(command|コマンド)/, 1), at(/^(result|結果)/, 2), at(/^(notes?|備考|メモ)/, 3)];
+    for (const [n, cells] of table.rows.entries()) {
+      const purpose = plain(cells[0] ?? '');
+      const command = commandIn(cells[cCommand]);
+      if (!purpose && !command) continue;
+      if (!command) { problems.push(`checks.md: the ${purpose || 'unnamed'} row names no command`); continue; }
+      const chained = chainProblem(command);
+      if (chained) { problems.push(`checks.md ${purpose}: ${chained}`); continue; }
+      progress(`${purpose}: ${command}`);
+      const result = await runOne(command, cwd, { timeoutMs, root });
+      progress(`${purpose}: ${result.exitCode === 0 ? 'passed' : result.timedOut ? 'timed out' : `failed, exit code ${result.exitCode}`} in ${result.seconds}s`);
+      ran.set(command, result);
+      commands.push({ purpose, command, exitCode: result.exitCode, seconds: result.seconds, ...(result.timedOut ? { timedOut: true } : {}), ...(result.exitCode !== 0 ? { tail: tailOf(result.output) } : {}) });
+      while (cells.length <= Math.max(cResult, cNotes)) cells.push('');
+      cells[cResult] = result.exitCode === 0 ? 'pass' : 'fail';
+      cells[cNotes] = noted(cells[cNotes], `finish.mjs run ${date}, ${result.seconds} s`);
+      lines[table.at[n]] = rowLine(cells);
+    }
+  }
+
+  // ## Verification levels, per context, over its archived ports.
+  const changes = path.join(root, 'openspec/changes');
+  const byContext = new Map();
+  for (const capability of planCapabilities(readIf(path.join(root, PLAN), problems))) {
+    const portDir = archivedChange(root, `port-${capabilitySegments(capability).join('-')}`);
+    if (!portDir) continue;
+    const context = capabilitySegments(capability)[0];
+    if (!byContext.has(context)) byContext.set(context, []);
+    byContext.get(context).push({ capability, change: path.relative(changes, portDir).split(path.sep).join('/') });
+  }
+  const levels = [];
+  const outcome = new Map();
+  for (const [context, ports] of byContext) {
+    for (const port of ports) {
+      const plan = verifyPlan(root, port.change, port.capability);
+      for (const p of plan.problems) problems.push(`${port.capability}: ${p}`);
+      const done = new Map();
+      for (const { level, command } of plan.runs) {
+        if (level === 'boundary') continue;
+        let result = ran.get(command) ?? done.get(command);
+        const again = Boolean(result);
+        if (!result) {
+          progress(`${context} ${level} (${port.capability}): ${command}`);
+          result = await runOne(command, cwd, { timeoutMs, root, change: null, capability: port.capability });
+          progress(`${context} ${level}: ${result.exitCode === 0 ? 'passed' : result.timedOut ? 'timed out' : `failed, exit code ${result.exitCode}`} in ${result.seconds}s`);
+          done.set(command, result);
+        }
+        levels.push({ context, capability: port.capability, level, command, exitCode: result.exitCode, ...(again ? { sameAs: 'an earlier run' } : { seconds: result.seconds }), ...(result.exitCode !== 0 && !again ? { tail: tailOf(result.output) } : {}) });
+        const key = `${context}\0${level}`;
+        const was = outcome.get(key) ?? { pass: true, failed: [] };
+        if (result.exitCode !== 0) { was.pass = false; was.failed.push(port.capability); }
+        outcome.set(key, was);
+      }
+    }
+  }
+  const lt = tableIn(lines, /^verification\b|^検証|^比べ方/i);
+  if (!lt) problems.push('checks.md has no table under ## Verification levels');
+  else {
+    const colOf = (level) => lt.header.findIndex((h) => new RegExp(`^${level.toLowerCase()}(?![0-9a-z])`).test(h));
+    const notesAt = lt.header.findIndex((h) => /^(notes?|備考|メモ)/.test(h));
+    for (const [n, cells] of lt.rows.entries()) {
+      const context = plain(cells[0] ?? '').toLowerCase();
+      const failedNotes = [];
+      let touched = false;
+      for (const level of LEVELS) {
+        const result = outcome.get(`${context}\0${level}`);
+        const c = colOf(level);
+        if (!result || c < 0) continue;
+        while (cells.length <= c) cells.push('');
+        cells[c] = result.pass ? 'pass' : 'fail';
+        touched = true;
+        if (!result.pass) failedNotes.push(`${level} failed in ${result.failed.join(', ')}`);
+      }
+      if (touched && notesAt >= 0) {
+        while (cells.length <= notesAt) cells.push('');
+        cells[notesAt] = noted(cells[notesAt], `finish.mjs run ${date}${failedNotes.length ? `: ${failedNotes.join(', ')}` : ''}`);
+      }
+      if (touched) lines[lt.at[n]] = rowLine(cells);
+    }
+    for (const context of byContext.keys()) if (!lt.rows.some((cells) => plain(cells[0] ?? '').toLowerCase() === context)) problems.push(`checks.md has no verification row for context ${context}`);
+  }
+
+  // The fingerprint of the code the checks ran on.
+  const sha256 = targetHash(root, targetFiles(root), problems);
+  const hashAt = lines.findIndex((l) => /^Target:\s*sha256:/i.test(l));
+  if (hashAt >= 0) lines[hashAt] = `Target: sha256:${sha256}`;
+  else lines.splice(1, 0, '', `Target: sha256:${sha256}`);
+  const out = lines.join('\n');
+  try { fs.writeFileSync(file, crlf ? out.replace(/\n/g, '\r\n') : out); } catch (error) { problems.push(`could not write checks.md: ${error.message}`); }
+  const failed = [...commands, ...levels].filter((r) => r.exitCode !== 0);
+  for (const r of failed) problems.push(`${r.purpose ?? `level ${r.level} of ${r.capability}`} failed: ${r.command}`);
+  return { ok: problems.length === 0, file: `openspec/changes/${change}/checks.md`, target: sha256, commands, levels, problems };
+}
+
 // ---------------------------------------------------------------- CLI
 
 const NEXT = {
@@ -479,7 +653,7 @@ export function main(argv) {
   const [command, ...rest] = argv;
   const opts = { root: process.cwd() };
   for (let i = 0; i < rest.length; i += 2) {
-    const key = { '--change': 'change', '--root': 'root', '--lang': 'lang' }[rest[i]];
+    const key = { '--change': 'change', '--root': 'root', '--lang': 'lang', '--timeout-minutes': 'timeout' }[rest[i]];
     if (!key || rest[i + 1] === undefined) return usage();
     opts[key] = rest[i + 1];
   }
@@ -494,6 +668,14 @@ export function main(argv) {
     result.next = { person: [result.ok ? words.ready : words.notReady], agent: result.problems };
   } else if (command === 'collect') result = collect(opts.root);
   else if (command === 'draft' && opts.change) result = draft(opts.root, opts.change);
+  else if (command === 'run' && opts.change) {
+    const minutes = Number(opts.timeout ?? 60);
+    if (!(minutes > 0) || minutes * 60 * 1000 > 2 ** 31 - 1) return usage();
+    return runChecks(opts.root, opts.change, { timeoutMs: minutes * 60 * 1000 }).then((r) => {
+      console.log(ascii(JSON.stringify(r, null, 2)));
+      return r.ok ? 0 : 1;
+    });
+  }
   else if (command === 'hash') {
     const files = targetFiles(opts.root);
     result = files ? { ok: true, target: rootValue(opts.root, 'Target root'), files: files.length, sha256: targetHash(opts.root, files) } : { ok: false, problems: ['the target root in openspec/config.yaml is not a folder inside the repository'] };
@@ -503,7 +685,7 @@ export function main(argv) {
 }
 
 function usage() {
-  console.error('Usage: node finish.mjs ready | collect | draft --change NAME | hash [--root DIR] [--lang ja|en]');
+  console.error('Usage: node finish.mjs ready | collect | draft --change NAME | run --change NAME [--timeout-minutes N] | hash [--root DIR] [--lang ja|en]');
   return 2;
 }
 
@@ -512,4 +694,4 @@ function invokedDirectly() {
   try { return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url)); } catch { return false; }
 }
 
-if (invokedDirectly()) process.exitCode = main(process.argv.slice(2));
+if (invokedDirectly()) Promise.resolve(main(process.argv.slice(2))).then((code) => { process.exitCode = code; });

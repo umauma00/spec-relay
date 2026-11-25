@@ -4,6 +4,17 @@
 
 導入スクリプトが `openspec/spec-relay/tools/` の package.json か package-lock.json を「衝突」と表示したときは、新しいキットが固定する OpenSpec の版が変わっています。その2つを消してから、導入スクリプトをもう一度実行してください。
 
+## 0.23.0 から更新するとき
+
+0.24.0 で、ほかのファイルから決まる部分をスクリプトが書くようにしました（モデルが書き写さないため）。6つのスキーマ（調査・移行先の設計・解析・修正・port・仕上げ）の説明文が変わったので、`openspec/schemas/spec-relay-*` を削除してから導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。archive 済みの change はそのままです。
+
+| 変わったこと | 進行中の change で起きること |
+|---|---|
+| review.md は `draft.mjs review --change <change>` が成果物から作る。直しで要件・画面・質問などが増えたり名前が変わったりしたら `--update` で作り直す（人のチェック・判断・fix や hold のメモは残り、文言が変わった項目はチェックが外れる） | なし。すでにある review.md は `--update` を付けたときだけ書き換わる |
+| 照合担当に渡す番号付きの名前（`R1 <名前>`、`S1 <名前>`）は `draft.mjs items --change <change>` が出す | なし |
+| port の design.md の画面・シナリオ・元コードの表は `draft.mjs port-design --change port-<capability>` が書く。修正（amend）の後は `--update` で足りない行を足す | なし。書いてある表は変えず、ひな形のままの節だけを埋める |
+| 仕上げの全体のチェックは `finish.mjs run --change finish` が実行し、checks.md に pass・fail と移行先のハッシュを書く | なし。進行中の仕上げでも、次に実行すると結果の欄が書き換わる（Notes に足したメモは残る） |
+
 ## 0.22.0 から更新するとき
 
 0.23.0 で、レビュー画面を使いやすくしました。5つのスキーマ（調査・移行先の設計・解析・修正・仕上げ）の apply の説明文が変わったので、`openspec/schemas/spec-relay-*` を削除してから導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。archive 済みの change はそのままです。
