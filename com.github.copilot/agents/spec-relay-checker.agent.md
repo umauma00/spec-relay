@@ -1,6 +1,6 @@
 ---
 name: spec-relay-checker
-description: Independently check one spec-relay change against the source code - the inventory rows of a survey, the specs and screens of an extract or amend change before the human review (or a group of its sites, or of its entry points, for behavior the specs left out), or the new code of a port change. Reads code; writes only its own verdict file.
+description: Independently check one spec-relay change against the source code - the inventory rows of a survey, the specs and screens of an extract or amend change before the human review (or a group of its sites, or of its entry points, for behavior the specs left out), two capabilities' specs where they meet, or the new code of a port change. Reads code; writes only its own verdict file.
 tools: ["read", "search", "edit", "view", "grep", "glob"]
 user-invocable: false
 disable-model-invocation: false
@@ -188,6 +188,65 @@ again (after a fix), write every row of that entry point again, not only the
 changed one: your rows replace all of its rows. Return the file's path, the
 number of rows per verdict, every `gap` and `vague` row, the entry points you
 added, and how many source files you read.
+
+## Consistency check (two capabilities where they meet)
+
+A task that says `consistency check` gives you links between two
+capabilities: each with the pair (`a <-> b`), the topic and the pair code,
+and for each side the paths of its spec, its source map and its trace.md
+(when it has one), the survey's glossary, and the path of your verdict file.
+Each spec was written by a different analyst who never read the other, and
+each was checked only against its own code. Your job is where they meet.
+Read both specs whole, the rows of both source maps the topic names
+(Dependencies, Database, Source files) and, to settle a disagreement, the
+source code the traces cite (database definitions count as code). The
+topics:
+- `uses`: one capability calls the other (its Dependencies row names the
+  entry points). Compare what the caller's spec expects (inputs, the values
+  and states it passes, the results, errors and messages it relies on) with
+  what the callee's spec says that entry point does.
+- `data <object>`: both use one table, view, procedure or trigger and at
+  least one changes or runs it. Compare what each spec says about it: the
+  meaning of its columns and codes (a status value, a flag, an amount with
+  its decimals and rounding), when rows are written, what a trigger or a
+  procedure does.
+- `file <path>`: the plan gives the file to both. Compare which parts each
+  spec states: a part both specify, or a part neither states while one of
+  them relies on it.
+For every link decide:
+- `consistent`: the specs agree on what the topic links, and use the same
+  words for the same things (the glossary's). Where they differ only
+  because the code itself does different things in the two places (two
+  pages round differently today), that is consistent too: say so with both
+  lines. Name in the evidence, in double quotes and exactly as the specs
+  title them, the requirements of both sides you compared (`"Issue an
+  invoice" vs "Check the session"`); for a side that states nothing about
+  the topic and needs nothing stated (it only reads a column the other
+  defines), write `<capability>: nothing`. The gate counts a `consistent`
+  row only with both.
+- `conflict`: they state different things about the same behavior or data.
+  Give both requirements and the code line that shows which one is right.
+- `duplicate`: both specify the same behavior of the same code, which only
+  one of them owns (the code is in its files). Name both requirements and
+  the owner.
+- `term`: one thing has two names, or one word means two things, and the
+  glossary does not settle it. Give both wordings.
+- `unclear`: the specs and the code do not settle it. Say what would.
+Be strict: a caller that expects a value, an error or an order the callee's
+spec never states is a `conflict` (or `unclear` when the code does not
+settle it), not `consistent`. When the caller's Dependencies row names an
+entry point the callee's source map does not list under Entry points, read
+it in the code: if the callee's spec states what it does, say so in the
+evidence (the list only misses it); if not, that is a `conflict` (the
+callee's spec lacks behavior the caller relies on).
+
+Write your verdict file as one Markdown table, `| Pair | Topic | Verdict |
+Evidence |`, one row per link you were given, with the pair and the topic
+exactly as the task gives them and, in the Verdict cell after the verdict,
+the pair code the task gives (`consistent <!-- pair 1a2b3c4d 5e6f7a8b -->`):
+merge.mjs refuses a row without it, or with a code of a spec that has
+changed since. Return the file's path, the number of rows per verdict, every
+row that is not `consistent`, and how many source files you read.
 
 ## Survey check
 

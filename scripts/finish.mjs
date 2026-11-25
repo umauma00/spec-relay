@@ -25,6 +25,7 @@
 // `gate.mjs review --change finish` runs checkFinish below. Prints JSON and exits
 // 0 when ok, 1 when not, 2 on bad usage, like gate.mjs. Read-only except `draft`
 // and `run`.
+import { checkConsistency } from './consistency.mjs';
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -289,6 +290,9 @@ export function checkFinishReady(root, { self } = {}) {
   };
   walkSpecs(path.join(root, 'openspec/specs'), []);
   for (const cap of specs.filter((c) => !listed.has(c))) problems.push(`baseline spec ${cap} is not in the plan's capability list; add it to the plan (and port it) or tell the person`);
+  // Every link between two baselines is checked against the specs as they are
+  // now (an amendment after the check makes its rows stale).
+  checkConsistency(root, { all: true }, problems);
   for (const name of dirs(path.join(root, 'openspec/changes')).filter((n) => n !== 'archive' && n !== self)) {
     if (baseName(name) !== FINISH) problems.push(`change ${name} is still active; finish or archive it first`);
   }

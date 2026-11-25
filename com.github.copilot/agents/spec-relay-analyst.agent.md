@@ -64,7 +64,16 @@ instructions), and the exact file paths you may write.
   how callers reach it`: each page, each button's, menu's or form event's
   handler, each route or web service method, each job or scheduled task,
   and each public function other capabilities call. A checker walks each
-  of them through the code for behavior no scenario states. Give every
+  of them through the code for behavior no scenario states. Under
+  Dependencies, give every other capability the code calls a row with the
+  entry points of it that the code calls (`path:symbol`, as that
+  capability's source map lists them when it has one), and in the Database
+  table say for each table whether this capability reads or writes it: the
+  gate compares both with the other capabilities' source maps and the
+  survey's context map. When the code relies on what another capability
+  does (its sign-in check, its rounding), say so in the requirement that
+  uses it and do not specify that behavior again: the other capability's
+  spec holds it. Give every
   scenario the condition and the values an implementer needs to
   reproduce it, and give each branch that changes the result (an error
   and its message, a limit, a role, an empty case) a scenario of its own.

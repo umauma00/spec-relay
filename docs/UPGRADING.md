@@ -8,6 +8,17 @@
 
 そのうえで、更新する前に使っていた版の節（「X から更新するとき」）と、それより上の節をすべて読んでください（上ほど新しい版です）。進行中の change で起きることと、手で決めることが書いてあります。
 
+## 0.30.0 から更新するとき
+
+0.31.0 で、機能（capability）どうしの仕様を突き合わせるようにしました（[詳しく](WORKFLOW.md#機能どうしの整合性0310-から)）。解析のスキーマの説明文と source-map.md のテンプレート（Dependencies が表に）が変わりました。導入スクリプトをもう一度実行すれば置き換わります（先頭の説明）。archive 済みの change はそのままです。
+
+| 変わったこと | 進行中の change で起きること |
+|---|---|
+| 解析の `gate.mjs review` が、source-map.md の Dependencies と Database を確かめる。入口からの見直しで `other capability` とした機能が Dependencies にないと止まる。Dependencies の表の Entry point 列に書いた入口が、相手の archive 済みの source-map の入口になく、plan が相手に割り当てたファイルでもないとき、Database の表の Use が read・write・calls などと読めないときも止まる。修正（amend）も、source-map.md を持つときは同じ確かめで止まる。書き込むテーブルを、調査のコンテキストの地図（と plan の `## Shared data`）がそのコンテキストに許していないとき、2つのコンテキストが書き込むのに持ち主がないときも止まる | レビュー中・作成中の解析は、gate の指摘どおり解析担当に source-map.md を直してもらう。Dependencies は箇条書きのままでも機能の名前は読むが、入口は表の Entry point 列からしか読まないので、表に直すとよい。テーブルの持ち主は人に聞き、答えを plan の `## Shared data`（`\| Data \| Owner \| Also written by \|`）に書く |
+| つながりのある機能の組（`uses`・`data <オブジェクト>`・`file <パス>`）ごとに、照合担当が両方の仕様を比べ、プロジェクトで1つの台帳 `openspec/spec-relay/consistency.md` に残す（`consistency.mjs items` が組と符号を出し、`merge.mjs --into openspec/spec-relay/consistency.md` がまとめる）。解析の gate は、その機能と、ベースライン（archive 済みの仕様）のあるほかの機能との組に、今の両方の仕様の符号を持つ行と、成り立つ判定（両側の要件の名前を引用符で書いた `consistent`、その解析の質問 `question <change> Q<n>`、plan の `## Consistency decisions` にある決定 `accepted D<n>`）を求める | レビュー中の解析は、gate が「no row in openspec/spec-relay/consistency.md」で止まる。オーケストレーターに機能どうしの照合を頼む（`consistency.mjs items --change extract-<capability>`）。つながる相手にまだベースラインがないとき、同じ機能の解析のやり直し（`-v<n>`）のときは何も求めない（archive 後の port-ready で照合する） |
+| `gate.mjs port-ready` と `gate.mjs port-done` が、その機能の確定した仕様と、ほかの確定した仕様との組がすべて照合済みであることを求める。仕上げ（`finish.mjs ready` と finish の gate）は、確定した仕様どうしのすべての組を求める。`question` の判定は、その解析のレビュー中だけ通る | **0.30.0 以前に archive した仕様どうしは照合されていない**ので、次の port-ready がその組で止まる。進行中の port は port-done で止まる。オーケストレーターに `consistency.mjs items --capability <capability>` の組を照合してもらう。`conflict` は誤っている側を amend で直してから照合し直す。`duplicate`・`term`・`unclear` は人が決め、直すなら amend、残すなら plan の `## Consistency decisions`（`\| Id \| Pair \| Topic \| Decision \|`、Decision の末尾に台帳の行の `<!-- pair ... -->`）に `D<n>` として書き、判定を `accepted D<n>` にする。port 済みの機能は、仕上げの前にまとめて照合する（`consistency.mjs items --all`） |
+| `openspec/spec-relay/consistency.md` は、サブエージェントが書けないファイルとして波の前後のガード（`gate.mjs guard`）と有効にしたフックで守る | なし |
+
 ## 0.29.0 から更新するとき
 
 0.30.0 で、取りこぼしを減らすために、調査と解析に別の AI による確認を足しました。調査・解析のスキーマの説明文と修正の照合のテンプレートが変わり、調査のスキーマに `templates/crosscheck.md`、解析のスキーマに `templates/walkthrough.md` が増えました。導入スクリプトをもう一度実行すれば置き換わります（先頭の説明）。archive 済みの change はそのままで、何も求めません。archive 済みでまだ port していない機能の仕様も、この見直しなしで進めてかまいません。漏れが心配な機能だけ、解析をやり直す（`extract-<capability>-v2`）こともできます。

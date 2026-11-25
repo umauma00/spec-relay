@@ -15,7 +15,7 @@
 //   - any agent edit of a change's verify.json (verify.mjs writes it), of its
 //     e2e-old.json (e2e.mjs writes it after the screen tests passed on the old system), or of
 //     openspec/spec-relay/local/canvas-log.jsonl (the canvas writes it);
-//   - subagent edits of review.md, questions.md, crosscheck.md, walkthrough.md, a port's proposal.md and design.md, the plan and the lessons,
+//   - subagent edits of review.md, questions.md, crosscheck.md, walkthrough.md, a port's proposal.md and design.md, the plan, the lessons and consistency.md,
 //     and a subagent's run of draft.mjs review or port-design or finish.mjs run, which write them;
 //   - shell commands that write a verify.json, an e2e-old.json or the canvas log;
 //   - shell commands that mention the "Hook enforcement" setting.
@@ -30,6 +30,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkReview, checkPortDone, changeSchema, configValue, cleanValue, nextSteps, language, readIf, PLAN, LESSONS, CANVAS_LOG } from './gate.mjs';
+import { LEDGER } from './consistency.mjs';
 
 const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Tool names of the Copilot runtime (CLI hooks reference; VS Code's Copilot
@@ -136,8 +137,8 @@ export function protectedPath(root, file, { subagent = false, pluginRoot = KIT_R
   if (fold(rel) === fold(CANVAS_LOG)) return 'only the canvas writes canvas-log.jsonl, the record of the person\'s own edits in the canvas';
   if (/^openspec\/changes\/[^/]+\/verify\.json$/i.test(rel)) return 'only verify.mjs writes verify.json, the record of the last verify run; run it again instead';
   if (/^openspec\/changes\/[^/]+\/e2e-old\.json$/i.test(rel)) return 'only e2e.mjs writes e2e-old.json, the record of the screen tests passing on the old system; run e2e.mjs old again instead';
-  if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions|crosscheck|walkthrough)\.md$/i.test(rel) || /^openspec\/changes\/port-[^/]+\/(proposal|design)\.md$/i.test(rel) || /^openspec\/changes\/finish(?:-v\d+)?\/(checks|leftovers)\.md$/i.test(rel) || [PLAN, LESSONS].some((p) => fold(p) === fold(rel)))) {
-    return 'only the orchestrator writes review.md, questions.md, crosscheck.md, walkthrough.md, a port\'s proposal.md and design.md, the finish change\'s checks.md and leftovers.md, the plan and the lessons';
+  if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions|crosscheck|walkthrough)\.md$/i.test(rel) || /^openspec\/changes\/port-[^/]+\/(proposal|design)\.md$/i.test(rel) || /^openspec\/changes\/finish(?:-v\d+)?\/(checks|leftovers)\.md$/i.test(rel) || [PLAN, LESSONS, LEDGER].some((p) => fold(p) === fold(rel)))) {
+    return 'only the orchestrator writes review.md, questions.md, crosscheck.md, walkthrough.md, a port\'s proposal.md and design.md, the finish change\'s checks.md and leftovers.md, the plan, the lessons and the consistency ledger (merge.mjs)';
   }
   if (subagent && under(rel, 'openspec/spec-relay/guide/qa')) return 'the code guide\'s saved questions and answers are the person\'s: only the canvas (their button) or the orchestrator on their word saves one';
   if (source === '.') {
