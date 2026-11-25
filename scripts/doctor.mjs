@@ -219,8 +219,8 @@ export function checkOpenspec(ctx) {
   return {
     id: 'openspec', level: 'fail',
     message: ctx.t(`openspec/spec-relay/tools の OpenSpec は ${showVersion(v)} で、キットが確認した ${OPENSPEC_TESTED} と違います。`, `the OpenSpec in openspec/spec-relay/tools is ${showVersion(v)}, not ${OPENSPEC_TESTED}, the version the kit is tested with.`),
-    // After a kit update the old package files are a conflict for setup, so they go first.
-    fix: ctx.t('導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。前の版のキットの package.json と package-lock.json は置き換わり、この版の OpenSpec が入ります。導入スクリプトがこの2つを「衝突」と表示したときは、誰かが書き換えたか、もっと新しい版のキットが置いたものです。ほかの人がキットを更新していれば自分のキットも更新し、そうでなければ元に戻すか消してから実行します。',
+    // Setup replaces an earlier kit's package files; a newer OpenSpec may come from a newer kit.
+    fix: ctx.t('導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。前の版のキットの package.json と package-lock.json は置き換わり、この版の OpenSpec が入ります。導入スクリプトがこの2つを「衝突」と表示したときは、誰かが書き換えたか、もっと新しい版のキットが置いたものです。ほかの人がキットを更新していれば（OpenSpec がこの版より新しいとき）自分のキットも更新し、そうでなければ元に戻すか消してから実行します。',
       'Run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`): it replaces package.json and package-lock.json of an earlier kit version and installs this version\'s OpenSpec. If setup shows those two as a conflict, someone edited them or a newer kit wrote them: if someone updated the kit, update yours; otherwise restore or delete them first.'),
   };
 }
@@ -391,14 +391,7 @@ export function checkSetup(ctx) {
   const results = [];
   // setup.mjs records the kit version that last set the repository up.
   const stamped = (() => { try { return JSON.parse(ctx.normalizeText(ctx.readFile(path.join(ctx.target, 'openspec/spec-relay/kit.json')) || '')).version; } catch { return null; } })();
-  const newer = stamped && compareVersions(parseVersion(stamped) || [0, 0, 0], parseVersion(ctx.kitVersion) || [0, 0, 0]) > 0;
-  if (newer) {
-    results.push({
-      id: 'kit-version', level: 'fail',
-      message: ctx.t(`このリポジトリは spec-relay ${stamped} で導入されていて、このキット（${ctx.kitVersion}）より新しい版です。ほかの人がキットを更新しています。`, `spec-relay ${stamped} set up this repository, newer than this kit (${ctx.kitVersion}); someone else updated the kit.`),
-      fix: ctx.t('キットを更新してください（プラグインの更新）。古いキットのまま導入スクリプトを実行したり、スキーマを消したりしないでください。', 'Update the kit (update the plugin). Do not run setup with the older kit or delete the schemas.'),
-    });
-  }
+  const newer = typeof stamped === 'string' && parseVersion(stamped) && parseVersion(ctx.kitVersion) && compareVersions(stamped, ctx.kitVersion) > 0;
   const differs = [];
   for (const schema of ctx.schemas) {
     const from = path.join(ctx.kitRoot, 'openspec-schemas', schema);
@@ -407,6 +400,14 @@ export function checkSetup(ctx) {
       const ours = ctx.readFile(path.join(from, rel));
       if (theirs === null || ctx.normalizeText(theirs) !== ctx.normalizeText(ours || '')) differs.push(`openspec/schemas/${schema}/${rel.replace(/\\/g, '/')}`);
     }
+  }
+  if (newer) {
+    // Only a problem when that kit changed files this one would call edited.
+    results.push({
+      id: 'kit-version', level: differs.length ? 'fail' : 'warn',
+      message: ctx.t(`このリポジトリは spec-relay ${stamped} で導入されていて、このキット（${ctx.kitVersion}）より新しい版です。ほかの人がキットを更新しています。`, `spec-relay ${stamped} set up this repository, newer than this kit (${ctx.kitVersion}); someone else updated the kit.`),
+      fix: ctx.t('キットを更新してください（プラグインの更新）。古いキットのまま導入スクリプトを実行したり、スキーマを消したりしないでください。', 'Update the kit (update the plugin). Do not run setup with the older kit or delete the schemas.'),
+    });
   }
   if (differs.length && !newer) {
     results.push({

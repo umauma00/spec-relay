@@ -460,7 +460,7 @@ test('known-files.json lists the current content of every schema and pinning fil
       if (!(knownFiles()[kitRel] || []).includes(contentHash(kitRel, fs.readFileSync(path.join(KIT_ROOT, kitRel), 'utf8')))) missing.push(kitRel);
     }
   }
-  assert.deepEqual(missing, [], 'run node scripts/known-files.mjs in the kit repository and commit scripts/known-files.json');
+  assert.deepEqual(missing, [], 'git add the new or changed files, run node scripts/known-files.mjs in the kit repository and commit scripts/known-files.json');
   // CRLF, a BOM and reformatted JSON are the same content.
   assert.equal(contentHash('a.yaml', '\uFEFFx: 1\r\n'), contentHash('a.yaml', 'x: 1\n'));
   assert.equal(contentHash('a.json', '{"b":1,"a":2}'), contentHash('a.json', '{\n    "a": 2,\n    "b": 1\n}\n'));
@@ -592,10 +592,29 @@ test('setup records the kit version, and an older kit stops on a repository a ne
   assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])), []);
   assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
   assert.equal(JSON.parse(fs.readFileSync(stamp, 'utf8')).version, version);
-  fs.writeFileSync(stamp, JSON.stringify({ kit: 'spec-relay', version: '99.0.0' }));
-  assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])), ['openspec/spec-relay/kit.json']);
+  // A newer kit that changed no kit file: go on, and keep its record.
+  const newer = JSON.stringify({ kit: 'spec-relay', version: '99.0.0' });
+  fs.writeFileSync(stamp, newer);
+  assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])), []);
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
+  assert.equal(fs.readFileSync(stamp, 'utf8'), newer);
+  // It changed a schema: one conflict on the record, not "someone edited it".
+  const schema = path.join(dir, 'openspec/schemas/spec-relay-port/schema.yaml');
+  fs.appendFileSync(schema, '# from 99.0.0\n');
+  const opts = parseArgs(['--target', dir, ...BASE]);
+  assert.deepEqual(conflicts(opts), ['openspec/spec-relay/kit.json']);
+  assert.match(plan(opts).steps.find((s) => s.action === 'conflict').reason, /newer version than this kit[\s\S]*update the kit first/);
   assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 2);
-  assert.equal(JSON.parse(fs.readFileSync(stamp, 'utf8')).version, '99.0.0');
+  assert.equal(fs.readFileSync(stamp, 'utf8'), newer);
+  // Short versions compare padded; a record that cannot be read (a merge conflict) stops.
+  fs.writeFileSync(schema, fs.readFileSync(path.join(KIT_ROOT, 'openspec-schemas/spec-relay-port/schema.yaml'), 'utf8'));
+  fs.writeFileSync(stamp, JSON.stringify({ kit: 'spec-relay', version: version.split('.').slice(0, 2).join('.') }));
+  assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])), []);
+  fs.writeFileSync(stamp, '<<<<<<< HEAD\n{"version": "0.24.0"}\n=======\n{"version": "0.25.0"}\n>>>>>>> other\n');
+  assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])), ['openspec/spec-relay/kit.json']);
+  // The dry run shows the record it writes.
+  fs.rmSync(stamp);
+  assert.ok(plan(parseArgs(['--target', dir, ...BASE])).steps.some((s) => s.action === 'create' && s.path === stamp));
 });
 
 test('0.6.0 stubs under .github/ are removed only after openspec update moved the skills', () => {

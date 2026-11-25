@@ -71,4 +71,6 @@ node scripts/known-files.mjs
 
 一覧から中身を消すと、その版から更新する人の導入スクリプトが衝突で止まるので、消さないでください。
 
+導入スクリプトは、最後に導入したキットの版を移行中のリポジトリの `openspec/spec-relay/kit.json` に記録します。記録がキットより新しく、キットのファイルを置き換えたり消したりする必要があるときは、書き換えと区別できないので衝突として止まります（doctor は `kit-version`）。`npm ci` の間、前に入っていた OpenSpec は `openspec/spec-relay/tools/.previous/node_modules` に移しておき、失敗したら戻します。
+
 画面のテストの通しの確認（Playwright を実際に入れてブラウザを動かす）は、`SPEC_RELAY_E2E_REAL=1` を付けたときだけ実行します（Windows は Edge、ほかは `SPEC_RELAY_E2E_CHANNEL=chrome` か `SPEC_RELAY_E2E_EXECUTABLE=<ブラウザのパス>`）。CI では Windows（Edge）と Ubuntu（Chrome）で実行しています。Playwright の版を上げるときは、`templates/e2e/package.json` の版を変えて、そのフォルダーで `npm install --package-lock-only --ignore-scripts` を実行します。

@@ -10,7 +10,7 @@
 //     extract or amend change, or from a subagent;
 //   - file edits under the source root (with source root ".", everything outside
 //     openspec/ and the target root), under openspec/specs/, openspec/changes/archive/,
-//     openspec/schemas/, openspec/spec-relay/tools/ (the pinned OpenSpec), openspec/spec-relay/db/ (the
+//     openspec/schemas/, openspec/spec-relay/tools/ (the pinned OpenSpec), openspec/spec-relay/kit.json, openspec/spec-relay/db/ (the
 //     exported database definitions), of openspec/config.yaml, and inside the kit itself;
 //   - any agent edit of a change's verify.json (verify.mjs writes it), of its
 //     e2e-old.json (e2e.mjs writes it after the screen tests passed on the old system), or of
@@ -126,6 +126,7 @@ export function protectedPath(root, file, { subagent = false, pluginRoot = KIT_R
     ['openspec/changes/archive', 'archived changes are the record of what was reviewed'],
     ['openspec/schemas', 'the kit\'s schemas are installed by setup.mjs'],
     ['openspec/spec-relay/tools', 'the pinned OpenSpec is installed by setup.mjs'],
+    ['openspec/spec-relay/kit.json', 'setup.mjs records the kit version that set up this repository there'],
     ['openspec/spec-relay/db', 'the database definitions are exported from the database by the person and are read-only like the source code'],
   ]) if (under(rel, dir)) return why;
   if (fold(rel) === fold(CANVAS_LOG)) return 'only the canvas writes canvas-log.jsonl, the record of the person\'s own edits in the canvas';
