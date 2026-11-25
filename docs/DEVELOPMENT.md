@@ -16,8 +16,9 @@ openspec-schemas/              移行用の OpenSpec スキーマ
 templates/openspec-config.yaml 移行対象に置く OpenSpec 設定のひな形
 scripts/setup.mjs              導入スクリプト（外部パッケージなし）
 scripts/gate.mjs               承認・実装の前に使う機械的な確認（止まったときの次の一手も出す）
-scripts/coverage.mjs           ファイル単位の網羅の確認（gate.mjs から使う。どの元ファイルもどれかの capability の仕様に入るか）
+scripts/coverage.mjs           ファイル単位の網羅の確認（gate.mjs から使う。どの元ファイルもどれかの capability の仕様に入るか）と、調査の照合（crosscheck.md）の確認
 scripts/sites.mjs              元コードの箇所（メソッドや関数など）と目印の一覧。照合担当が箇所ごとに仕様の抜けを判定する台帳のもと
+scripts/walkthrough.mjs        解析の入口からの見直し（walkthrough.md）の確認。source-map の入口ごとに行があり、名前を挙げたシナリオが実在するか（gate.mjs から使う）
 scripts/hook.mjs               フックの本体（gate を通らない archive と保護されたファイルへの書き込みを拒否）
 scripts/status.mjs             進捗の計算（TODO リスト・チャット用）と、次に並列で始めてよい作業
 scripts/finish.mjs             仕上げの工程（開始の確認、残りものの収集と下書き、全体のチェックの実行と記録、移行先のハッシュ、仕上げの gate）

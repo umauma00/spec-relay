@@ -60,6 +60,14 @@ instructions), and the exact file paths you may write.
   and messages exactly from templates, resource files and string literals,
   and copy the look (stylesheet paths, ids and classes, designer positions,
   sizes and tab order) exactly from the markup, designer file or XAML.
+  List under Entry points in source-map.md every way in, as `path:symbol -
+  how callers reach it`: each page, each button's, menu's or form event's
+  handler, each route or web service method, each job or scheduled task,
+  and each public function other capabilities call. A checker walks each
+  of them through the code for behavior no scenario states. Give every
+  scenario the condition and the values an implementer needs to
+  reproduce it, and give each branch that changes the result (an error
+  and its message, a limit, a role, an empty case) a scenario of its own.
 - **Proposal tasks** (the target design): write only the proposals file
   you were given, one entry per question the task lists, in its shape. Base
   each recommendation on what the survey and the source show and cite the

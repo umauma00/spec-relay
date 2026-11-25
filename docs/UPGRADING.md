@@ -8,6 +8,20 @@
 
 そのうえで、更新する前に使っていた版の節（「X から更新するとき」）と、それより上の節をすべて読んでください（上ほど新しい版です）。進行中の change で起きることと、手で決めることが書いてあります。
 
+## 0.29.0 から更新するとき
+
+0.30.0 で、取りこぼしを減らすために、調査と解析に別の AI による確認を足しました。調査・解析のスキーマの説明文と修正の照合のテンプレートが変わり、調査のスキーマに `templates/crosscheck.md`、解析のスキーマに `templates/walkthrough.md` が増えました。導入スクリプトをもう一度実行すれば置き換わります（先頭の説明）。archive 済みの change はそのままで、何も求めません。archive 済みでまだ port していない機能の仕様も、この見直しなしで進めてかまいません。漏れが心配な機能だけ、解析をやり直す（`extract-<capability>-v2`）こともできます。
+
+| 変わったこと | 進行中の change で起きること |
+|---|---|
+| 調査に `crosscheck.md`（調査の照合）が増えた。別の AI が inventory の行ごとにファイルを読み、コンテキスト・capability・扱い、除外と carry の妥当さ、入口の持ち主を確かめる。`gate.mjs review` は、inventory の行ごとに照合の行がないと止まり、判定は `confirmed` か `question` で、どちらも根拠があるものだけを通す。照合の行は inventory の行の符号 `<!-- row ... -->` があるものだけを数える（`draft.mjs items` の `codes` を照合担当が写し、`merge.mjs` が確かめ、なければ書く。あとで inventory の行が変わると、その行は照合し直すまで止まる）。`question` の行があると、review.md の `## 3. Coverage` に C2（一覧と根拠の符号つき）が要る | レビュー中の調査（archive 前）は、gate が「crosscheck.md is missing」で止まる。オーケストレーターに調査の照合を頼み（`draft.mjs items --change survey` の `paths` を照合担当に分ける）、`merge.mjs` でまとめ、`draft.mjs review --change survey --update` で C2 を足す。調査の archive 後なら何もしなくてよい |
+| 解析に `walkthrough.md`（入口からの見直し）が増えた。別の AI が source-map.md の `## Entry points` の入口ごとに処理を最後まで追い、動作ごとにそれを書いたシナリオの名前を挙げる。`gate.mjs review` は、入口に行がない、source-map にない入口がある、名前を挙げたシナリオがその要件にない、根拠のファイルや行が実在しない、シナリオを挙げられていない要件がある、箇所台帳で `covered` の箇所の作用の行を `covered` のどの行も指していない（40行以内の範囲かメソッド名で）、`gap`・`vague` が残る、などで止まる。source-map.md に入口が1つもないときも止まる（定義だけの機能は `- None（理由）`） | レビュー中・作成中の解析は、gate が「walkthrough.md is missing」で止まる。source-map.md の Entry points を、1行に1つ `` `パス:シンボル` - 呼ばれ方 `` の形に直し（足りなければ解析担当が足す）、`draft.mjs items --change extract-<capability>` の `entryPoints` に全部出ることを確かめてから、見直しを1波で実行して `merge.mjs --into openspec/changes/extract-<capability>/walkthrough.md` でまとめる。見つかった `gap` は要件を末尾に足すか質問にし、変わった要件は照合し直す。チェック済みの項目の文が変わったら `draft.mjs review --update` がチェックを外すので、もう一度見てもらう |
+| 解析と修正の照合（crosscheck.md）に `incomplete` が増えた。書いてあることは正しいが、trace の行にシナリオにない分岐・エラー・既定値・上限・書き込みがあるときの判定で、解決するまで gate を通らない（これまでも `confirmed` 以外は止まっていたので、gate の動きは同じ） | なし。次に照合するときから、照合担当がこの判定を使う |
+| `draft.mjs items` が、解析では source-map の入口（`entryPoints`）も、調査では inventory の行（`paths`）も出す | なし |
+| `merge.mjs` が walkthrough.md を入口ごとにまとめる（1回の merge で来た行が、その入口の行をすべて置き換える。同じ回の部品どうしは足し合わせるので、見直しは別の回でまとめる。消えた `gap`・`vague` の行は `dropped` に出る）。調査の crosscheck.md はパスでまとめ、行ごとに inventory の行の符号を書く | なし |
+| レビュー画面の冒頭に、調査では照合の件数、解析では入口からの見直しの件数が出る。付録に、人に任された行・未解決の行・見直していない入口の一覧が出る | なし |
+| walkthrough.md も、サブエージェントが書けないファイルとして波の前後のガード（`gate.mjs guard`）と有効にしたフックで守る | なし |
+
 ## 0.28.0 から更新するとき
 
 0.29.0 で、画面のない機能（capability）の実装が、コンテキストで選んだ B2・C（画面のテストとスクリーンショットの比較）で止まらないようにしました。解析・移行先の設計・port のスキーマの説明文が変わりました。導入スクリプトをもう一度実行すれば置き換わります（先頭の説明）。archive 済みの change はそのままです。

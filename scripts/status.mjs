@@ -41,9 +41,9 @@ const PLAN = 'openspec/spec-relay/plan.md';
 // Used when a change's schema file cannot be read. The schema's own list wins,
 // so an artifact added to a schema later is counted without touching this file.
 const DEFAULT_ARTIFACTS = {
-  'spec-relay-survey': ['inventory.md', 'context-map.md', 'glossary.md', 'capabilities.md', 'database.md', 'review.md'],
+  'spec-relay-survey': ['inventory.md', 'context-map.md', 'glossary.md', 'capabilities.md', 'database.md', 'crosscheck.md', 'review.md'],
   'spec-relay-target': ['architecture.md', 'conventions.md', 'ui.md', 'verification.md', 'data.md', 'review.md'],
-  'spec-relay-extract': ['source-map.md', 'specs/**/*.md', 'screens.md', 'trace.md', 'crosscheck.md', 'coverage.md', 'questions.md', 'review.md'],
+  'spec-relay-extract': ['source-map.md', 'specs/**/*.md', 'screens.md', 'trace.md', 'crosscheck.md', 'coverage.md', 'walkthrough.md', 'questions.md', 'review.md'],
   'spec-relay-amend': ['reason.md', 'specs/**/*.md', 'trace.md', 'crosscheck.md', 'impact.md', 'review.md'],
   'spec-relay-port': ['proposal.md', 'design.md', 'tasks.md'],
   'spec-relay-finish': ['checks.md', 'leftovers.md', 'handover.md', 'review.md'],

@@ -27,7 +27,7 @@ AI が止まったときは、報告の最初に「止まった理由」「あ�
 
 - gate を通らない `openspec archive`（`node <キット>/scripts/openspec.mjs`・`openspec`・`openspec.cmd`・`npx @fission-ai/openspec` などの書き方と、`cd` してからの実行を含む）、change 名のない archive、変数で名前を渡す archive、サブエージェントからの archive
 - 元コード（元のフォルダーが `.` のときは `openspec/` と移行先のフォルダー以外のすべて）、`openspec/specs/`、`openspec/changes/archive/`、`openspec/schemas/`、`openspec/spec-relay/tools/`（固定した OpenSpec）、`openspec/config.yaml`、キット自体への書き込み
-- サブエージェントによる review.md・questions.md・crosscheck.md・port の proposal.md と design.md・仕上げの checks.md と leftovers.md・計画（plan.md）・学びの記録（lessons.md）の書き込み
+- サブエージェントによる review.md・questions.md・crosscheck.md・walkthrough.md・port の proposal.md と design.md・仕上げの checks.md と leftovers.md・計画（plan.md）・学びの記録（lessons.md）の書き込み
 - サブエージェントによる `draft.mjs review`・`draft.mjs port-design`・`finish.mjs run` の実行（review.md・port の design.md・仕上げの checks.md を書くため）
 - port のテスト実行の記録（`verify.json`）への書き込み（編集ツールでも、`Set-Content`・リダイレクト・`node -e` などのシェルコマンドでも。書くのは `verify.mjs` だけ）
 - canvas での書き込みの記録（`openspec/spec-relay/local/canvas-log.jsonl`）への書き込み（編集ツールでも、シェルコマンドでも。書くのは canvas だけ）

@@ -11,9 +11,10 @@
 //
 // gate.mjs runs these checks in `review` (survey, extract, amend) and in
 // `coverage`, the check over the whole plan.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { readIf, tableRows, plain, norm, sourceFiles, archivedChange, baseName, PLAN, DATABASE_DIR, checkDatabaseDrift } from './gate.mjs';
+import { readIf, tableRows, headedRows, plain, norm, sourceFiles, archivedChange, baseName, PLAN, PLACEHOLDER, DATABASE_DIR, checkDatabaseDrift } from './gate.mjs';
 import { parseRefs } from './render.mjs';
 
 const MAX_LISTED = 20;
@@ -314,7 +315,7 @@ export function traceRefs(dir, root = null) {
 // starts no line), or null when it cannot be read. Bytes are enough for every
 // encoding old sources use except UTF-16, which is read by its byte order mark.
 const lineCounts = new Map();
-function lineCount(root, file) {
+export function lineCount(root, file) {
   const full = path.join(root, file);
   let stat;
   try { stat = fs.statSync(full); } catch { return null; }
@@ -441,4 +442,126 @@ export function checkCoverage(root) {
     capped(problems, missing, (file) => `source file assigned to ${capability} is not in the source map of ${path.basename(change)} or of an amendment: ${file}`);
   }
   return { ok: problems.length === 0, problems, files: files.length, capabilities: { analyzed, pending } };
+}
+
+// ---------------------------------------------------------------- survey crosscheck
+//
+// The survey's crosscheck.md: an independent checker reads the files of every
+// inventory row itself and judges whether the row's context, capability and
+// handling are right, whether an excluded or carried file holds behavior the new
+// system needs, and whether every entry point in it (a page, a route, a menu
+// item, a job, a handler, behavior that configuration defines) reaches a
+// capability that will specify it. The gate counts the rows; the person decides
+// the rows the checker and the analysts do not agree on (item C2).
+
+const pathKey = (p) => repoPath(stripComments(p)).toLowerCase();
+
+// The rows of the tables whose first column is Path: { path, key, verdict,
+// evidence, stamp }. The stamp (`<!-- row 1a2b3c -->`, which merge.mjs writes
+// into the Verdict cell) is the code of the inventory row the checker judged.
+export function surveyCheckRows(text) {
+  // Comments are gone from the cells headedRows gives, so the stamps are read from the lines.
+  const stamps = new Map();
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const code = /^\s*\|/.test(line) && line.match(ROW_STAMP);
+    if (code) stamps.set(pathKey(line.trim().replace(/^\|/, '').split(/(?<!\\)\|/)[0]), code[1].toLowerCase());
+  }
+  return headedRows(text ?? '').filter(({ header }) => /^(path|パス)(?![a-z0-9_])/i.test(header[0] ?? '')).map(({ cells }) => {
+    const [where = '', verdict = '', evidence = ''] = cells;
+    const stamp = stamps.get(pathKey(where)) ?? null;
+    return { path: repoPath(stripComments(where)), key: pathKey(where), verdict: plain(stripComments(verdict)).toLowerCase().replace(/[.。]$/, ''), evidence: stripComments(evidence).trim(), stamp };
+  }).filter((row) => row.key);
+}
+
+export const ROW_STAMP = /<!--\s*row\s+([0-9a-f]{6})\s*-->/i;
+
+// The code of what an inventory row says (its context, handling and notes): a
+// crosscheck row judged a row as it was, so a row changed since needs a new look.
+export const surveyRowStamp = (row) => crypto.createHash('sha256').update([row.context, row.handling || 'port', row.notes].map((c) => String(c ?? '').trim().toLowerCase()).join('\n')).digest('hex').slice(0, 6);
+
+// An Evidence cell that says nothing: empty, a dash, n/a, none, a lone mark.
+const saysNothing = (cell) => {
+  const t = stripComments(cell).replace(/[`'"*_]/g, '').trim();
+  return PLACEHOLDER.test(t) || /^(?:[-–—―‐ー.。?？!・…]+|none|nothing|nil|null|na|ok|なし|無し|特になし|不明)$/i.test(t);
+};
+
+// A short code for the list the person decides with C2, as sites.mjs codes C1:
+// a list that changed, even to one of the same length, needs a new look.
+const listCode = (entries) => crypto.createHash('sha256').update([...entries].sort().join('\n')).digest('hex').slice(0, 6);
+
+export const SURVEY_CHECK_VERDICTS = ['confirmed', 'question'];
+
+// The C2 wording for the rows the checker left to the person, or null when none.
+export function surveyQuestionWording(rows) {
+  const asked = rows.filter((r) => r.verdict === 'question');
+  if (!asked.length) return null;
+  // The code covers what the checker found too: new findings on the same rows need a new look.
+  return `C2 The survey crosscheck leaves ${asked.length} row${asked.length === 1 ? '' : 's'} for you to decide (list ${listCode(asked.map((r) => `${r.key}\t${r.evidence.replace(/\s+/g, ' ')}`))})`;
+}
+
+// Survey review: one crosscheck row per inventory row, each `confirmed` or a
+// `question` the person decides with C2 (whose words name the list as it is).
+// `boxes` null skips the review item (draft.mjs asks for the wording only).
+export function checkSurveyCrosscheck(dir, inventory, boxes, problems) {
+  const text = readIf(path.join(dir, 'crosscheck.md'), problems);
+  if (text === null) { problems.push('crosscheck.md is missing (the survey crosscheck: checkers read the files of every inventory row and judge it; see the spec-relay skill)'); return {}; }
+  const rows = surveyCheckRows(text);
+  const byKey = new Map();
+  const duplicates = new Set();
+  for (const row of rows) { if (byKey.has(row.key)) duplicates.add(row.path); byKey.set(row.key, row); }
+  const listed = new Set(inventory.map((r) => r.path.toLowerCase()));
+  const stamps = new Map(inventory.map((r) => [r.path.toLowerCase(), surveyRowStamp(r)]));
+  capped(problems, inventory.filter((r) => !byKey.has(r.path.toLowerCase())).map((r) => r.path), (p) => `inventory row has no crosscheck row: ${p} (have a checker judge it)`);
+  capped(problems, [...duplicates], (p) => `inventory row has more than one crosscheck row: ${p}; keep only the current verdict`);
+  capped(problems, rows.filter((r) => !listed.has(r.key)).map((r) => r.path), (p) => `crosscheck.md has a row for ${p}, which is not a row of inventory.md (a mistyped path, or a row that moved: delete it, and check the new row)`);
+  const bad = [];
+  const stale = [];
+  const unstamped = [];
+  for (const row of [...byKey.values()].filter((r) => listed.has(r.key))) {
+    if (!row.stamp) unstamped.push(row.path);
+    else if (row.stamp !== stamps.get(row.key)) stale.push(row.path);
+    if (row.verdict === 'confirmed') {
+      if (saysNothing(row.evidence)) bad.push(`crosscheck of ${row.path} is confirmed with no evidence; say which files the checker read and what it found there`);
+      continue;
+    }
+    if (row.verdict === 'question') {
+      if (saysNothing(row.evidence)) bad.push(`crosscheck of ${row.path} is a question with no evidence; say what the checker found and what the person decides`);
+      continue;
+    }
+    bad.push(`crosscheck of ${row.path} is "${row.verdict || 'blank'}"; fix the survey and have a checker judge the row again, or write "question" for the person to decide (item C2)`);
+  }
+  capped(problems, unstamped, (p) => `crosscheck row of ${p} carries no code of the inventory row it judged; merge the checker's part with merge.mjs, which writes it (<!-- row ... -->)`);
+  capped(problems, stale, (p) => `inventory row ${p} changed after the crosscheck judged it (context, handling or notes); have a checker judge the row again and merge its part`);
+  capped(problems, bad, (p) => p);
+  const wording = surveyQuestionWording([...byKey.values()].filter((r) => listed.has(r.key)));
+  if (wording && boxes) {
+    const code = wording.match(/list ([0-9a-f]{6})\)$/)[1];
+    const item = boxes.find((b) => /^C2\b/i.test(b.plain));
+    if (!item) problems.push(`review.md has no C2 item for the rows the survey crosscheck leaves to the person; run draft.mjs review --change <change> --update, which adds "- [ ] ${wording}" under "## 3. Coverage"`);
+    else if (!new RegExp(`(^|[^0-9a-z])${code}([^0-9a-z]|$)`, 'i').test(item.plain)) problems.push(`review item C2 is not for the list as it is now; run draft.mjs review --change <change> --update, which writes "- [ ] ${wording}" unticked, so the person sees the list again`);
+  } else if (!wording && boxes) {
+    const item = boxes.find((b) => /^C2\b/i.test(b.plain));
+    if (item) problems.push('review.md has a C2 item, but the survey crosscheck leaves no row to the person; run draft.mjs review --change <change> --update, which drops it');
+  }
+  return { wording };
+}
+
+// What the survey review page shows: the counts, the rows left to the person
+// (with the C2 code), the rows still open and the inventory rows not checked yet.
+export function surveyCheckSummary(dir, inventory) {
+  const text = readIf(path.join(dir, 'crosscheck.md'), []);
+  if (text === null) return null;
+  const rows = surveyCheckRows(text);
+  const listed = new Set(inventory.map((r) => r.path.toLowerCase()));
+  const kept = rows.filter((r) => listed.has(r.key));
+  const checked = new Set(kept.map((r) => r.key));
+  const questions = kept.filter((r) => r.verdict === 'question');
+  return {
+    rows: inventory.length,
+    confirmed: kept.filter((r) => r.verdict === 'confirmed').length,
+    questions,
+    open: kept.filter((r) => !SURVEY_CHECK_VERDICTS.includes(r.verdict)),
+    unchecked: inventory.filter((r) => !checked.has(r.path.toLowerCase())).map((r) => r.path),
+    code: surveyQuestionWording(kept)?.match(/list ([0-9a-f]{6})\)$/)?.[1] ?? null,
+  };
 }

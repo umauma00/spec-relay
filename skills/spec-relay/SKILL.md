@@ -279,15 +279,16 @@ not wash out these instructions.
 4. **One writer per file.** No two subagents of a wave write the same file.
    Analysts and checkers write only the paths you give them, the implementer
    only its capability's module. Only you write `review.md`, `plan.md`,
-   `lessons.md` and `questions.md`, merge `crosscheck.md`, run `openspec`
+   `lessons.md` and `questions.md`, merge `crosscheck.md` and
+   `walkthrough.md`, run `openspec`
    commands and `verify.mjs`, render review pages and archive.
    Never give a subagent a path to write under the source root (when the
    source root is `.`, give only paths under `openspec/` and the target root),
    under `openspec/specs/`, `openspec/config.yaml` or the lessons.
    Before every wave, run `node "<kit>/scripts/gate.mjs" guard --save
    wave-<n>`: it saves the hashes of the files no subagent may write (every
-   active change's `review.md`, `questions.md`, `crosscheck.md` and
-   `verify.json` and `e2e-old.json`, every active port's `proposal.md` and `design.md`,
+   active change's `review.md`, `questions.md`, `crosscheck.md`,
+   `walkthrough.md`, `verify.json` and `e2e-old.json`, every active port's `proposal.md` and `design.md`,
    the finish change's `checks.md` and `leftovers.md`, `plan.md`, `lessons.md`,
    `openspec/specs/`, `openspec/config.yaml` and the source files). After the
    wave, run `gate.mjs guard --compare wave-<n>`, which lists only the paths
@@ -303,12 +304,19 @@ not wash out these instructions.
    In a git repository, also compare `git status --porcelain
    --untracked-files=all` before and after, for files outside those (such as
    kit or host folders).
-5. **Tables split across subagents** (inventory, crosscheck): each subagent
+5. **Tables split across subagents** (inventory, crosscheck, coverage,
+   walkthrough): each subagent
    writes its rows as a Markdown table to its own part file in the work folder
    (a `|` inside a cell written as `\|`),
    and `node "<kit>/scripts/merge.mjs" --into <artifact> --parts <folder>
    --clean` merges them into the artifact: a later part replaces the row with
-   the same key, and rows you edited yourself stay. If merge reports one
+   the same key, and rows you edited yourself stay (in walkthrough.md, the
+   rows one merge brings for an entry point, from all its parts together,
+   replace all the rows that entry point had, so merge each wave on its own
+   and a walk again writes all of them; merge lists under `dropped` the `gap`
+   and `vague` rows that are gone: confirm the spec now states each). The
+   survey's crosscheck.md gets the code of each inventory row it judged
+   (`<!-- row ... -->`) only through merge.mjs. If merge reports one
    `R<n>` with two names because a requirement was renamed on purpose, delete
    the old row from the artifact and merge again.
 6. **Mixed waves** are fine when no file is written twice: the implementer of
@@ -452,7 +460,9 @@ you assist. This gate is the point of the kit.
      review.md, questions.md, impact.md, crosscheck.md, a port's proposal
      and design, or the finish change's checks.md and leftovers.md: they
      stay yours. In extract and amend, have the checker
-     check the changed rows again, whoever changed them. Then write
+     check the changed rows again, whoever changed them (in an extract, also
+     walk again the entry points whose behavior changed; in a survey, judge
+     the changed inventory rows again). Then write
      `  - fixed: <what you changed, in one line>` right under that fix
      line, keep the item unticked, render again and ask the person to look
      again. When you think the request is wrong, do not change the
@@ -562,6 +572,28 @@ the domain, not the folders.
      uses unchanged (stylesheets, images, fonts, script libraries, report
      templates) and `port` for everything else. Ask the analysts to propose
      carry; the person confirms it in the review (M5).
+   - **Crosscheck** (after the inventory, capabilities and database are
+     written): split the inventory rows (`node "<kit>/scripts/draft.mjs"
+     items --change <change>` prints them as `paths`, with each row's code
+     under `codes`) across
+     `spec-relay-checker` subagents as a **survey check**, in groups like the
+     inventory's folders. Give each the paths of inventory.md,
+     context-map.md, capabilities.md and database.md, its rows with their
+     codes (the checker copies each into its row), and
+     `openspec/spec-relay/work/<change>/crosscheck/<nn>.md` to write; never
+     the evidence files or the analysts' reports. Merge with `merge.mjs
+     --into openspec/changes/<change>/crosscheck.md --parts
+     openspec/spec-relay/work/<change>/crosscheck --clean`. For every
+     `mismatch` or `unclear` row, have an analyst correct the inventory,
+     capabilities or context map and a new checker judge the row again (a
+     part file with a higher number), or, when only the person can decide
+     (whether a page is still used, where a feature belongs), write
+     `question` as the verdict yourself and keep the evidence: the person
+     decides those rows with item C2. Every row needs evidence, `confirmed`
+     too. When the inventory or capabilities.md changes later (a review's
+     fix), have a checker judge the changed rows again: the gate names each
+     inventory row whose context, handling or notes changed after it was
+     judged.
    Legacy code rarely has clean
    boundaries: propose owners for shared tables, split god classes by method,
    put technical shared parts in `platform`, and give the evidence for each
@@ -581,7 +613,10 @@ the domain, not the folders.
    never specified or ported, so that box (C1) is theirs, and the gate fails
    on an excluded row with no reason in Notes. The template's M1-M5 and C1
    items stay in review.md even when one has nothing to decide (tell the
-   person so when you reach it): the gate fails when one is missing. While the person reviews, run the
+   person so when you reach it): the gate fails when one is missing.
+   `draft.mjs review` adds C2 when the crosscheck left rows to the person;
+   tell them how many rows the crosscheck judged, what it corrected, and
+   the rows of C2. While the person reviews, run the
    target design's proposals and questions (step 2, items 2 and 3) on the
    survey under review, so that the target design can start right after the
    archive; when the review changes a context, the inventory or database.md,
@@ -695,9 +730,11 @@ waves.
    `mismatch` and `unclear` row, have an analyst fix the spec, screens or trace
    and a new checker check that row again (a part file with a higher number,
    such as `crosscheck-02.md`, merged the same way), or move it to questions.md and write `question Q<n>` as its verdict
-   yourself.
+   yourself. For every `incomplete` row, have an analyst add a scenario for
+   each behavior the checker names (or a requirement at the END of the spec),
+   then check that row again.
 4. **Omission check.** In the same wave as the crosscheck (both need only
-   trace.md), run `node "<kit>/scripts/sites.mjs" --change
+   trace.md, and the walkthrough of step 5 runs with them), run `node "<kit>/scripts/sites.mjs" --change
    extract-<capability>`. It lists the sites of the source map's files in
    groups of 40 under `openspec/spec-relay/work/extract-<capability>/sites/`
    (`--per N` changes the size). Give each group to its own
@@ -735,7 +772,37 @@ waves.
    without a row, and names the rows of sites it no longer finds, which you
    delete from coverage.md. When sites.mjs writes no group (the files hold no
    code), coverage.md keeps its empty table.
-5. **Questions and review.** Write questions.md from the analysts' reported
+5. **Walkthrough.** In the same wave, give the entry points (`entryPoints`
+   in the output of `draft.mjs items --change extract-<capability>`, from
+   source-map.md) to `spec-relay-checker` subagents as a **walkthrough**,
+   about ten entry points each: with the change's specs, screens.md and
+   source-map.md paths, the numbered requirement and screen names, the
+   capabilities that own parts of shared files (from the plan), and the path
+   `openspec/spec-relay/work/extract-<capability>/walkthrough/<nn>.md` to
+   write. Never give it trace.md or the analysts' notes: it finds the code
+   from the entry point, so that what the trace missed shows up. Merge with
+   `merge.mjs --into openspec/changes/extract-<capability>/walkthrough.md
+   --parts openspec/spec-relay/work/extract-<capability>/walkthrough
+   --clean`. For every `gap` and `vague` row, have an analyst add the
+   requirement (with its trace) at the END of the spec or make the scenario
+   concrete, then a checker crosscheck that requirement and walk the entry
+   point again (merged on its own; its rows replace all of that entry point's
+   rows), and judge again any site of coverage.md the new
+   requirement covers; or move it to questions.md and write `question Q<n>`
+   as its verdict yourself. When a checker reports an entry point the source
+   map lacks, have the analyst add it under Entry points (the gate fails on
+   a walked entry point the source map does not list, and on a listed one
+   nobody walked). The gate also checks that each named scenario exists, so
+   a loose `covered` does not pass; that each row cites code that exists;
+   that every requirement is named by some row; and that every effect line
+   of a site coverage.md judges `covered` is cited by some row. When it names
+   effect lines no row reaches, have the checker walk the entry point that
+   leads there to the end, or add the entry point the source map misses;
+   code that nothing reaches is a question. When source-map.md says
+   `- None (why)` under Entry points (definitions only), walkthrough.md keeps
+   its empty table. A scenario renamed later breaks the rows
+   that name it: walk those entry points again.
+6. **Questions and review.** Write questions.md from the analysts' reported
    doubts and the rows moved to questions, each with the answer you recommend
    and why (`  - Recommended:` and `  - Why:` under it, as the schema says; ask
    the analyst who reported a doubt when the reason needs the code read
@@ -748,14 +815,17 @@ waves.
    check with the same code, and the person decides whether they may be left
    out. When the list changes later, run it again with `--update`: the new
    C1 words are unticked.
-6. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
+7. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
    analyst fix every error and warning. `gate.mjs review` also checks the
    coverage, so the person does not: source-map.md holds every file the plan
    assigns to the capability, and every requirement has a trace row whose
    paths exist.
-7. **Report** to the person: the number of requirements and screens, what the
-   crosscheck found and fixed, how many sites the omission check judged and
-   the gaps it found and how they were resolved, the questions they must
+8. **Report** to the person: the number of requirements and screens, what the
+   crosscheck found and fixed (`incomplete` rows are behavior the text left
+   out), how many sites the omission check judged and the gaps it found and
+   how they were resolved, how many entry points and behaviors the
+   walkthrough checked and the gaps and vague scenarios it found and how
+   they were resolved, the questions they must
    decide, the path of the review page, and that step 4 is theirs. Then stop
    and wait.
 
