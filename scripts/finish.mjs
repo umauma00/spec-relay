@@ -479,7 +479,7 @@ const commandIn = (cell = '') => {
 // Exactly the note this script writes, so the orchestrator's words around it stay.
 // It is "finish.mjs run <date>", then ", <n> s" or ": <part> / <part>", where a
 // part is "<level> failed in <capability> <capability>" or the no-port note.
-const RUN_PART = String.raw`(?:[A-Z0-9]+ failed in [a-z0-9/-]+(?: [a-z0-9/-]+)*|A failed in the Test command|no port, the Test command)`;
+const RUN_PART = String.raw`(?:[A-Z0-9]+ failed in [\w./-]+(?:,? [\w./-]+)*|A failed in the Test command|no port, the Test command)`;
 const RUN_NOTE = new RegExp(String.raw`\s*(?:;\s*)?finish\.mjs run \d{4}-\d{2}-\d{2}(?:, [\d.]+ s|: ${RUN_PART}(?: / ${RUN_PART})*)?(?=\s*(?:[;(]|$))`, 'g');
 // The Notes cell with this run's note in place of an earlier one.
 const noted = (cell, note) => {
@@ -635,9 +635,17 @@ export async function runChecks(root, change, { timeoutMs = 60 * 60 * 1000, run 
         const result = outcome.get(`${context}\0${level}`);
         const c = colOf(level);
         if (!result || c < 0 || notRun(context, level)) continue;
-        if (result.missing.length) { note(`level ${level} of context ${context} has no command in the design.md of ${result.missing.join(', ')}; its cell is left as it was`); continue; }
-        if (!result.pass && !result.failed.length) continue;
         while (cells.length <= c) cells.push('');
+        if (result.missing.length) {
+          // A failure elsewhere is still a failure; a pass from an earlier run
+          // no longer stands for the port that cannot be run.
+          const failed = result.failed.length > 0;
+          note(`level ${level} of context ${context} has no command in the design.md of ${result.missing.join(', ')}; ${failed ? 'its cell says fail (it failed in another port)' : 'its cell is left open'}`);
+          if (failed) { cells[c] = 'fail'; notes.push(`${level} failed in ${result.failed.join(' ')}`); touched = true; }
+          else if (/^pass$/i.test(plain(cells[c]))) { cells[c] = ''; touched = true; }
+          continue;
+        }
+        if (!result.pass && !result.failed.length) continue;
         cells[c] = result.pass ? 'pass' : 'fail';
         touched = true;
         if (!result.pass) notes.push(`${level} failed in ${result.failed.join(' ')}`);

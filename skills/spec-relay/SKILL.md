@@ -356,11 +356,13 @@ you assist. This gate is the point of the kit.
    requirement, screen, question, context or leftover, run `node
    "<kit>/scripts/draft.mjs" review --change <change> --update`: it rebuilds
    the items, keeps the person's ticks, decisions and notes for every subject
-   that is still there (a renamed item keeps its notes under the same id), and
-   unticks an item whose words changed. It writes nothing while an artifact
-   it reads is missing or not UTF-8. Tell the person about every item in its
-   `removed` list that was ticked or had notes (its `lines` hold them), and
-   about `warnings`.
+   that is still there (a renamed item that shares a word with its old name
+   keeps its notes under the same id), and unticks an item whose words
+   changed. A reworded question starts without a decision. It writes nothing
+   while an artifact it reads is missing or not UTF-8. Tell the person about
+   every item in its `removed` list that was ticked or had notes (its `lines`
+   hold them), every reworded question in `changed` that had a decision (its
+   `was` holds it), and `warnings`.
    - A `fix:` note under an item (written in the file or the canvas, or
      sent from the canvas as "[canvas] ... change requests"), or a change
      asked for in the chat, is that request. Correct the artifacts (in
@@ -689,7 +691,7 @@ Words); the finish step (step 6) lists it in the hand-over.
    or B2 command, choose each scenario's check in the Check column the
    script left open: `e2e` for what a user does on a web screen (B2),
    `compare` for what a recorded case covers (B1), `unit` for the rest
-   (without B1 or B2 the script writes `unit` everywhere). If the archived
+   (without B1, B2 or C the script writes `unit` everywhere). If the archived
    target design has no ui.md (it was made before kit 0.8.0), ask the person
    for each screen's policy and record the answers under Decisions; never
    choose one yourself.
@@ -865,9 +867,11 @@ changes no behavior.
    last lines of each failure. Never write `pass`, `fail` or the hash
    yourself. When a chosen level cannot run (the source program cannot run
    any more), write `not-run: <reason>` in its cell before the run: the run
-   skips that cell. A cell the run leaves open names, in `problems`, a port
-   whose design.md has no command for the level: ask the person whether to
-   add it through a port change or write not-run. A context without a
+   skips that cell. When a port's design.md has no command for a level, the
+   run leaves that cell open (or writes `fail` when the level failed in
+   another port) and names the port in `problems`: ask the person whether to
+   add the command through a port change. Write not-run only when the level
+   truly cannot run, never over a failure in another port. A context without a
    capability of its own gets the Test command's result as its A. For each
    cross-context flow, name the test that covers it, or `none`. A
    failure is fixed, never accepted: show it to the person and fix it through

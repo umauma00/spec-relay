@@ -36,7 +36,7 @@ import { readIf, changeSchema, plain, norm, targetHash, CODE_STAMP } from './gat
 const SEPARATOR = /^\s*\|?\s*:?-{2,}/;
 const cellsOf = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
 const visible = (cell) => cell.replace(/<!--[\s\S]*?-->/g, '').trim();
-const ID = /^([RS])(\d+)\b\s*[.:)-]?\s*(.*)$/i;
+const ID = /^([RS])(\d+)\b\s*(?:[:)]|[.-](?=\s|$))?\s*(.*)$/i;
 const WORK = 'openspec/spec-relay/work';
 const collator = new Intl.Collator('en', { numeric: true });
 

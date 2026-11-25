@@ -72,13 +72,15 @@ test('--update reads hand-written ids as the gate does, keeps decisions and CRLF
   write(dir, `${X}/review.md`, 'Reviewer: Uma\r\n\r\n- [x] R1: Add two numbers\r\n  - fix: x\r\n  - fixed: y\r\n- [x] **R2** Reject text\r\n- [x] S1. Calculator\r\n- [x] Q1 Overflow: decision: keep\r\n- [x] Q2 Rounding of halves: decision: up\r\n<!-- a comment\r\nof two lines -->\r\nA note the person wrote.\r\n');
   const result = review(dir, 'extract-calc', { update: true });
   // "Reject text" and "Reject `text`" are the same subject; Q1's title is not the one questions.md gives.
-  assert.deepEqual(result.changed, [{ was: 'Q1 Overflow: decision: keep', now: 'Q1 Overflow wraps around at 2^31: decision: keep', ticked: true }]);
-  assert.equal(result.moved, 3);
+  // A reworded question starts without a decision; the report has the old one.
+  assert.deepEqual(result.changed, [{ was: 'Q1 Overflow: decision: keep', now: 'Q1 Overflow wraps around at 2^31: decision:', ticked: true }]);
+  // The comment and the note are already at the end of the file.
+  assert.equal(result.moved, 0);
   const text = read(dir, `${X}/review.md`);
   assert.match(text, /\r\n/);
   assert.match(text, /- \[x\] R1 Add two numbers\r\n {2}- fix: x\r\n {2}- fixed: y\r\n- \[x\] R2 Reject `text`\r\n/);
   assert.match(text, /- \[x\] S1 Calculator\r\n/);
-  assert.match(text, /- \[ \] Q1 Overflow wraps around at 2\^31: decision: keep\r\n- \[x\] Q2 Rounding of halves: decision: up\r\n/);
+  assert.match(text, /- \[ \] Q1 Overflow wraps around at 2\^31: decision:\r\n- \[x\] Q2 Rounding of halves: decision: up\r\n/);
   assert.match(text, /<!-- a comment\r\nof two lines -->\r\nA note the person wrote\.\r\n$/);
 });
 
@@ -231,6 +233,54 @@ test('port-design fills only template sections, and --update adds missing rows',
   assert.deepEqual(items(dir, 'port-calc-add').screens, ['S1 Calculator']);
 });
 
+test('--update tells apart questions whose short titles are the same', () => {
+  const dir = extract();
+  const long = '[Reject `text`] Overflow wraps around for very large numbers in the add function of the calculator page';
+  write(dir, `${X}/questions.md`, `# Questions\n\n- Q1. ${long} - when the sum is negative\n- Q2. ${long} - when the sum is positive\n`);
+  review(dir, 'extract-calc');
+  const first = read(dir, `${X}/review.md`);
+  assert.match(first, /- \[ \] Q1 \[Reject `text`\] Overflow wraps[^\n]* - when the sum is negative: decision:\n- \[ \] Q2 \[Reject `text`\] Overflow wraps[^\n]* - when the sum is positive: decision:\n/);
+  write(dir, `${X}/review.md`, tickAll(first).replace(/(negative: decision:)$/m, '$1 keep').replace(/(positive: decision:)$/m, '$1 **fix**'));
+  assert.equal(review(dir, 'extract-calc', { update: true }).written, false);
+  // Q1 is withdrawn and Q2 becomes Q1: only Q2's tick and decision move.
+  write(dir, `${X}/questions.md`, `# Questions\n\n- Q1. ${long} - when the sum is positive\n`);
+  const result = review(dir, 'extract-calc', { update: true });
+  assert.match(read(dir, `${X}/review.md`), /- \[x\] Q1 Overflow wraps around[^\n]*…: decision: \*\*fix\*\*\n$/);
+  assert.deepEqual(result.removed.map((r) => [r.item.slice(-31), r.why]), [['sum is negative: decision: keep', 'its subject is gone']]);
+});
+
+test('--update writes nothing while coverage.md is unreadable, and a renumbered item needs a shared word', () => {
+  const dir = extract();
+  review(dir, 'extract-calc');
+  write(dir, `${X}/review.md`, tickAll(read(dir, `${X}/review.md`)));
+  const before = read(dir, `${X}/review.md`);
+  // A UTF-16 ledger would make its C1 item look gone, with the person's tick.
+  fs.writeFileSync(path.join(dir, `${X}/coverage.md`), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('| Site |', 'utf16le')]));
+  const refused = review(dir, 'extract-calc', { update: true });
+  assert.equal(refused.ok, false);
+  assert.match(refused.problems.join(), /coverage\.md/);
+  assert.equal(read(dir, `${X}/review.md`), before);
+  // A requirement that only kept R1's number does not take R1's notes.
+  const fresh = extract();
+  review(fresh, 'extract-calc');
+  write(fresh, `${X}/review.md`, tickAll(read(fresh, `${X}/review.md`)).replace('- [x] R1 Add two numbers', '- [x] R1 Add two numbers\n  - fix: name the operands'));
+  write(fresh, `${X}/specs/calc/spec.md`, SPEC.replace('Add two numbers', 'Clear memory'));
+  const result = review(fresh, 'extract-calc', { update: true });
+  assert.deepEqual(result.added, ['R1 Clear memory']);
+  assert.deepEqual(result.removed.map((r) => r.lines), [['- [x] R1 Add two numbers', '  - fix: name the operands']]);
+});
+
+test('review accepts a requirement named ".NET ..." as the gate does', () => {
+  const dir = extract();
+  write(dir, `${X}/specs/calc/spec.md`, SPEC.replace('Add two numbers', '.NET rounding').replace('Reject `text`', '-1 is rejected'));
+  write(dir, `${X}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| .NET rounding | src/calc.php:add:3-5 | none |\n| -1 is rejected | src/calc.php:add:9 | none |\n');
+  write(dir, `${X}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 .NET rounding | confirmed | x |\n| R2 -1 is rejected | confirmed | x |\n| S1 Calculator | confirmed | x |\n');
+  review(dir, 'extract-calc');
+  write(dir, `${X}/review.md`, tickAll(read(dir, `${X}/review.md`)).replace(/decision:$/gm, 'decision: keep'));
+  assert.deepEqual(checkReview(dir, 'extract-calc').problems.filter((p) => /rounding|rejected/.test(p)), []);
+  assert.equal(review(dir, 'extract-calc', { update: true }).written, false);
+});
+
 // ---------------------------------------------------------------- finish.mjs run
 
 function finishRepo() {
@@ -303,6 +353,37 @@ test('finish.mjs run keeps a not-run cell, leaves a level a port has no command 
   assert.match(read(dir, 'openspec/changes/finish/checks.md'), /\| Test \| `npm test` \| pass \| \(412 tests, 412 passed\); finish\.mjs run \d{4}-\d{2}-\d{2}, 1 s \|/);
 });
 
+test('finish.mjs run writes fail when a level failed in one port and another has no command, and opens a stale pass', async () => {
+  const dir = finishRepo();
+  quiet(() => finishDraft(dir, 'finish'));
+  const ok = async () => ({ exitCode: 0, seconds: 1, timedOut: false, output: '' });
+  await runChecks(dir, 'finish', { run: ok, progress: () => {} });
+  assert.match(read(dir, 'openspec/changes/finish/checks.md'), /\| billing \| pass \| pass \|/);
+  // payment loses its B1 command: the earlier pass no longer stands.
+  write(dir, 'openspec/changes/archive/2026-11-04-port-billing-payment/design.md', '## Verification\n| Level | Covers | Command |\n|---|---|---|\n| A | all | |\n');
+  let result = await runChecks(dir, 'finish', { run: ok, progress: () => {} });
+  assert.match(result.problems.join('\n'), /has no command in the design\.md of billing\/payment; its cell is left open/);
+  assert.match(read(dir, 'openspec/changes/finish/checks.md'), /\| billing \| pass \|  \|/);
+  // And invoice's B1 fails: the cell says fail.
+  result = await runChecks(dir, 'finish', { run: async (command) => ({ exitCode: command === 'node b1-invoice.js' ? 1 : 0, seconds: 1, timedOut: false, output: '' }), progress: () => {} });
+  assert.match(read(dir, 'openspec/changes/finish/checks.md'), /\| billing \| pass \| fail \| - \| - \| finish\.mjs run \d{4}-\d{2}-\d{2}: B1 failed in billing\/invoice \|/);
+  // An older note with commas is replaced too.
+  write(dir, 'openspec/changes/finish/checks.md', read(dir, 'openspec/changes/finish/checks.md').replace('B1 failed in billing/invoice', 'B1 failed in billing/invoice, billing/payment'));
+  await runChecks(dir, 'finish', { run: ok, progress: () => {} });
+  assert.doesNotMatch(read(dir, 'openspec/changes/finish/checks.md'), /failed in billing\/invoice, billing\/payment/);
+});
+
+test('review tells apart two leftovers with the same words by where they are', () => {
+  const dir = tempDir();
+  write(dir, 'openspec/changes/finish/.openspec.yaml', 'schema: spec-relay-finish\n');
+  write(dir, 'openspec/changes/finish/leftovers.md', '# Leftovers\n\n| Id | Kind | Where | What | Class | Reason |\n|---|---|---|---|---|---|\n| L1 | todo | `ts/a.ts:3` | check the rounding | after-release | x |\n| L2 | todo | `ts/b.ts:9` | check the rounding | before-release | y |\n');
+  review(dir, 'finish');
+  const text = read(dir, 'openspec/changes/finish/review.md');
+  assert.match(text, /- \[ \] L1 check the rounding \(ts\/a\.ts:3\) - class: after-release\n- \[ \] L2 check the rounding \(ts\/b\.ts:9\) - class: before-release\n/);
+  write(dir, 'openspec/changes/finish/review.md', tickAll(text));
+  assert.equal(review(dir, 'finish', { update: true }).written, false);
+});
+
 test('finish.mjs run refuses a chained command and a missing checks.md', async () => {
   const dir = finishRepo();
   assert.match((await runChecks(dir, 'finish', { progress: () => {} })).problems.join(), /checks.md is missing/);
@@ -319,6 +400,13 @@ test('readReview keeps an item\'s notes with it and the rest apart', () => {
   assert.equal(reviewer, 'Reviewer: Uma');
   assert.deepEqual(found.map((i) => [i.key, i.done, i.block.length]), [['R1', true, 2], ['R2', false, 1]]);
   assert.deepEqual(other, ['<!-- a', 'comment -->', 'free text', '', 'more text']);
+});
+
+test('readReview keeps a comment inside an item\'s notes and a fix under a heading of its own with the item', () => {
+  const read2 = readReview('# Review\n\n## 1. R\n- [ ] R1 a\n  <!-- two\n  lines -->\n  - fix: b\n\n## 2. S\n- fix: c\n- [ ] S1 d\ntail\n', (b) => b.slice(0, 2));
+  assert.deepEqual(read2.items.map((i) => i.block), [['- [ ] R1 a', '  <!-- two', '  lines -->', '  - fix: b', '- fix: c'], ['- [ ] S1 d']]);
+  assert.equal(read2.moved, 0);
+  assert.equal(readReview('free\n## 1. R\n- [ ] R1 a\n', (b) => b.slice(0, 2)).moved, 1);
 });
 
 test('the CLI prints ASCII-only JSON and exits 0, 1 or 2', () => {
