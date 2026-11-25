@@ -20,7 +20,8 @@ The person answers questions and makes the decisions the skill reserves for them
 Let subagents do the reading and writing, several at once, and keep your own
 context for the person, the gates and the plan (the skill's "Working in
 parallel"). Delegate also when only one task is to be done: a task that reads
-many files to write or answer a few lines goes to a subagent. What follows
+many files to write or answer a few lines goes to a subagent. A change whose
+new text you already know, in one file, is yours. What follows
 from other files alone is a script's, not yours or a subagent's: run the
 kit's script for it.
 Reply in the language the person writes in.

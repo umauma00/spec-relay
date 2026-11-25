@@ -135,8 +135,8 @@ export function protectedPath(root, file, { subagent = false, pluginRoot = KIT_R
   if (fold(rel) === fold(CANVAS_LOG)) return 'only the canvas writes canvas-log.jsonl, the record of the person\'s own edits in the canvas';
   if (/^openspec\/changes\/[^/]+\/verify\.json$/i.test(rel)) return 'only verify.mjs writes verify.json, the record of the last verify run; run it again instead';
   if (/^openspec\/changes\/[^/]+\/e2e-old\.json$/i.test(rel)) return 'only e2e.mjs writes e2e-old.json, the record of the screen tests passing on the old system; run e2e.mjs old again instead';
-  if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions|crosscheck)\.md$/i.test(rel) || /^openspec\/changes\/port-[^/]+\/(proposal|design)\.md$/i.test(rel) || [PLAN, LESSONS].some((p) => fold(p) === fold(rel)))) {
-    return 'only the orchestrator writes review.md, questions.md, crosscheck.md, a port\'s proposal.md and design.md, the plan and the lessons';
+  if (subagent && (/^openspec\/changes\/[^/]+\/(review|questions|crosscheck)\.md$/i.test(rel) || /^openspec\/changes\/port-[^/]+\/(proposal|design)\.md$/i.test(rel) || /^openspec\/changes\/finish(?:-v\d+)?\/(checks|leftovers)\.md$/i.test(rel) || [PLAN, LESSONS].some((p) => fold(p) === fold(rel)))) {
+    return 'only the orchestrator writes review.md, questions.md, crosscheck.md, a port\'s proposal.md and design.md, the finish change\'s checks.md and leftovers.md, the plan and the lessons';
   }
   if (subagent && under(rel, 'openspec/spec-relay/guide/qa')) return 'the code guide\'s saved questions and answers are the person\'s: only the canvas (their button) or the orchestrator on their word saves one';
   if (source === '.') {

@@ -317,9 +317,10 @@ not wash out these instructions.
    archiving. Everything that needs reading many source files or artifacts
    to write a few lines goes to a subagent, even when it is one task and
    nothing runs beside it: your context has to last the whole migration,
-   and a compaction loses what the person said. A task small enough to do
-   in a few reads (a word in one file, one table row) is faster done
-   yourself than delegated.
+   and a compaction loses what the person said. A change whose new text you
+   already know, in one file (a word, a name, a line the person dictated),
+   is faster done yourself than delegated. A single task is a wave of one:
+   save and compare the guard around it as around any wave.
 11. **Code questions.** When the person asks about the source code or the
    new code (in the chat, a `[canvas]` question, a review item) and the
    answer needs more than a few files, give the question to one
@@ -383,15 +384,22 @@ you assist. This gate is the point of the kit.
    `was` holds it), and `warnings`.
    - A `fix:` note under an item (written in the file or the canvas, or
      sent from the canvas as "[canvas] ... change requests"), or a change
-     asked for in the chat, is that request. Correct the artifacts: change
-     a word, a name or one line yourself; give anything more (a scenario, a
-     requirement, a trace row, a screen, a context's boundary, a table of
-     the target design) to one `spec-relay-analyst` with the item, the
-     person's words from the fix line, the files to change and the schema
-     artifact, and read only its report (in extract and amend, have the
-     checker check the changed rows again). Then write `  - fixed: <what you changed, in one line>` right under that
-     fix line, keep the item unticked, render again and ask the person to
-     look again. When you think the request is wrong, do not change the
+     asked for in the chat, is that request. Correct the artifacts. Change
+     a word, a name or a line whose new text you already know yourself.
+     Give anything that needs the source or other artifacts read (a
+     scenario, a requirement, a trace row, a screen, a context's boundary,
+     a table of the target design, a section of handover.md) to one
+     `spec-relay-analyst` with the item, the person's words from the fix
+     line, the files to change and the schema artifact, and read only its
+     report. Tell it to add a new requirement at the end of its spec file
+     and to report every requirement or screen it added or renamed, so that
+     you untick those and run `draft.mjs review --update`. Never give it
+     review.md, questions.md, impact.md, crosscheck.md or a port's proposal
+     and design: they stay yours. In extract and amend, have the checker
+     check the changed rows again, whoever changed them. Then write
+     `  - fixed: <what you changed, in one line>` right under that fix
+     line, keep the item unticked, render again and ask the person to look
+     again. When you think the request is wrong, do not change the
      artifacts: say why in the chat and let the person withdraw or keep it.
    - A `hold:` note waits for the person. Do not answer it by ticking; ask
      whether someone else must be asked, and note what they decide.
@@ -909,8 +917,10 @@ changes no behavior.
 5. **Handover and review.** Give handover.md to one `spec-relay-analyst`
    (schema `spec-relay-finish`, artifact `handover`; it reads checks.md,
    leftovers.md, the plan, the archived ports, the survey's inventory and
-   conventions.md) once the person agreed on the classes, and read only its
-   Verdict and Before the switch to report them. Write review.md with
+   the target design's conventions.md), and read only its Verdict and
+   Before the switch to report them. When a class changes in the review or
+   `finish.mjs run` runs again, handover.md is out of date: give it back to
+   the analyst as a correction and untick H1 and H2. Write review.md with
    `draft.mjs review --change finish` (one item per leftover, with its
    class), validate (`node "<kit>/scripts/openspec.mjs" validate finish
    --strict`) and run the review (above). Show the leftovers grouped by
