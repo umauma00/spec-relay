@@ -11,7 +11,8 @@
    "eb47fc83136b8aad4506273498d13a1c3a66951c36d65977645f9d2080b4a617"
   ],
   "openspec-schemas/spec-relay-amend/templates/crosscheck.md": [
-   "72af8e60ce45f2031e6f77a3b2f45c3e858f2632afc20290a9664bc3641de5e2"
+   "72af8e60ce45f2031e6f77a3b2f45c3e858f2632afc20290a9664bc3641de5e2",
+   "cf59d7efe2322b4fa7415188d1e2067ad300a8681a821ee7a63414da5a033390"
   ],
   "openspec-schemas/spec-relay-amend/templates/impact.md": [
    "c6f5dc50f8a4b8a839cc242ae08b14e6d733b887dbee7fb08763b8d785b4f268",
@@ -57,6 +58,7 @@
    "b90a68f538d7b7ce2ad3b7a2e6b8b853df6b695f8304a3a78480d25fef539c40",
    "bc46f9954c8d0a01972e9d98d0870ecc2ddc255996c8a38d7ef54ed8ea269cde",
    "ca6a256dfc3b6f6d61699c53f3bf232db35e0e9978c3bff122dac7de3d3cacc5",
+   "cc3034a18068bb9a57703b72ab1b6be06c2365116dfe764ddf424ed2cea84676",
    "d5ed52f8c55e10eb18cd0f0ce2a2ce1f5e5a9db071fc21cb0f58a63433aeb061",
    "d8113cade8e108b1663ade52fbdc149232dc3fb943f3041dd4aa24157f41ec83",
    "e753c7d14c923290cadd02693cc891d58d9fe946fe3d1b4c0e9f0d924d1d90e3"
@@ -67,7 +69,8 @@
    "e3c8f4ee4a28af605ea43aeaefec77b7a630d99f286ece091b83f10529ed37c6"
   ],
   "openspec-schemas/spec-relay-extract/templates/crosscheck.md": [
-   "72af8e60ce45f2031e6f77a3b2f45c3e858f2632afc20290a9664bc3641de5e2"
+   "72af8e60ce45f2031e6f77a3b2f45c3e858f2632afc20290a9664bc3641de5e2",
+   "8d0b671ffabde922922dbf01c33b79399f42dd959e11a2ed734dc1ff438166fd"
   ],
   "openspec-schemas/spec-relay-extract/templates/questions.md": [
    "6a01d21dddc70271c43cd82526486ff1b98c71e718cc77d776feba0a4a099637",
@@ -96,6 +99,9 @@
   "openspec-schemas/spec-relay-extract/templates/trace.md": [
    "509ac2c5a491082b7fd6cc9532e876833c951510c62a87477c3844e4d1a517a9",
    "f142d666408bf07cc43d310bc88a80282537bf5c04e2ddb20fbd5366b39b1b88"
+  ],
+  "openspec-schemas/spec-relay-extract/templates/walkthrough.md": [
+   "3968fb37492805adb206891e4fb376293ba54627e552c9f8bf5df8f45dc9d316"
   ],
   "openspec-schemas/spec-relay-finish/schema.yaml": [
    "070dc616c843c5ca92c7339da5b53ee13f04d5e9ee9979a244b7d0e3a127ce95",
@@ -174,6 +180,7 @@
    "658bd84de47327253e24a685b3fcad05eac707c36acb87ca174a21a0172f004c",
    "79e08a2414f1b25adc6e06808da257ec3dc460ce6884a3a2acb34c18579eb261",
    "7aca491616a4f429b79986ea1d74c5f7fc59838ce91057db94b129432e4317b2",
+   "a01ed7f676b2f05969ea3984ee382a791c759df442fa49adc84625daa8d49363",
    "b423163a030cae278a7415b95f7b58fc4d4194c1fe5df16fe170effe67565d9e",
    "cc08b51a313fbb78c5623ae5bfc13d654aa5ffbefcf3f1b96d058b24ff7fc7c2",
    "e3e6f1a8aa41d2d03804f9d91bd5e66d5aa95168461c1bf9f54b40dc85699076",
@@ -185,6 +192,9 @@
   ],
   "openspec-schemas/spec-relay-survey/templates/context-map.md": [
    "82f189bce98a80bdb95c99a9ff342666110b12245dfdb821266ca979f1bfc6b0"
+  ],
+  "openspec-schemas/spec-relay-survey/templates/crosscheck.md": [
+   "c588a6d279704b6d59328db6cffe0d885a995f10e6f397d9539276a6b26634d0"
   ],
   "openspec-schemas/spec-relay-survey/templates/database.md": [
    "c54eb22997787a6cf9d755224f7bb633baf875df798bf74af3bdad51ff9b3704"
