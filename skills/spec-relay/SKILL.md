@@ -164,8 +164,11 @@ stop halfway on something the machine or the host lacks.
      version's in their place, and that is expected. Then tell the person, in
      a few lines, what docs/UPGRADING.md of the kit says changes for changes in
      progress (the sections above the version they updated from).
-   - A `conflict` on one of those files means someone edited it: show it and
-     ask the person to restore or delete it; never do it yourself.
+   - A `conflict` on one of those files means someone edited it or a newer
+     kit wrote it: show it and ask the person whether someone updated the kit
+     (then they update theirs) or to restore or delete it; never do it yourself.
+   - `kit-version` (`fail`): a newer kit set this repository up. Tell the
+     person to update the kit (the plugin) first; never run setup with this one.
    - `legacy` (`fail`, a repository set up with 0.6.0 or earlier): after the
      person agrees, run `node "<kit>/scripts/openspec.mjs" update` in the
      repository, then setup as above; setup removes the old stubs update leaves.

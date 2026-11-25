@@ -462,7 +462,7 @@ test('known-files.json lists the current content of every schema and pinning fil
   }
   assert.deepEqual(missing, [], 'run node scripts/known-files.mjs in the kit repository and commit scripts/known-files.json');
   // CRLF, a BOM and reformatted JSON are the same content.
-  assert.equal(contentHash('a.yaml', '﻿x: 1\r\n'), contentHash('a.yaml', 'x: 1\n'));
+  assert.equal(contentHash('a.yaml', '\uFEFFx: 1\r\n'), contentHash('a.yaml', 'x: 1\n'));
   assert.equal(contentHash('a.json', '{"b":1,"a":2}'), contentHash('a.json', '{\n    "a": 2,\n    "b": 1\n}\n'));
   assert.notEqual(contentHash('a.yaml', 'x: 1\n'), contentHash('a.yaml', 'x: 2\n'));
 });
@@ -484,7 +484,15 @@ test('files an earlier kit version installed are replaced; edited ones are still
     assert.deepEqual(conflicts(opts), []);
     assert.deepEqual(actions(opts, 'replace'), ['openspec/schemas/spec-relay-port/schema.yaml', 'openspec/spec-relay/tools/package.json']);
     // A replaced package.json reinstalls OpenSpec even when the installed one runs.
+    const tools = path.join(dir, 'openspec/spec-relay/tools');
+    write(tools, 'node_modules/@fission-ai/openspec/package.json', JSON.stringify({ version: OPENSPEC_VERSION }));
+    write(tools, 'node_modules/@fission-ai/openspec/bin/openspec.js', `console.log(${JSON.stringify(OPENSPEC_VERSION)})\n`);
+    write(tools, 'node_modules/.package-lock.json', '{}');
     assert.equal(plan(opts).install, true);
+    const keepPkg = fs.readFileSync(pkg, 'utf8');
+    fs.writeFileSync(pkg, fs.readFileSync(path.join(KIT_ROOT, 'templates/openspec-tools/package.json'), 'utf8'));
+    assert.equal(plan(opts).install, false);
+    fs.writeFileSync(pkg, keepPkg);
     // A dry run changes nothing.
     assert.equal(quiet(() => main(['--target', dir, ...BASE])), 0);
     assert.equal(fs.readFileSync(schema, 'utf8'), crlf(oldSchema));
@@ -516,22 +524,78 @@ test('a schema file an earlier version had and this one has not is removed, with
   } finally { restore(); }
 });
 
-test('a failed install puts the replaced files back', { skip: process.platform === 'win32' && 'npm sits in node\'s folder' }, () => {
+// The same PATH as envWithPath, inside this process (setup runs in-process here,
+// so the earlier-version list can be extended for the test).
+function withFakeNpm(bin, fn) {
+  const saved = { ...process.env };
+  for (const key of Object.keys(process.env)) if (key.toUpperCase() === 'PATH' || key === 'APPDATA' || key === 'npm_config_prefix') delete process.env[key];
+  process.env.PATH = bin;
+  try { return fn(); } finally {
+    for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+    Object.assign(process.env, saved);
+  }
+}
+
+test('a failed run puts the replaced files and the installed OpenSpec back', () => {
   const dir = tempDir();
   assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
-  const pkg = path.join(dir, 'openspec/spec-relay/tools/package.json');
+  const tools = path.join(dir, 'openspec/spec-relay/tools');
+  const pkg = path.join(tools, 'package.json');
   const schema = path.join(dir, 'openspec/schemas/spec-relay-survey/schema.yaml');
+  const configFile = path.join(dir, 'openspec/config.yaml');
   const oldPkg = '{"name":"spec-relay-openspec","dependencies":{"@fission-ai/openspec":"2.0.0"}}';
   const restore = [asEarlier('templates/openspec-tools/package.json', oldPkg), asEarlier('openspec-schemas/spec-relay-survey/schema.yaml', 'old\n')];
-  const savedPath = process.env.PATH;
-  try {
+  const installed = path.join(tools, 'node_modules/@fission-ai/openspec/package.json');
+  const reset = () => {
     fs.writeFileSync(pkg, oldPkg);
     fs.writeFileSync(schema, 'old\n');
-    process.env.PATH = fakeNpm(OPENSPEC_VERSION, { ciFails: true });
-    assert.throws(() => quiet(() => main(['--target', dir, ...BASE, '--apply'])), /npm ci in openspec\/spec-relay\/tools failed[\s\S]*put back/);
+    write(tools, 'node_modules/@fission-ai/openspec/package.json', JSON.stringify({ version: '2.0.0' }));
+  };
+  try {
+    // npm ci fails (no network): the old package files and the old OpenSpec are back.
+    reset();
+    withFakeNpm(fakeNpm(OPENSPEC_VERSION, { ciFails: true }), () => {
+      assert.throws(() => quiet(() => main(['--target', dir, ...BASE, '--apply'])), /npm ci in openspec\/spec-relay\/tools failed[\s\S]*put back/);
+    });
     assert.equal(fs.readFileSync(pkg, 'utf8'), oldPkg);
     assert.equal(fs.readFileSync(schema, 'utf8'), 'old\n');
-  } finally { process.env.PATH = savedPath; restore.forEach((undo) => undo()); }
+    assert.equal(JSON.parse(fs.readFileSync(installed, 'utf8')).version, '2.0.0');
+    assert.ok(!fs.existsSync(path.join(tools, '.previous')));
+    // npm ci works but a later write fails: the replaced schema and the old OpenSpec come back too.
+    reset();
+    fs.writeFileSync(configFile, fs.readFileSync(configFile, 'utf8').replace(/^skillsScope: project\r?\n/m, ''));
+    const realWrite = fs.writeFileSync;
+    fs.writeFileSync = (file, ...rest) => {
+      if (path.resolve(String(file)) === configFile) throw new Error('disk full');
+      return realWrite(file, ...rest);
+    };
+    try {
+      withFakeNpm(fakeNpm(), () => {
+        assert.throws(() => quiet(() => main(['--target', dir, ...BASE, '--apply'])), /disk full[\s\S]*put back/);
+      });
+    } finally { fs.writeFileSync = realWrite; }
+    assert.equal(fs.readFileSync(pkg, 'utf8'), oldPkg);
+    assert.equal(fs.readFileSync(schema, 'utf8'), 'old\n');
+    assert.equal(JSON.parse(fs.readFileSync(installed, 'utf8')).version, '2.0.0');
+    assert.ok(!fs.existsSync(path.join(tools, '.previous')));
+  } finally { restore.forEach((undo) => undo()); }
+});
+
+test('setup records the kit version, and an older kit stops on a repository a newer one set up', () => {
+  const dir = tempDir();
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
+  const stamp = path.join(dir, 'openspec/spec-relay/kit.json');
+  const { version } = JSON.parse(fs.readFileSync(path.join(KIT_ROOT, 'package.json'), 'utf8'));
+  assert.equal(JSON.parse(fs.readFileSync(stamp, 'utf8')).version, version);
+  // An older stamp is just updated; a newer one is a conflict before anything else.
+  fs.writeFileSync(stamp, crlf(JSON.stringify({ kit: 'spec-relay', version: '0.1.0' })));
+  assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])), []);
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 0);
+  assert.equal(JSON.parse(fs.readFileSync(stamp, 'utf8')).version, version);
+  fs.writeFileSync(stamp, JSON.stringify({ kit: 'spec-relay', version: '99.0.0' }));
+  assert.deepEqual(conflicts(parseArgs(['--target', dir, ...BASE])), ['openspec/spec-relay/kit.json']);
+  assert.equal(quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply'])), 2);
+  assert.equal(JSON.parse(fs.readFileSync(stamp, 'utf8')).version, '99.0.0');
 });
 
 test('0.6.0 stubs under .github/ are removed only after openspec update moved the skills', () => {
@@ -539,7 +603,8 @@ test('0.6.0 stubs under .github/ are removed only after openspec update moved th
   quiet(() => main(['--target', dir, ...BASE, '--skip-init', '--apply']));
   const prompt = '.github/prompts/opsx-archive.prompt.md';
   const skill = '.github/skills/openspec-sync-specs';
-  write(dir, prompt, crlf(legacyStubFor(path.join(dir, prompt))));
+  // The 0.6.0 text itself, so a change to legacyStubFor cannot go unnoticed.
+  write(dir, prompt, crlf('---\ndescription: "Disabled by spec-relay in this repository. Select the spec-relay-orchestrator agent to apply, review, archive or sync OpenSpec changes."\n---\n\n<!-- spec-relay: disabled -->\n\nThis repository is migrated with spec-relay. Applying, archiving or syncing an OpenSpec change here\nmust go through the `spec-relay-orchestrator` agent, which runs the human review gate.\nDo not perform this workflow. Tell the person to select `spec-relay-orchestrator` (Copilot CLI: `/agent`) and stop.\n'));
   write(dir, `${skill}/SKILL.md`, legacyStubFor(path.join(dir, skill, 'SKILL.md')));
   write(dir, '.github/prompts/opsx-apply.prompt.md', `${legacyStubFor(path.join(dir, '.github/prompts/opsx-apply.prompt.md'))}My own note\n`);
   write(dir, '.github/prompts/opsx-propose.prompt.md', 'Run openspec instructions propose\n');

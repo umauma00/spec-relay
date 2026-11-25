@@ -20,7 +20,7 @@ export const KNOWN_FILE = path.join(KIT_ROOT, 'scripts/known-files.json');
 export const TRACKED = ['openspec-schemas', 'templates/openspec-tools'];
 
 // The same text whatever the checkout did to it (as setup.mjs normalizeText).
-const normalize = (text) => text.replace(/^﻿/, '').replace(/\r\n/g, '\n');
+const normalize = (text) => text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
 function sortKeys(value) {
   if (Array.isArray(value)) return value.map(sortKeys);
   if (!value || typeof value !== 'object') return value;
@@ -37,9 +37,11 @@ export function contentHash(rel, text) {
 }
 
 let cache;
+// A missing or damaged list would make every earlier file look edited, so it stops instead.
 export function knownFiles() {
   if (!cache) {
-    try { cache = JSON.parse(fs.readFileSync(KNOWN_FILE, 'utf8')).files || {}; } catch { cache = {}; }
+    try { cache = JSON.parse(fs.readFileSync(KNOWN_FILE, 'utf8')).files; } catch (error) { throw new Error(`cannot read ${KNOWN_FILE} (${error.message}); install the kit again`); }
+    if (!cache || typeof cache !== 'object') throw new Error(`${KNOWN_FILE} has no "files"; install the kit again`);
   }
   return cache;
 }
@@ -56,14 +58,6 @@ const git = (args) => {
   return result.stdout;
 };
 
-function listFiles(dir, base = dir) {
-  let entries = [];
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
-  return entries.flatMap((entry) => {
-    const full = path.join(dir, entry.name);
-    return entry.isDirectory() ? listFiles(full, base) : [path.relative(base, full).replace(/\\/g, '/')];
-  });
-}
 
 // Every content of the tracked files in the kit's git history, plus the working tree.
 export function collect() {
@@ -73,8 +67,9 @@ export function collect() {
   const files = {};
   const add = (rel, text) => { (files[rel] ??= new Set()).add(contentHash(rel, text)); };
   const blobs = new Map();
-  for (const commit of git(['rev-list', 'HEAD', '--', ...TRACKED]).split('\n').filter(Boolean)) {
-    for (const line of git(['ls-tree', '-r', commit, '--', ...TRACKED]).split('\n').filter(Boolean)) {
+  // --full-history: also the commits a merge discarded, which a release may have shipped.
+  for (const commit of git(['rev-list', '--full-history', 'HEAD', '--', ...TRACKED]).split('\n').filter(Boolean)) {
+    for (const line of git(['ls-tree', '-r', '-z', commit, '--', ...TRACKED]).split('\0').filter(Boolean)) {
       const [meta, rel] = line.split('\t');
       const blob = meta.split(' ')[2];
       if (!blobs.has(blob)) blobs.set(blob, new Set());
@@ -85,8 +80,9 @@ export function collect() {
     const text = git(['cat-file', 'blob', blob]);
     for (const rel of rels) add(rel, text);
   }
-  for (const top of TRACKED) {
-    for (const rel of listFiles(path.join(KIT_ROOT, top))) add(`${top}/${rel}`, fs.readFileSync(path.join(KIT_ROOT, top, rel), 'utf8'));
+  // The working tree's tracked files (not yet committed changes), never stray untracked ones.
+  for (const rel of git(['ls-files', '-z', '--', ...TRACKED]).split('\0').filter(Boolean)) {
+    if (fs.existsSync(path.join(KIT_ROOT, rel))) add(rel, fs.readFileSync(path.join(KIT_ROOT, rel), 'utf8'));
   }
   return Object.fromEntries(Object.keys(files).sort().map((rel) => [rel, [...files[rel]].sort()]));
 }

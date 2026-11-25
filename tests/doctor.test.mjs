@@ -259,6 +259,13 @@ test('after setup: schemas, restored workflows, source root, toolchain and the t
   json = await run();
   assert.equal(byId(json, 'schemas').level, 'fail');
   assert.equal(json.ok, false);
+  // A newer kit set the repository up: update the kit, not "your schemas differ".
+  write(dir, 'openspec/spec-relay/kit.json', JSON.stringify({ kit: 'spec-relay', version: '99.0.0' }));
+  json = await run();
+  assert.equal(byId(json, 'kit-version').level, 'fail');
+  assert.equal(byId(json, 'schemas'), undefined);
+  write(dir, 'openspec/spec-relay/kit.json', JSON.stringify({ kit: 'spec-relay', version: '0.1.0' }));
+  assert.equal(byId(await run(), 'kit-version'), undefined);
 
   write(dir, '.agents/skills/openspec-archive-change/SKILL.md', '---\nname: openspec-archive-change\nmetadata:\n  generatedBy: "2.0.0"\n---\nRun openspec archive.\n');
   assert.equal(byId(await run(), 'workflows').level, 'fail');

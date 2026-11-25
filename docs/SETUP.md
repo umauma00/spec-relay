@@ -83,6 +83,7 @@ node "C:\path\to\spec-relay\scripts\setup.mjs" --target . --source-language "Jav
 | `openspec/schemas/spec-relay-*/` | 各工程のスキーマとテンプレート（survey・target・extract・amend・port・finish） |
 | `openspec/config.yaml` | 移行元・移行先の言語とフォルダー（全成果物の生成に使われる） |
 | `openspec/spec-relay/tools/` | キットが確認した版の OpenSpec を固定する package.json と package-lock.json（コミットします）。`npm ci` で入る `node_modules/` は Git の対象外です。OpenSpec は `node "<キットのフォルダー>/scripts/openspec.mjs" <引数>` で呼びます（キットのスクリプトもオーケストレーターもこれを使います） |
+| `openspec/spec-relay/kit.json` | 最後に導入したキットの版。古いキットで導入スクリプトを実行すると、ここで止まります（コミットしてください） |
 | `.agents/skills/openspec-*` | `openspec init --tools github-copilot --scope project` が置く OpenSpec 標準のスキル。導入スクリプトがすべて「`spec-relay-orchestrator` を使ってください」という案内に置き換えます（下の説明）。Copilot はこのフォルダーを直接読むので、リンクは作られません |
 
 - キットを更新したあとに導入スクリプトを実行し直すと、前の版のキットが置いたスキーマと `openspec/spec-relay/tools/` の3つのファイルは、そのまま新しい版に置き換わります（`replace`）。中身が過去のどの版とも違うファイル（誰かが書き換えたもの）は置き換えずに衝突として止まります。キットは過去の版の中身を `scripts/known-files.json` にハッシュで持っています。

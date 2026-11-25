@@ -220,8 +220,8 @@ export function checkOpenspec(ctx) {
     id: 'openspec', level: 'fail',
     message: ctx.t(`openspec/spec-relay/tools の OpenSpec は ${showVersion(v)} で、キットが確認した ${OPENSPEC_TESTED} と違います。`, `the OpenSpec in openspec/spec-relay/tools is ${showVersion(v)}, not ${OPENSPEC_TESTED}, the version the kit is tested with.`),
     // After a kit update the old package files are a conflict for setup, so they go first.
-    fix: ctx.t('導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。前の版のキットの package.json と package-lock.json は置き換わり、この版の OpenSpec が入ります。導入スクリプトがこの2つを「衝突」と表示したときは誰かが書き換えたものなので、元に戻すか消してから実行します。',
-      'Run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`): it replaces package.json and package-lock.json of an earlier kit version and installs this version\'s OpenSpec. If setup shows those two as a conflict, someone edited them: restore or delete them first.'),
+    fix: ctx.t('導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。前の版のキットの package.json と package-lock.json は置き換わり、この版の OpenSpec が入ります。導入スクリプトがこの2つを「衝突」と表示したときは、誰かが書き換えたか、もっと新しい版のキットが置いたものです。ほかの人がキットを更新していれば自分のキットも更新し、そうでなければ元に戻すか消してから実行します。',
+      'Run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`): it replaces package.json and package-lock.json of an earlier kit version and installs this version\'s OpenSpec. If setup shows those two as a conflict, someone edited them or a newer kit wrote them: if someone updated the kit, update yours; otherwise restore or delete them first.'),
   };
 }
 
@@ -389,6 +389,16 @@ export function checkSetup(ctx) {
     return [{ id: 'setup', level: 'warn', message: ctx.t('OpenSpec の設定 openspec/config.yaml がすでにあります。導入スクリプトはここで止まります。', 'an OpenSpec config openspec/config.yaml exists; setup stops on it.'), fix: ctx.t('キットの templates/openspec-config.yaml の内容を手で取り込んでください。', 'Merge the kit\'s templates/openspec-config.yaml into it by hand.') }];
   }
   const results = [];
+  // setup.mjs records the kit version that last set the repository up.
+  const stamped = (() => { try { return JSON.parse(ctx.normalizeText(ctx.readFile(path.join(ctx.target, 'openspec/spec-relay/kit.json')) || '')).version; } catch { return null; } })();
+  const newer = stamped && compareVersions(parseVersion(stamped) || [0, 0, 0], parseVersion(ctx.kitVersion) || [0, 0, 0]) > 0;
+  if (newer) {
+    results.push({
+      id: 'kit-version', level: 'fail',
+      message: ctx.t(`このリポジトリは spec-relay ${stamped} で導入されていて、このキット（${ctx.kitVersion}）より新しい版です。ほかの人がキットを更新しています。`, `spec-relay ${stamped} set up this repository, newer than this kit (${ctx.kitVersion}); someone else updated the kit.`),
+      fix: ctx.t('キットを更新してください（プラグインの更新）。古いキットのまま導入スクリプトを実行したり、スキーマを消したりしないでください。', 'Update the kit (update the plugin). Do not run setup with the older kit or delete the schemas.'),
+    });
+  }
   const differs = [];
   for (const schema of ctx.schemas) {
     const from = path.join(ctx.kitRoot, 'openspec-schemas', schema);
@@ -398,15 +408,15 @@ export function checkSetup(ctx) {
       if (theirs === null || ctx.normalizeText(theirs) !== ctx.normalizeText(ours || '')) differs.push(`openspec/schemas/${schema}/${rel.replace(/\\/g, '/')}`);
     }
   }
-  if (differs.length) {
+  if (differs.length && !newer) {
     results.push({
       id: 'schemas', level: 'fail',
       message: ctx.t(`openspec/schemas のスキーマが、このキット（${ctx.kitVersion}）の版と違います: ${differs.slice(0, 3).join(', ')}${differs.length > 3 ? ` ほか ${differs.length - 3} 件` : ''}`,
         `the schemas in openspec/schemas differ from this kit (${ctx.kitVersion}): ${differs.slice(0, 3).join(', ')}${differs.length > 3 ? ` and ${differs.length - 3} more` : ''}`),
-      fix: ctx.t('キットを更新したときは、導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。前の版のスキーマはそのまま新しい版に置き換わります。導入スクリプトが「衝突」と表示したファイルは誰かが書き換えたものなので、元に戻すか消してから実行します。キットの docs/UPGRADING.md の「〜から更新するとき」も読んでください（進行中の change で起きることが書いてあります）。違うスキーマのまま進めると、途中で成果物や確認が合わなくなります。',
-        'If you updated the kit, run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`): it replaces the schemas of an earlier version. A file it shows as a conflict was edited by someone: restore or delete it first. Also read "〜から更新するとき" in docs/UPGRADING.md of the kit (what happens to changes in progress). With other schemas, artifacts and gates stop matching midway.'),
+      fix: ctx.t('キットを更新したときは、導入スクリプトをもう一度実行してください（`node "<キットのフォルダー>/scripts/setup.mjs" --target . --apply`）。前の版のスキーマはそのまま新しい版に置き換わります。導入スクリプトが「衝突」と表示したファイルは、誰かが書き換えたか、もっと新しい版のキットが置いたものです。ほかの人がキットを更新していれば自分のキットも更新し、そうでなければ元に戻すか消してから実行します。キットの docs/UPGRADING.md の「〜から更新するとき」も読んでください（進行中の change で起きることが書いてあります）。違うスキーマのまま進めると、途中で成果物や確認が合わなくなります。',
+        'If you updated the kit, run setup again (`node "<kit>/scripts/setup.mjs" --target . --apply`): it replaces the schemas of an earlier version. A file it shows as a conflict was edited by someone or written by a newer kit: if someone updated the kit, update yours; otherwise restore or delete it first. Also read "〜から更新するとき" in docs/UPGRADING.md of the kit (what happens to changes in progress). With other schemas, artifacts and gates stop matching midway.'),
     });
-  } else {
+  } else if (!newer) {
     results.push({ id: 'schemas', level: 'ok', message: ctx.t(`スキーマはこのキットの版と同じです（${ctx.schemas.length} 個）。`, `the schemas match this kit (${ctx.schemas.length}).`) });
   }
   const legacy = ctx.legacyFiles ? ctx.legacyFiles(ctx.target) : [];
