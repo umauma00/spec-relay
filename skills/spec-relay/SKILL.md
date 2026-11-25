@@ -381,7 +381,10 @@ you assist. This gate is the point of the kit.
    while an artifact it reads is missing or not UTF-8. Tell the person about
    every item in its `removed` list that was ticked or had notes (its `lines`
    hold them), every reworded question in `changed` that had a decision (its
-   `was` holds it), and `warnings`.
+   `was` holds it), and `warnings`. When a removed item had a `fix:` line
+   (a rename with no word in common), copy its note lines under the item
+   that replaced it, so that the fix keeps its thread. Free text that is no
+   item's note goes under `## Other notes` at the end.
    - A `fix:` note under an item (written in the file or the canvas, or
      sent from the canvas as "[canvas] ... change requests"), or a change
      asked for in the chat, is that request. Correct the artifacts. Change

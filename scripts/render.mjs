@@ -501,9 +501,9 @@ export function parseReview(text) {
       continue;
     }
     if (!group) { group = { title: '', items: [] }; groups.push(group); }
-    const m = box.plain.match(/^([A-Za-z])(\d+)\b\s*(?:[:)]|[.-](?=\s|$))?\s*(.*)$/);
+    const m = box.plain.match(/^([A-Za-z])(\d+)\b(?:[.:)-]|\s+(?:[:)]|[.-](?=\s|$)))?\s*(.*)$/);
     if (!m) { last = { id: '', letter: '', done: box.done, title: stripComments(box.body).trim(), decision: null, key: norm(box.plain), plain: box.plain, remarks: [] }; group.items.push(last); continue; }
-    const rest = stripComments(box.body).replace(/^\W*[A-Za-z]\d+[\s*_\]`).:-]*/, '');
+    const rest = stripComments(box.body).replace(/^\W*[A-Za-z]\d+[*_\]`)]*(?:[.:)-]|\s+(?:[:)]|[.-](?=\s|$)))?\s*/, '');
     const [title, decision] = rest.split(/\bdecision:/i);
     last = {
       id: `${m[1].toUpperCase()}${Number(m[2])}`, letter: m[1].toUpperCase(), done: box.done,
@@ -631,7 +631,7 @@ function remarksHtml(remarks, L) {
 }
 const cautionsHtml = (list) => list.map((c) => `<p class="caution">${escapeHtml(c)}</p>`).join('');
 const deltaTag = (kind, L) => (L.deltas[kind] ? `<span class="delta ${kind}">${escapeHtml(L.deltas[kind])}</span>` : '');
-const withoutId = (s) => norm(s).replace(/^[a-z]\d+\b\s*(?:[:)]|[.-](?=\s|$))?\s*/, '');
+const withoutId = (s) => norm(s).replace(/^[a-z]\d+\b(?:[.:)-]|\s+(?:[:)]|[.-](?=\s|$)))?\s*/, '');
 
 function crossLine(row, L) {
   if (!row) return '';

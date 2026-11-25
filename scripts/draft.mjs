@@ -11,8 +11,9 @@
 //       never ticks a box. Without --update it writes only a missing file.
 //       With --update it rebuilds the list and keeps, for every item whose
 //       subject is still there, the person's tick, decision and notes; an item
-//       whose wording changed keeps its notes and loses its tick, so the
-//       person looks at it again. It reports what it added, changed and removed.
+//       whose wording changed keeps its notes and loses its tick (a question
+//       also its decision), so the person looks at it again. It reports what
+//       it added, changed and removed.
 //   node draft.mjs items --change <change>
 //       the numbered requirement and screen names (`R1 <name>`, `S1 <name>`)
 //       in spec and screens.md order, for crosscheck and omission-check tasks;
@@ -44,10 +45,15 @@ import { leftoverRows } from './finish.mjs';
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHECKBOX = /^\s*(?:[-*+]|\d+[.)])\s+\[(.?)\]\s*(.*)$/;
 const FENCE = /^\s*(```|~~~)/;
-// An item's id and the rest of its line. A mark after the id (R1. R1: R1 -)
-// counts only with a space after it, so that ".NET" or "-1" keeps its mark.
-const ID_REST = /^([A-Za-z])(\d+)\b\s*(?:[:)]|[.-](?=\s|$))?\s*(.*)$/;
-const ID_ONLY = /^[A-Za-z]\d+\b\s*(?:[:)]|[.-](?=\s|$))?\s*/;
+const OTHER = '## Other notes';
+// The decision at the end of a question's line (": decision: ..."); a
+// "decision" inside the title has no colon before it.
+const DECISION = /\s*:\s*(?:\*\*|__)?decision(?:\*\*|__)?\s*:.*$/i;
+// An item's id and the rest of its line. A mark right after the id (R1. R1:
+// R1-) ends the id; after a space (R1 - name) only with a space after it, so
+// that "R1 .NET" or "R1 -1 is rejected" keeps its mark.
+const ID_REST = /^([A-Za-z])(\d+)\b(?:[.:)-]|\s+(?:[:)]|[.-](?=\s|$)))?\s*(.*)$/;
+const ID_ONLY = /^[A-Za-z]\d+\b(?:[.:)-]|\s+(?:[:)]|[.-](?=\s|$)))?\s*/;
 const stripComments = (text) => String(text ?? '').replace(/<!--[\s\S]*?-->/g, '');
 const ascii = (json) => json.replace(/[\u007f-\uffff]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
 const escCell = (s) => String(s).replace(/\|/g, '\\|');
@@ -193,34 +199,19 @@ function targetReview(root, dir, problems, warnings) {
   return sections;
 }
 
-// Titles that tell items apart: the short form of each, and the long form for
-// those whose short forms are the same. Map(id -> { title, long }); an item
-// is followed by either form, since a sibling coming or going switches it.
-function distinct(entries) {
-  const short = entries.reduce((m, [, t]) => m.set(norm(t), (m.get(norm(t)) ?? 0) + 1), new Map());
-  return new Map(entries.map(([id, t, long]) => [id, { title: short.get(norm(t)) > 1 ? long : t, long }]));
-}
-
-const cut = (s, n) => (s.length > n ? `${s.slice(0, n - 1).trim()}…` : s);
-
-// A short title for a question: its first line without the id and without a
-// leading "[requirement]", up to the first " - " or about 60 characters. Two
-// questions with the same short title get their whole first lines instead, so
-// that a tick or a decision cannot pass from one to the other.
+// A question's title: its whole first line without the id (a leading
+// "[requirement]" included), so that two questions are told apart by all their
+// words and a tick or a decision cannot pass from one to the other.
 function questionTitles(text) {
-  const entries = [];
-  const seen = new Set();
+  const titles = new Map();
   for (const line of stripComments(text ?? '').split(/\r?\n/)) {
     const m = line.match(/^\s*(?:[-*+]\s*|#{1,6}\s*)?(?:\*\*|__)?Q(\d+)(?:\*\*|__)?\s*[.:)）．]?\s*(.*)$/i);
     if (!m) continue;
     const id = `Q${Number(m[1])}`;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    const whole = light(m[2]).replace(/decision\s*:/gi, '').trim();
-    const title = cut(whole.replace(/^\[[^\]]*\]\s*/, '').split(/\s+-\s+/)[0].trim(), 60);
-    entries.push([id, title || whole || id, whole || id]);
+    if (titles.has(id)) continue;
+    titles.set(id, light(m[2]).replace(/decision\s*:/gi, '').trim() || id);
   }
-  return distinct(entries);
+  return titles;
 }
 
 function extractReview(root, dir, problems) {
@@ -235,10 +226,7 @@ function extractReview(root, dir, problems) {
   const sections = [
     ['1. Requirements', requirements.map((name, i) => ({ key: `R:${norm(name)}`, text: `R${i + 1} ${oneLine(name)}` }))],
     ['2. Screens', screens.map((name, i) => ({ key: `S:${norm(name)}`, text: `S${i + 1} ${oneLine(name)}` }))],
-    ['3. Questions', ids.map((id) => {
-      const { title, long } = titles.get(id) ?? { title: id, long: id };
-      return { key: `Q:${norm(title)}`, also: `Q:${norm(long)}`, fallback: id, text: `${id} ${title}: decision:`, question: true };
-    })],
+    ['3. Questions', ids.map((id) => ({ key: `Q:${norm(titles.get(id) ?? id)}`, fallback: id, text: `${id} ${titles.get(id) ?? id}: decision:`, question: true }))],
   ];
   // The C1 item, in the gate's own words, when the omission check set sites aside.
   const own = walk(path.join(dir, 'specs')).filter((f) => f.endsWith('.md')).map((f) => path.relative(path.join(dir, 'specs'), path.dirname(f)).split(path.sep).join('/'))[0] ?? '';
@@ -266,19 +254,17 @@ function finishReview(dir, problems, warnings) {
   const text = readIf(path.join(dir, 'leftovers.md'), problems);
   if (text === null) problems.push('leftovers.md is missing; run finish.mjs draft first');
   const rows = leftoverRows(text ?? '').filter((r) => /^L\d+$/.test(r.id));
-  // Two leftovers with the same words (one TODO in two files) are told apart
-  // by where they are.
-  const whats = distinct(rows.map((r) => {
+  // What and where: two leftovers with the same words (one TODO in two files)
+  // are told apart by where they are.
+  const what = (r) => {
     const t = light(r.what) || r.kind;
-    return [r.id, cut(t, 80), r.where ? `${cut(t, 80)} (${light(r.where)})` : t];
-  }));
+    const short = t.length > 80 ? `${t.slice(0, 79).trim()}…` : t;
+    return r.where ? `${short} (${light(r.where)})` : short;
+  };
   for (const r of rows.filter((x) => !x.klass)) warnings.push(`leftovers.md ${r.id} has no class yet; the item says "class: ?" until it has one`);
   return [
     ['1. Checks', [{ key: 'C1', text: 'C1 The whole-system checks' }]],
-    ['2. Leftovers', rows.map((r) => {
-      const { title, long } = whats.get(r.id);
-      return { key: `L:${norm(title)}`, also: `L:${norm(long)}`, fallback: r.id, text: `${r.id} ${title} - class: ${r.klass || '?'}` };
-    })],
+    ['2. Leftovers', rows.map((r) => ({ key: `L:${norm(what(r))}`, fallback: r.id, text: `${r.id} ${what(r)} - class: ${r.klass || '?'}` }))],
     ['3. Handover', [{ key: 'H1', text: 'H1 The verdict' }, { key: 'H2', text: 'H2 Before the switch' }]],
   ];
 }
@@ -325,9 +311,6 @@ export function readReview(text, keyOf) {
     if (!fenced && /^Reviewer:/.test(line)) { reviewer = line; item = null; continue; }
     if (!fenced && (/^#{1,6}\s/.test(line) || !line.trim())) { if (/^#{1,6}\s/.test(line)) { item = null; passed(); } gap = true; continue; }
     if (item && (REMARK.test(line) || /^\s/.test(line))) { item.block.push(line); continue; }
-    // A fix or hold note with no item right above it (under a heading of its
-    // own) belongs, as the gate reads it, to the item before: keep it there.
-    if (!item && !fenced && REMARK.test(line) && found.length) { item = found[found.length - 1]; item.block.push(line); continue; }
     item = null;
     keep(line);
   }
@@ -344,9 +327,9 @@ function keyFor(schema) {
     const letter = m[1].toUpperCase();
     const id = `${letter}${Number(m[2])}`;
     const rest = m[3];
-    const subject = (s) => norm(s.replace(/\s*:?\s*(?:\*\*|__)?decision(?:\*\*|__)?\s*:.*$/i, ''));
     if (schema === 'spec-relay-extract' || schema === 'spec-relay-amend') {
-      if (letter === 'R' || letter === 'S' || letter === 'Q') return `${letter}:${subject(rest)}`;
+      if (letter === 'Q') return `Q:${norm(rest.replace(DECISION, ''))}`;
+      if (letter === 'R' || letter === 'S') return `${letter}:${norm(rest)}`;
       return id;
     }
     if (schema === 'spec-relay-finish' && letter === 'L') return `L:${norm(rest.replace(/\s+-\s+class\s*:.*$/i, ''))}`;
@@ -367,20 +350,21 @@ function keyFor(schema) {
 // The words of an item without its id, as the gate compares them (withoutId).
 const words = (s) => norm(plain(stripComments(s)).replace(ID_ONLY, ''));
 // A question's line without its decision.
-const DECISION = /\s*(?:\*\*|__)?decision(?:\*\*|__)?\s*:.*$/i;
-const sameWords = (a, b) => words(a.replace(DECISION, '')) === words(b.replace(DECISION, ''));
+const unDecided = (s) => (/^\W*Q\d/i.test(plain(s)) ? s.replace(DECISION, '') : s);
+const sameWords = (a, b) => words(unDecided(a)) === words(unDecided(b));
 const idOf = (text) => plain(stripComments(text)).match(/^([A-Za-z])(\d+)\b/)?.slice(1, 3).join('').toUpperCase().replace(/^([A-Z])0*(\d)/, '$1$2') ?? null;
 
 // The decision a question's line holds, or ''.
-const decisionOf = (text) => text.match(/(?:\*\*|__)?decision(?:\*\*|__)?\s*:(?:\*\*|__)?\s*(.*)$/i)?.[1]?.trim() ?? '';
+const decisionOf = (text) => text.match(/:\s*(?:\*\*|__)?decision(?:\*\*|__)?\s*:(?:\*\*|__)?\s*(.*)$/i)?.[1]?.trim() ?? '';
 
 // Whether two items share a word (two characters in a row for Japanese and
 // Chinese), so that an item that only kept its number is not taken for the
 // old one.
-const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'not', 'decision', 'class']);
-function grams(text) {
+const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'not']);
+// Of the subjects only (the keys), not the fixed words after them.
+function grams(key) {
   const out = new Set();
-  for (const w of words(text.replace(DECISION, '')).split(/[^\p{L}\p{N}]+/u)) {
+  for (const w of String(key).replace(/^[A-Z]:/, '').split(/[^\p{L}\p{N}]+/u)) {
     if (/^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー]+$/u.test(w)) for (let i = 0; i + 1 < w.length; i++) out.add(w.slice(i, i + 2));
     else if (w.length >= 3 && !STOP.has(w)) out.add(w);
   }
@@ -390,28 +374,26 @@ const overlaps = (a, b) => { const x = grams(a); return [...grams(b)].some((g) =
 
 // Pairs every new item with the old item about the same subject: first by
 // subject, then, for an item whose subject changed (a rename the person asked
-// for, a question reworded), by the same id when the two share a word.
-// A subject that two old items or two new items have cannot tell them apart,
-// so it pairs only by id. matches: Map(new item -> { old, exact }).
+// for, a question reworded), by the same id when the two subjects share a
+// word. Two items with the same words (old or new) are paired by subject and
+// id together, since nothing else tells them apart.
+// matches: Map(new item -> { old, exact }).
 function pair(sections, old) {
   const matches = new Map();
   const used = new Set();
   const all = sections.flatMap(([, list]) => list);
-  const keysOf = (i) => [...new Set([i.key, i.also].filter(Boolean))];
-  const tally = (list) => list.reduce((m, i) => { for (const k of keysOf(i)) m.set(k, (m.get(k) ?? 0) + 1); return m; }, new Map());
+  const tally = (list) => list.reduce((m, i) => (i.key ? m.set(i.key, (m.get(i.key) ?? 0) + 1) : m), new Map());
   const olds = tally(old);
   const news = tally(all);
   for (const item of all) {
-    const key = keysOf(item).find((k) => olds.get(k) === 1 && news.get(k) === 1);
-    const m = key && old.find((o) => o.key === key && !used.has(o));
-    if (!m) continue;
-    // Matched by its long form: the same subject, only shown shorter now.
-    matches.set(item, { old: m, exact: true, same: key !== item.key });
-    used.add(m);
+    const twins = olds.get(item.key) > 1 || news.get(item.key) > 1;
+    const id = item.fallback ?? idOf(item.text);
+    const m = old.find((o) => !used.has(o) && o.key === item.key && (!twins || idOf(o.text) === id));
+    if (m) { matches.set(item, { old: m, exact: true }); used.add(m); }
   }
   for (const item of all.filter((i) => !matches.has(i))) {
     const id = item.fallback ?? idOf(item.text);
-    const m = old.find((o) => !used.has(o) && idOf(o.text) === id && (keysOf(item).includes(o.key) || overlaps(o.text, item.text)));
+    const m = old.find((o) => !used.has(o) && idOf(o.text) === id && o.key && item.key && overlaps(o.key, item.key));
     if (m) { matches.set(item, { old: m, exact: false }); used.add(m); }
   }
   return { matches, unused: old.filter((o) => !used.has(o)), ambiguous: new Set([...olds.keys()].filter((k) => olds.get(k) > 1)) };
@@ -424,12 +406,12 @@ function renderReview(sections, reviewer, matches = new Map(), report = null, ot
     for (const item of list) {
       const match = matches.get(item);
       if (!match) { out.push(`- [ ] ${item.text}`); report?.added.push(item.text); continue; }
-      const { old, exact, same } = match;
+      const { old, exact } = match;
       const [, ...notes] = old.block;
       // A question keeps the person's decision only when it is the same
       // question; otherwise the old line is in the report.
       const text = item.question && exact ? `${item.text} ${decisionOf(old.text)}`.trim() : item.text;
-      if (exact && (same || sameWords(old.text, item.text))) {
+      if (exact && sameWords(old.text, item.text)) {
         out.push(`- [${old.done ? 'x' : ' '}] ${text}`, ...notes);
       } else {
         out.push(`- [ ] ${text}`, ...notes);
@@ -437,7 +419,9 @@ function renderReview(sections, reviewer, matches = new Map(), report = null, ot
       }
     }
   }
-  if (other.length) out.push('', ...other);
+  // Under a heading of its own, so that a fix or hold line in it stays with no
+  // item, as the gate read it before.
+  if (other.length) out.push('', OTHER, ...other);
   return `${out.join('\n')}\n`;
 }
 
