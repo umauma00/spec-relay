@@ -16,9 +16,11 @@
 //       it added, changed and removed.
 //   node draft.mjs items --change <change>
 //       the numbered requirement and screen names (`R1 <name>`, `S1 <name>`)
-//       in spec and screens.md order, for crosscheck and omission-check tasks;
+//       in spec and screens.md order, for crosscheck, omission-check and
+//       walkthrough tasks, and an extract's entry points from source-map.md;
 //       for a port change, those of the baseline spec and the archived
-//       extract's screens.md.
+//       extract's screens.md; for a survey, the inventory rows (`paths`) the
+//       survey crosscheck judges.
 //   node draft.mjs port-design --change port-<capability> [--update]
 //       the Screens, Scenario checks and Source references tables of
 //       design.md, from screens.md and ui.md, the baseline spec, and the
@@ -35,11 +37,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   readIf, tableRows, headedRows, column, section, plain, norm, contextIds, archivedChange, changeSchema,
-  requirementNames, screenNames, noScreens, NO_SCREENS_ITEM, portLevels, questionIds, scenarioList, capabilitySegments, portCapability,
+  requirementNames, screenNames, noScreens, NO_SCREENS_ITEM, inventoryRows, portLevels, questionIds, scenarioList, capabilitySegments, portCapability,
   PLACEHOLDER, DB_KINDS, REMARK,
 } from './gate.mjs';
-import { assignment, traceSources } from './coverage.mjs';
+import { assignment, traceSources, checkSurveyCrosscheck } from './coverage.mjs';
 import { checkLedger } from './sites.mjs';
+import { entryPoints } from './walkthrough.mjs';
 import { leftoverRows } from './finish.mjs';
 
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -90,9 +93,19 @@ export function items(root, change) {
   const schema = changeSchema(dir);
   let requirements = [];
   let screens = [];
+  if (schema === 'spec-relay-survey') {
+    const inventory = readIf(path.join(dir, 'inventory.md'), problems);
+    const paths = inventoryRows(inventory ?? '').map((r) => r.path);
+    if (inventory !== null && paths.length === 0) problems.push('inventory.md has no rows');
+    return { ok: problems.length === 0, change, paths, problems };
+  }
+  let entries = null;
   if (schema === 'spec-relay-extract' || schema === 'spec-relay-amend') {
     requirements = changeRequirements(dir, problems);
-    if (schema === 'spec-relay-extract') screens = screenNames(readIf(path.join(dir, 'screens.md'), problems) ?? '');
+    if (schema === 'spec-relay-extract') {
+      screens = screenNames(readIf(path.join(dir, 'screens.md'), problems) ?? '');
+      entries = (entryPoints(readIf(path.join(dir, 'source-map.md'), problems) ?? '') ?? []).map((e) => e.id);
+    }
   } else if (schema === 'spec-relay-port') {
     const capability = portCapability(root, change);
     if (!capability) return { ok: false, problems: ['proposal.md records no baseline hash for this change\'s own capability; add it with gate.mjs baseline'] };
@@ -102,8 +115,8 @@ export function items(root, change) {
     const extract = archivedExtract(root, capability);
     if (!extract) problems.push(`no archived extract change of ${capability}`);
     else screens = screenNames(readIf(path.join(extract, 'screens.md'), problems) ?? '');
-  } else return { ok: false, problems: [`${change} has schema ${schema}; items lists the requirements and screens of an extract, amend or port change`] };
-  return { ok: problems.length === 0, change, requirements: numbered('R', requirements), screens: numbered('S', screens), problems };
+  } else return { ok: false, problems: [`${change} has schema ${schema}; items lists the requirements and screens of an extract, amend or port change, or the inventory rows of a survey`] };
+  return { ok: problems.length === 0, change, requirements: numbered('R', requirements), screens: numbered('S', screens), ...(entries ? { entryPoints: entries } : {}), problems };
 }
 
 // ---------------------------------------------------------------- review.md
@@ -146,6 +159,10 @@ function surveyReview(dir, problems) {
   const db = readIf(path.join(dir, 'database.md'), problems);
   if (db === null) problems.push('database.md is missing; write it before the review');
   const databases = databasesOf(db) ?? [];
+  // An unreadable crosscheck would drop the C2 item with the person's tick and notes.
+  const readable = fs.existsSync(path.join(dir, 'crosscheck.md')) && readIf(path.join(dir, 'crosscheck.md'), problems) !== null;
+  const inventory = readable ? readIf(path.join(dir, 'inventory.md'), problems) : null;
+  const asked = inventory === null ? null : checkSurveyCrosscheck(dir, inventoryRows(inventory), null, []).wording;
   return [
     ['1. Contexts', contexts.map((c, i) => ({ key: `K:${c.id}`, text: `K${i + 1} ${c.id}: ${c.name || c.id}` }))],
     ['2. Map', [
@@ -155,7 +172,11 @@ function surveyReview(dir, problems) {
       ['M4', 'The capability list and its order are right'],
       ['M5', 'The files marked carry may go to the new system unchanged'],
     ].map(([id, text]) => ({ key: id, text: `${id} ${text}` }))],
-    ['3. Coverage', [{ key: 'C1', text: 'C1 Every file marked excluded may be left out of the migration' }]],
+    ['3. Coverage', [
+      { key: 'C1', text: 'C1 Every file marked excluded may be left out of the migration' },
+      // The rows the survey crosscheck leaves to the person, in the gate's own words.
+      ...(asked ? [{ key: 'C2', text: asked }] : []),
+    ]],
     ['4. Databases', databases.length ? [
       ...databases.map((name, i) => ({ key: `D:${norm(name)}`, text: `D${i + 1} ${name}: definitions and the logic in it` })),
       { key: 'D90', text: 'D90 The missing definitions are understood' },

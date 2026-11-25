@@ -4,8 +4,11 @@
 //
 //   node merge.mjs --into <artifact.md> --parts <file-or-folder> [--parts ...] [--clean] [--root DIR]
 //
-// Used for the survey's inventory.md (rows keyed by path) and for crosscheck.md
-// (a table whose first column is `Item`, rows keyed by R<n> / S<n>). A port
+// Used for the survey's inventory.md and crosscheck.md (rows keyed by path),
+// for crosscheck.md of the other changes (a table whose first column is `Item`,
+// rows keyed by R<n> / S<n>), for coverage.md (keyed by site), and for an
+// extract's walkthrough.md (any number of rows per entry point: a part's rows
+// for an entry point replace all the rows that entry point had). A port
 // change's crosscheck.md also gets a stamp with the hash of the target code it
 // was merged on (`<!-- spec-relay: code checked sha256:... -->`), which
 // gate.mjs port-done compares with the code as it is.
@@ -164,7 +167,10 @@ export function merge(root, { into, parts, clean = false }) {
   }
   if (problems.length) return { ok: false, problems };
 
-  const byId = table.names[0] === 'item' || path.basename(into).toLowerCase() === 'crosscheck.md';
+  const byId = table.names[0] === 'item' || (path.basename(into).toLowerCase() === 'crosscheck.md' && !/^(path|パス)$/.test(table.names[0]));
+  // A walkthrough lists several behaviors per entry point: rows are grouped by
+  // the entry point, and a later part (a walk again after a fix) replaces the group.
+  if (table.names[0] === 'entry point' || table.names[0] === '入口') return writeGrouped(root, { into, target, lines, table, incoming, files, parts, clean, eol });
   const rows = new Map();
   const claim = (row, where) => {
     const { key, name } = rowKey(row, byId);
@@ -215,15 +221,56 @@ export function merge(root, { into, parts, clean = false }) {
     return { ok: false, problems: [`could not write ${into}: ${e.message}`] };
   }
 
-  if (clean) {
-    for (const file of files) fs.rmSync(file, { force: true });
-    for (const entry of parts) {
-      const dir = path.resolve(root, entry);
-      try { if (fs.statSync(dir).isDirectory() && fs.readdirSync(dir).length === 0) fs.rmdirSync(dir); } catch { /* already gone */ }
-    }
-  }
+  if (clean) cleanParts(root, files, parts);
   problems = [];
   return { ok: true, into: show(target), rows: sorted.length, added, replaced, parts: files.map(show), ...(clean ? { cleaned: true } : {}), problems };
+}
+
+function writeGrouped(root, { into, target, lines, table, incoming, files, parts, clean, eol }) {
+  const show = (f) => path.relative(root, f).split(path.sep).join('/');
+  const groups = new Map();
+  for (const row of table.rows) {
+    if (isPlaceholder(row)) continue;
+    const { key } = rowKey(row, false);
+    if (!key) return { ok: false, problems: [`${path.basename(into)}: row has an empty first cell: ${row}`] };
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  let added = 0; let replaced = 0;
+  const byFile = new Map();
+  for (const { row, file } of incoming) {
+    const { key } = rowKey(row, false);
+    if (!key) return { ok: false, problems: [`${show(file)}: row has an empty first cell: ${row}`] };
+    if (!byFile.has(file)) byFile.set(file, new Map());
+    const mine = byFile.get(file);
+    if (!mine.has(key)) mine.set(key, []);
+    mine.get(key).push(row);
+  }
+  for (const mine of byFile.values()) {
+    for (const [key, rows] of mine) {
+      if (groups.has(key)) replaced += 1; else added += 1;
+      groups.set(key, rows);
+    }
+  }
+  const sorted = [...groups.keys()].sort(compareKeys).flatMap((key) => groups.get(key));
+  const head = lines.slice(0, table.start);
+  if (table.start === lines.length) {
+    while (head.length && head.at(-1).trim() === '') head.pop();
+    if (head.length) head.push('');
+  }
+  let text = [...head, table.header, table.separator, ...sorted, ...lines.slice(table.end)].join(eol);
+  if (!text.endsWith(eol)) text += eol;
+  try { fs.writeFileSync(target, text, 'utf8'); } catch (e) { return { ok: false, problems: [`could not write ${into}: ${e.message}`] }; }
+  if (clean) cleanParts(root, files, parts);
+  return { ok: true, into: show(target), rows: sorted.length, entries: groups.size, added, replaced, parts: files.map(show), ...(clean ? { cleaned: true } : {}), problems: [] };
+}
+
+function cleanParts(root, files, parts) {
+  for (const file of files) fs.rmSync(file, { force: true });
+  for (const entry of parts) {
+    const dir = path.resolve(root, entry);
+    try { if (fs.statSync(dir).isDirectory() && fs.readdirSync(dir).length === 0) fs.rmdirSync(dir); } catch { /* already gone */ }
+  }
 }
 
 export function main(argv) {

@@ -6,7 +6,7 @@ import { capabilitySources, ownersOf, checkCoverage, checkTrace, contextOf, inve
 import { checkReview, main } from '../scripts/gate.mjs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { tempDir, write, quiet, crlf } from './helpers.mjs';
+import { tempDir, writeChecked as write, quiet, crlf } from './helpers.mjs';
 
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 

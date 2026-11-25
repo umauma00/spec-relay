@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { checkReview, checkPortReady, checkPortDone, baselineHash, archivedChange, sourceFiles, databaseHash, main, nextSteps, language, inventoryRows, inventoryRowFor, reviewRemarks, noteState } from '../scripts/gate.mjs';
 import { quiet } from './helpers.mjs';
-import { tempDir, write } from './helpers.mjs';
+import { tempDir, writeChecked as write, walkthrough } from './helpers.mjs';
 
 // A source file with no site and enough lines for the fixtures' trace ranges.
 const PHP = `<?php\n${'//\n'.repeat(40)}`;
@@ -16,7 +16,8 @@ const QUESTIONS = '# Questions\n\n## Suspected bugs\n- Q1. Overflow wraps - keep
 const GOOD = 'Reviewer: Uma\n\n## 1. Requirements\n- [x] R1 Add two numbers\n- [x] R2 Reject text\n\n## 2. Screens\n- [x] S0 This capability has no screens\n\n## 3. Questions\n- [x] Q1 Overflow: decision: keep\n';
 
 const CROSSCHECK = '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/calc.php:3 |\n| R2 Reject text | confirmed | src/calc.php:9 |\n';
-const SOURCE_MAP = '# Source map\n\n## Source files\n| Path | Role | In scope |\n|---|---|---|\n| `src/calc.php` | calculator | full |\n';
+const SOURCE_MAP = '# Source map\n\n## Source files\n| Path | Role | In scope |\n|---|---|---|\n| `src/calc.php` | calculator | full |\n\n## Entry points\n- `src/calc.php` - the page\n';
+const WALK = walkthrough(['src/calc.php']);
 const TRACE = '| Requirement | Source | Existing tests |\n|---|---|---|\n| Add two numbers | src/calc.php:add:3-5 | none |\n| R2 Reject text | `src/calc.php:add:9` | none |\n';
 
 // The archived survey that lists the capability the fixtures review.
@@ -25,7 +26,7 @@ function surveyed(dir, caps = ['calc']) {
   return dir;
 }
 
-function repo(review, { questions = QUESTIONS, screens = '# Screens\n\nNone\n', crosscheck = CROSSCHECK, sourceMap = SOURCE_MAP, trace = TRACE } = {}) {
+function repo(review, { questions = QUESTIONS, screens = '# Screens\n\nNone\n', crosscheck = CROSSCHECK, sourceMap = SOURCE_MAP, trace = TRACE, walk = WALK } = {}) {
   const dir = surveyed(tempDir());
   write(dir, 'src/calc.php', PHP);
   write(dir, `${CHANGE}/specs/calc/spec.md`, SPEC);
@@ -35,6 +36,7 @@ function repo(review, { questions = QUESTIONS, screens = '# Screens\n\nNone\n', 
   write(dir, `${CHANGE}/questions.md`, questions);
   if (screens !== null) write(dir, `${CHANGE}/screens.md`, screens);
   if (crosscheck !== null) write(dir, `${CHANGE}/crosscheck.md`, crosscheck);
+  if (walk !== null) write(dir, `${CHANGE}/walkthrough.md`, walk);
   if (review !== null) write(dir, `${CHANGE}/review.md`, review);
   return dir;
 }
@@ -229,7 +231,8 @@ function survey({ inventory, review, capabilities, database } = {}) {
   write(dir, '.agents/skills/openspec-explore/SKILL.md', '#');
   write(dir, '.agents/skills/.openspec-target', 'github-copilot\n');
   write(dir, `${SURVEY}/context-map.md`, '## Contexts\n\n### Context: platform\n- x\n\n### Context: billing\n- y\n');
-  write(dir, `${SURVEY}/inventory.md`, inventory ?? '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | port | |\n| src/common/db.php | platform | port | |\n| vendor/ | excluded | | library |\n');
+  const rows = inventory ?? '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/ | billing | port | |\n| src/common/db.php | platform | port | |\n| vendor/ | excluded | | library |\n';
+  write(dir, `${SURVEY}/inventory.md`, rows);
   write(dir, `${SURVEY}/capabilities.md`, capabilities ?? '# Capabilities\n\n### platform\n1. `platform/db` DB\n   - `src/common/db.php`\n\n### billing\n1. `billing/invoice` 請求書\n   - `src/billing/`\n');
   write(dir, `${SURVEY}/review.md`, review ?? 'Reviewer: Uma\n\n- [x] K1 platform: 共通基盤\n- [x] K2 billing: 請求\n- [x] M1 map\n- [x] M2 owners\n- [x] M3 glossary\n- [x] M4 capabilities\n- [x] M5 carry\n- [x] C1 coverage\n');
   write(dir, `${SURVEY}/database.md`, database ?? NO_DATABASE);

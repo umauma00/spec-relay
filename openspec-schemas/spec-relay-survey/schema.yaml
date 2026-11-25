@@ -171,6 +171,53 @@ artifacts:
     requires:
       - context-map
 
+  - id: crosscheck
+    generates: crosscheck.md
+    description: An independent AI check of every inventory row against the source code
+    template: crosscheck.md
+    instruction: |
+      An INDEPENDENT check of the survey before the human review. The gate
+      only counts files; this asks whether what the survey says about them
+      is right, so that no behavior is lost before any spec is written: a
+      file wrongly excluded is never specified, and an entry point nobody
+      owns is never ported. Give it to `spec-relay-checker` subagents: each
+      gets a group of inventory rows (`draft.mjs items --change <change>`
+      prints them as `paths`), the paths of inventory.md, context-map.md,
+      capabilities.md and database.md, and reads the files of its rows
+      itself. It never gets the analysts' evidence files or notes. Each
+      writes `openspec/spec-relay/work/<change>/crosscheck/<nn>.md`, merged
+      into this file by the kit's `merge.mjs`.
+
+      One row per inventory row, with its path exactly as inventory.md
+      writes it (a folder row is one row): `| Path | Verdict | Evidence |`.
+      For the files of the row, the checker decides:
+      - `confirmed`: the context and the handling fit; the capability that
+        lists the file (capabilities.md) is the one whose behavior it holds,
+        and a file split by method is listed under every capability that
+        gets a part; every entry point in it (a page, a route, a menu item,
+        a handler, a job, a scheduled task, behavior that configuration or
+        a rewrite rule defines) belongs to a capability; an `excluded` file
+        holds nothing the running system needs (its reason holds); a
+        `carry` file can be used unchanged (no server-side code, no path
+        that changes).
+      - `mismatch`: one of these is wrong. Evidence: the line and what it
+        does, and what the row should say.
+      - `unclear`: the code does not settle it.
+      Then resolve every row that is not `confirmed`: fix inventory.md,
+      capabilities.md or context-map.md and have a checker judge the row
+      again (a part file with a higher number), or, when it is the
+      person's decision (whether a file is still used, where a feature
+      belongs), write `question` as its verdict, keeping the evidence: the
+      person decides those rows together with item C2 of the review.
+      `gate.mjs review` fails while an inventory row has no row or two
+      rows, a row names a path the inventory does not have, a verdict is
+      anything but `confirmed` or `question`, or a `question` has no
+      evidence.
+    requires:
+      - inventory
+      - capabilities
+      - database
+
   - id: review
     generates: review.md
     description: Human review checklist of the context map; the change may be archived only when every box is ticked by the reviewer
@@ -190,7 +237,11 @@ artifacts:
       - Under `## 3. Coverage`, one checkbox that every file marked `excluded`
         may really be left out of the migration. The gate checks that every
         other file is in the inventory and in a capability; what is excluded
-        is the person's decision.
+        is the person's decision. When the crosscheck leaves rows to the
+        person (`question`), a second checkbox in the gate's words:
+        `- [ ] C2 The survey crosscheck leaves <n> rows for you to decide
+        (list <code>)`. The code names the list as it is now; when the list
+        changes, the item is written again unticked.
       - Under `## 4. Databases`, one checkbox per database in database.md's
         table, `- [ ] D<n> <database>: definitions and the logic in it`, and
         `- [ ] D90 The missing definitions are understood`. Leave the heading
@@ -206,6 +257,7 @@ artifacts:
       - glossary
       - capabilities
       - database
+      - crosscheck
 
 apply:
   requires: [ review ]

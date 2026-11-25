@@ -20,9 +20,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkboxes, questionIds, questionAdvice, questionStart, ADVICE, reviewProgress, tableRows, changeSchema, archivedChange, REMARK, noteState } from './gate.mjs';
+import { checkboxes, questionIds, questionAdvice, questionStart, ADVICE, reviewProgress, tableRows, changeSchema, archivedChange, REMARK, noteState, inventoryRows as gateInventoryRows } from './gate.mjs';
 import { guideView, guidePage, guideWords, modules as guideModules, moduleKey, GUIDE_CSS } from './guide.mjs';
 import { ledgerSummary } from './sites.mjs';
+import { walkthroughSummary } from './walkthrough.mjs';
+import { surveyCheckSummary } from './coverage.mjs';
 import { leftoverRows } from './finish.mjs';
 import { itemGuide, itemTitle, guideWords as howWords } from './review-guide.mjs';
 import { surveyFacts, contextCard, surveyAid, inventorySummary, SURVEY_CSS } from './survey-view.mjs';
@@ -57,7 +59,7 @@ const LABELS = {
     split: (n) => [n.fixed ? `うち再確認待ち ${n.fixed}` : '', n.fix + n.hold ? `ほかに ${[['AI の対応待ち', n.fix], ['保留中', n.hold]].filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join('・')}` : ''].filter(Boolean).join('。'),
     folded: '内容を表示', appendixHint: '参照用の元の Markdown です。必要なときだけ開いてください。',
     scenario: 'シナリオ', evidence: '根拠（元コード）', source: '元コード', tests: '既存のテスト', crosscheck: '照合（AI の再確認）', lines: '行',
-    screenLabels: { entry: '入口', layout: 'レイアウト', look: '見た目', scripts: 'スクリプト', label: 'ラベル', kind: '種類', required: '必須', 'format and limits': '形式と制限', default: '初期値', editable: '編集可', 'look details': '見た目の詳細', item: '項目', 'element or control': '要素・コントロール', details: '詳細', actions: '操作', messages: 'メッセージ', transitions: '遷移' }, noneWord: 'なし', verdicts: { confirmed: '一致', mismatch: '不一致', unclear: '不明', question: '質問へ' },
+    screenLabels: { entry: '入口', layout: 'レイアウト', look: '見た目', scripts: 'スクリプト', label: 'ラベル', kind: '種類', required: '必須', 'format and limits': '形式と制限', default: '初期値', editable: '編集可', 'look details': '見た目の詳細', item: '項目', 'element or control': '要素・コントロール', details: '詳細', actions: '操作', messages: 'メッセージ', transitions: '遷移' }, noneWord: 'なし', verdicts: { confirmed: '一致', mismatch: '不一致', incomplete: '書き漏れあり', unclear: '不明', question: '質問へ' },
     noTrace: 'trace.md に記載がありません', unreadable: 'ファイルを読めませんでした', truncated: '長いため先頭のみ表示', encoding: (e) => `文字コード ${e} を変換して表示`, dedent: (n) => `字下げを ${n} 文字詰めて表示`,
     decision: '判断', noDecision: (id) => `未記入 — review.md の ${id} の行に decision: を書きます`,
     recommended: 'AI の推奨', why: '理由', asRecommended: '推奨どおり', noAdvice: 'AI がまだ推奨と理由を書いていません。チャットで AI に頼んでください', noRec: 'AI は推奨できません',
@@ -78,6 +80,15 @@ const LABELS = {
     ledgerOpen: (n) => `判定がない、または gap の箇所が ${n} 件あります。gate はまだ通りません。`,
     ledgerQuestions: '質問に回した箇所', ledgerUnmarked: '目印（DB 書き込み・例外など）があるのに、「動作なし」または「効果なし」とした箇所。目を通して、よければ review.md の C1 にチェックしてください',
     ledgerAll: '台帳のすべての行',
+    walk: '入口からの見直し', walkTitle: '入口からの見直し（walkthrough）',
+    walkFacts: (w) => `入口 ${w.entries}・確かめた動作 ${w.behaviors}・シナリオあり ${w.counts.covered}・別の capability ${w.counts.other}・質問 ${w.counts.question}`,
+    walkOpen: (n) => `gap・あいまい・判定のない動作が ${n} 件あります。gate はまだ通りません。`,
+    walkUnwalked: '見直していない入口', walkElsewhere: '別の capability か質問に回した動作', walkAll: '見直しのすべての行',
+    surveyCheck: '照合（別の AI）', surveyCheckTitle: '照合（別の AI による調査の確認）',
+    surveyCheckFacts: (s) => `行 ${s.rows}・一致 ${s.confirmed}・判断待ち ${s.questions.length}`,
+    surveyCheckOpen: (n) => `まだ確認していない、または食い違いが残る行が ${n} 件あります。gate はまだ通りません。`,
+    surveyCheckQuestions: '照合担当と調査が食い違い、判断を任された行。読んで、よければ review.md の C2 にチェックしてください（変えたいときは C2 に修正の依頼）',
+    surveyCheckAll: '照合のすべての行',
     specKind: '仕様', specIndexKind: '仕様の一覧', specIndexTitle: '移行の仕様', capability: 'capability', scenarios: 'シナリオ', basis: '根拠', amendingNow: '修正中',
     amending: (c) => `修正中の変更があります（${c}）。archive するまで、この仕様はまだ変わっていません`,
     search: '検索', searchHint: '要件名・本文で絞り込む', noMatch: '一致する項目はありません。',
@@ -130,6 +141,15 @@ const LABELS = {
     ledgerOpen: (n) => `${n} sites have no verdict or are gaps; the gate does not pass yet.`,
     ledgerQuestions: 'Sites moved to questions', ledgerUnmarked: 'Sites that hold markers (a database write, an error...) and are judged "no behavior" or "no effect". Read them, and tick C1 in review.md when they are right',
     ledgerAll: 'Every row of the ledger',
+    walk: 'Walkthrough', walkTitle: 'Walkthrough (from each entry point)',
+    walkFacts: (w) => `${w.entries} entry points, ${w.behaviors} behaviors: ${w.counts.covered} in a scenario, ${w.counts.other} other capability, ${w.counts.question} questions`,
+    walkOpen: (n) => `${n} behaviors are gaps, vague or unjudged; the gate does not pass yet.`,
+    walkUnwalked: 'Entry points not walked yet', walkElsewhere: 'Behaviors left to another capability or to a question', walkAll: 'Every row of the walkthrough',
+    surveyCheck: 'Crosscheck (second AI)', surveyCheckTitle: 'Crosscheck (a second AI checks the survey)',
+    surveyCheckFacts: (s) => `${s.rows} rows: ${s.confirmed} confirmed, ${s.questions.length} for you to decide`,
+    surveyCheckOpen: (n) => `${n} rows are not checked yet or still disagree; the gate does not pass yet.`,
+    surveyCheckQuestions: 'Rows where the checker and the survey disagree, left to you. Read them, and tick C2 in review.md when the survey may stay as it is (or ask for a change under C2)',
+    surveyCheckAll: 'Every row of the crosscheck',
     specKind: 'Spec', specIndexKind: 'Specs', specIndexTitle: 'Migration specs', capability: 'Capability', scenarios: 'Scenarios', basis: 'Basis', amendingNow: 'Being amended',
     amending: (c) => `An amendment is in progress (${c}). Until it is archived, this spec has not changed yet`,
     search: 'Search', searchHint: 'Filter by requirement name or text', noMatch: 'No item matches.',
@@ -727,7 +747,7 @@ function crossLine(row, L) {
   if (!row) return '';
   const ok = /^confirmed\b/i.test(row.verdict);
   // The verdict word in the page's language, the word as written beside it.
-  const word = (row.verdict.match(/^(confirmed|mismatch|unclear|question)\b/i) ?? [])[1]?.toLowerCase();
+  const word = (row.verdict.match(/^(confirmed|mismatch|incomplete|unclear|question)\b/i) ?? [])[1]?.toLowerCase();
   const said = word && L.verdicts?.[word] ? `${escapeHtml(L.verdicts[word])}（${inline(row.verdict)}）` : inline(row.verdict || '—');
   return `<p class="tests"><span class="label">${escapeHtml(L.crosscheck)}</span><span><span${ok ? '' : ' class="caution"'}>${said}</span>${row.evidence ? ` — ${inline(row.evidence)}` : ''}</span></p>`;
 }
@@ -1015,10 +1035,12 @@ ${cautionsHtml(notes)}${remarks}${content}
   });
 
   const ledger = schema === 'spec-relay-extract' ? ledgerSummary(root, dir) : null;
+  const walked = schema === 'spec-relay-extract' ? walkthroughSummary(dir) : null;
+  const surveyCheck = survey ? surveyCheckSummary(dir, gateInventoryRows(readText(path.join(dir, 'inventory.md')) ?? '')) : null;
   const named = reviewer && !/^<.*>$/.test(reviewer);
   const brief = `<header class="brief">
 ${purpose.trim() ? `<div class="purpose"><span class="label">${escapeHtml(L.purpose)}</span>${markdown(purpose)}</div>` : ''}
-<dl class="facts"><dt>${escapeHtml(L.reviewer)}</dt><dd><span class="sign${named ? '' : ' is-blank'}">${named ? inline(reviewer) : escapeHtml(L.notNamed)}</span></dd><dt>${escapeHtml(L.scope)}</dt><dd>${shown.map((g) => `${escapeHtml(g.title)} ${g.items.length}`).join('・')}</dd>${ledger ? `<dt>${escapeHtml(L.ledger)}</dt><dd><a href="#doc-coverage-md">${escapeHtml(L.ledgerFacts(ledger))}</a></dd>` : ''}</dl>
+<dl class="facts"><dt>${escapeHtml(L.reviewer)}</dt><dd><span class="sign${named ? '' : ' is-blank'}">${named ? inline(reviewer) : escapeHtml(L.notNamed)}</span></dd><dt>${escapeHtml(L.scope)}</dt><dd>${shown.map((g) => `${escapeHtml(g.title)} ${g.items.length}`).join('・')}</dd>${ledger ? `<dt>${escapeHtml(L.ledger)}</dt><dd><a href="#doc-coverage-md">${escapeHtml(L.ledgerFacts(ledger))}</a></dd>` : ''}${walked ? `<dt>${escapeHtml(L.walk)}</dt><dd><a href="#doc-walkthrough-md">${escapeHtml(L.walkFacts(walked))}</a></dd>` : ''}${surveyCheck ? `<dt>${escapeHtml(L.surveyCheck)}</dt><dd><a href="#doc-crosscheck-md">${escapeHtml(L.surveyCheckFacts(surveyCheck))}</a></dd>` : ''}</dl>
 <ol class="howto">${L.howto.map((step) => `<li>${step}</li>`).join('')}</ol>
 </header>`;
 
@@ -1038,6 +1060,14 @@ ${purpose.trim() ? `<div class="purpose"><span class="label">${escapeHtml(L.purp
       docs.push({ id: 'doc-coverage-md', title: L.ledgerTitle, html: ledgerHtml(ledger, text, L) });
       continue;
     }
+    if (rel === 'walkthrough.md' && walked) {
+      docs.push({ id: 'doc-walkthrough-md', title: L.walkTitle, html: walkHtml(walked, text, L) });
+      continue;
+    }
+    if (rel === 'crosscheck.md' && surveyCheck) {
+      docs.push({ id: 'doc-crosscheck-md', title: L.surveyCheckTitle, html: surveyCheckHtml(surveyCheck, text, L) });
+      continue;
+    }
     docs.push({ id: `doc-${rel.replace(/[^\w-]/g, '-')}`, title: rel.replace(/\.md$/, ''), html: `<div class="doc">${markdown(text, { headingOffset: 2 })}</div>` });
   }
   return { groups: shown, docs, brief };
@@ -1053,6 +1083,27 @@ ${sum.open.length ? `<p class="caution">${escapeHtml(L.ledgerOpen(sum.open.lengt
 ${sum.questions.length ? `<h3>${escapeHtml(L.ledgerQuestions)}</h3>${list(sum.questions)}` : ''}
 ${sum.unmarked.length ? `<h3>${escapeHtml(L.ledgerUnmarked)}${sum.code ? ` <span class="mono">(list ${escapeHtml(sum.code)})</span>` : ''}</h3>${list(sum.unmarked)}` : ''}
 <details><summary>${escapeHtml(L.ledgerAll)}</summary>${markdown(text, { headingOffset: 2 })}</details></div>`;
+}
+
+// The walkthrough as the reviewer needs it: the counts, what is still open, the
+// entry points not walked, and the behaviors left to another capability or a question.
+function walkHtml(sum, text, L) {
+  const rows = (list) => `<ul>${list.map((r) => `<li><code>${escapeHtml(r.entry)}</code> ${inline(r.behavior)} → ${inline(r.verdict || '—')}${r.evidence ? ` — ${inline(r.evidence)}` : ''}</li>`).join('')}</ul>`;
+  return `<div class="doc"><p>${escapeHtml(L.walkFacts(sum))}</p>
+${sum.open.length ? `<p class="caution">${escapeHtml(L.walkOpen(sum.open.length))}</p>${rows(sum.open)}` : ''}
+${sum.unwalked.length ? `<h3>${escapeHtml(L.walkUnwalked)}</h3><ul>${sum.unwalked.map((e) => `<li><code>${escapeHtml(e)}</code></li>`).join('')}</ul>` : ''}
+${sum.elsewhere.length ? `<h3>${escapeHtml(L.walkElsewhere)}</h3>${rows(sum.elsewhere)}` : ''}
+<details><summary>${escapeHtml(L.walkAll)}</summary>${markdown(text, { headingOffset: 2 })}</details></div>`;
+}
+
+// The survey crosscheck: the counts, the rows left to the person (C2) and what is still open.
+function surveyCheckHtml(sum, text, L) {
+  const rows = (list) => `<ul>${list.map((r) => `<li><code>${escapeHtml(r.path)}</code> ${r.verdict === 'question' ? '' : `${escapeHtml(r.verdict || '—')} `}— ${inline(r.evidence || '—')}</li>`).join('')}</ul>`;
+  const open = sum.open.length + sum.unchecked.length;
+  return `<div class="doc"><p>${escapeHtml(L.surveyCheckFacts(sum))}</p>
+${open ? `<p class="caution">${escapeHtml(L.surveyCheckOpen(open))}</p>${rows(sum.open)}${sum.unchecked.length ? `<ul>${sum.unchecked.map((p) => `<li><code>${escapeHtml(p)}</code></li>`).join('')}</ul>` : ''}` : ''}
+${sum.questions.length ? `<h3>${escapeHtml(L.surveyCheckQuestions)}${sum.code ? ` <span class="mono">(list ${escapeHtml(sum.code)})</span>` : ''}</h3>${rows(sum.questions)}` : ''}
+<details><summary>${escapeHtml(L.surveyCheckAll)}</summary>${markdown(text, { headingOffset: 2 })}</details></div>`;
 }
 
 function withoutSection(text, heading) {

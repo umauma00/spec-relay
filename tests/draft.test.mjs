@@ -5,7 +5,7 @@ import path from 'node:path';
 import { review, items, portDesign, readReview, main } from '../scripts/draft.mjs';
 import { runChecks, targetHash, draft as finishDraft } from '../scripts/finish.mjs';
 import { checkReview, baselineHash, designScenarioChecks } from '../scripts/gate.mjs';
-import { tempDir, write, quiet } from './helpers.mjs';
+import { tempDir, writeChecked as write, quiet } from './helpers.mjs';
 
 const read = (dir, rel) => fs.readFileSync(path.join(dir, rel), 'utf8');
 // What the person does in the review: tick every box and sign.
@@ -161,7 +161,11 @@ test('review writes the amend and finish checklists', () => {
 
 test('items numbers the requirements and screens as the review and the crosscheck do', () => {
   const dir = extract();
-  assert.deepEqual(items(dir, 'extract-calc'), { ok: true, change: 'extract-calc', requirements: ['R1 Add two numbers', 'R2 Reject `text`'], screens: ['S1 Calculator'], problems: [] });
+  const listed = items(dir, 'extract-calc');
+  assert.deepEqual({ ...listed, entryPoints: undefined }, { ok: true, change: 'extract-calc', requirements: ['R1 Add two numbers', 'R2 Reject `text`'], screens: ['S1 Calculator'], entryPoints: undefined, problems: [] });
+  // The walkthrough's checkers get the entry points of the source map.
+  write(dir, 'openspec/changes/extract-calc/source-map.md', '# Source map\n\n## Entry points\n- `src/calc.py:add` - callers add\n- src/calc.py:check - validation\n- `src/calc.py:add` - again\n');
+  assert.deepEqual(items(dir, 'extract-calc').entryPoints, ['src/calc.py:add', 'src/calc.py:check']);
   assert.equal(items(dir, 'nope').ok, false);
 });
 

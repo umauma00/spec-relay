@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { status, checklist, markdown, planCapabilities, language, main } from '../scripts/status.mjs';
 import { KIT_ROOT } from '../scripts/setup.mjs';
 import { baselineHash } from '../scripts/gate.mjs';
-import { tempDir, write, quiet, crlf } from './helpers.mjs';
+import { tempDir, writeChecked as write, quiet, crlf } from './helpers.mjs';
 
 const PLAN = `# Plan
 
@@ -50,6 +50,7 @@ function repo({ plan = PLAN, review = '- [x] R1 a\n- [ ] R2 b\n- [ ] Q1 c decisi
     write(dir, `${EXTRACT}/screens.md`, '# Screens\nNone\n');
     write(dir, `${EXTRACT}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n');
     write(dir, `${EXTRACT}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 a | confirmed | x |\n| R2 b | confirmed | x |\n');
+    write(dir, `${EXTRACT}/walkthrough.md`, '| Entry point | Behavior | Verdict | Evidence |\n|---|---|---|---|\n| `src/invoice.php` | a | question Q1 | src/invoice.php:1 - read |\n');
     write(dir, `${EXTRACT}/questions.md`, '- Q1. c\n  - Recommended: keep\n  - Why: the old system does it\n');
     write(dir, `${EXTRACT}/review.md`, review.startsWith('Reviewer') ? review : `Reviewer: Uma\n\n${review}`);
   }
@@ -95,7 +96,7 @@ test('the review step says whether the gate passes, and a waiting step is never 
   const passing = status(repo({ review: PASSING }));
   assert.equal(passing.todoList[2].title, 'billing/invoice: Review [reviewed; waiting for approval to archive]');
   const writing = status(repo({ artifacts: false }));
-  assert.equal(writing.todoList[1].title, 'billing/invoice: Analyze [writing artifacts 0/8]');
+  assert.equal(writing.todoList[1].title, 'billing/invoice: Analyze [writing artifacts 0/9]');
   assert.deepEqual(statuses(writing), ['not-started', 'in-progress', 'not-started', 'not-started']);
   for (const report of [ticked, passing, writing]) {
     assert.equal(report.todoList[2].status, 'not-started');
@@ -109,7 +110,7 @@ test('artifacts are counted from the change schema, so a new artifact needs no c
     .replace('  - id: trace\n', '  - id: notes\n    generates: notes.md  # new\n    requires: []\n    instruction: |\n      generates: not-an-artifact.md\n\n  - id: trace\n');
   write(dir, 'openspec/schemas/spec-relay-extract/schema.yaml', schema);
   const report = status(dir);
-  assert.equal(report.todoList[1].title, 'billing/invoice: Analyze [writing artifacts 8/9]');
+  assert.equal(report.todoList[1].title, 'billing/invoice: Analyze [writing artifacts 9/10]');
   write(dir, `${EXTRACT}/notes.md`, '# notes\n');
   assert.equal(status(dir).todoList[1].status, 'completed');
 });
@@ -276,11 +277,12 @@ test('the survey and the target design come before any capability', () => {
   const dir = tempDir();
   write(dir, 'openspec/config.yaml', 'context: |\n  Artifact language: ja\n');
   write(dir, 'openspec/changes/survey/.openspec.yaml', 'schema: spec-relay-survey\n');
-  write(dir, 'openspec/changes/survey/inventory.md', '# i\n');
+  fs.mkdirSync(path.join(dir, 'openspec/changes/survey'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'openspec/changes/survey/inventory.md'), '# i\n');
   let report = status(dir);
-  assert.deepEqual(report.todoList.map((i) => i.title).slice(1), ['Survey: map the bounded contexts [writing artifacts 1/6]', 'Target design: modules, conventions, screens, verification']);
+  assert.deepEqual(report.todoList.map((i) => i.title).slice(1), ['Survey: map the bounded contexts [writing artifacts 1/7]', 'Target design: modules, conventions, screens, verification']);
   assert.deepEqual(statuses(report), ['not-started', 'in-progress', 'not-started']);
-  for (const f of ['context-map.md', 'glossary.md', 'capabilities.md', 'database.md']) write(dir, `openspec/changes/survey/${f}`, '# x\n');
+  for (const f of ['context-map.md', 'glossary.md', 'capabilities.md', 'database.md', 'crosscheck.md']) write(dir, `openspec/changes/survey/${f}`, '# x\n');
   write(dir, 'openspec/changes/survey/review.md', 'Reviewer: Uma\n- [ ] K1 billing\n');
   report = status(dir);
   assert.equal(report.todoList[1].title, 'Survey: map the bounded contexts [waiting for review 0/1]');

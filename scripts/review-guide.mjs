@@ -21,6 +21,11 @@ const GUIDE = {
       M4: { check: ['capability の分け方が、仕様を書いてレビューする単位としてちょうどよいか', '移行する順番（共通基盤が先）が妥当か'], against: '下の capability の一覧' },
       M5: { check: ['carry（変えずに新しいシステムへ持っていく）にしたファイルを、そのまま使ってよいか（画像・CSS・フォント・帳票テンプレートなど）'], against: '下の carry のファイル一覧' },
       C1: { check: ['excluded（移行しない）にしたファイルを、本当に捨ててよいか（生成物、外部ライブラリ、使われていないコードなど）', '理由がそれぞれに書かれているか'], against: '下の excluded のファイルと理由' },
+      C2: {
+        check: ['別の AI（照合担当）が調査と食い違うと言った行を1件ずつ読む（入口がどの capability にもない、除外や carry のファイルに動作がある、割り当てのコンテキストが違う、など）', '調査のままでよいか、照合担当の言うとおりに変えるか'],
+        against: '付録の「照合」にある各行の根拠（元コードの行）',
+        wrong: '変えたい行と、どう変えるかを書く（AI が inventory.md や capabilities.md を直し、照合担当がその行をもう一度確かめる）',
+      },
       D: { check: ['データベースの製品・版と、定義ファイルの場所が正しいか', 'データベースの中のロジック（ビュー、ストアド、トリガーなど）の数が実態と合うか'], against: '下の表（database.md）' },
       D90: { check: ['読めなかった定義と、その理由を理解したか（扱いは移行先の設計で決める）'], against: '下の「読めなかった定義」' },
     },
@@ -71,6 +76,11 @@ const GUIDE = {
       M4: { check: ['Is each capability a good unit to specify and review?', 'Is the order of the migration right (the platform first)?'], against: 'The capability list below' },
       M5: { check: ['May the files marked carry go to the new system unchanged (images, CSS, fonts, report templates)?'], against: 'The carried files below' },
       C1: { check: ['May the files marked excluded really be left behind (generated code, vendored libraries, dead code)?', 'Does each have its reason?'], against: 'The excluded files and their reasons below' },
+      C2: {
+        check: ['Read each row where the second AI (the checker) disagrees with the survey (an entry point in no capability, an excluded or carried file with behavior, the wrong context)', 'Should the survey stay as it is, or change as the checker says?'],
+        against: 'The evidence (source lines) of each row in the crosscheck in the appendix',
+        wrong: 'Name the rows to change and how; the agent corrects inventory.md or capabilities.md and a checker judges those rows again',
+      },
       D: { check: ['Are the product, version and the place of the definitions right?', 'Do the counts of logic in the database (views, procedures, triggers) match what is there?'], against: 'The table below (database.md)' },
       D90: { check: ['Do you understand which definitions could not be read, and why (the target design decides what to do)?'], against: 'Missing definitions below' },
     },

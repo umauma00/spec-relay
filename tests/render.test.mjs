@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { render, markdown, inline, parseRefs, parseReview, parseQuestions, diffChars, commonIndent, timeStamp, main, capabilities } from '../scripts/render.mjs';
-import { tempDir, write, quiet, crlf } from './helpers.mjs';
+import { tempDir, writeChecked as write, quiet, crlf } from './helpers.mjs';
 import { contextFields, surveyFacts, surveyAid, contextCard } from '../scripts/survey-view.mjs';
 
 const CHANGE = 'openspec/changes/extract-billing-invoice';

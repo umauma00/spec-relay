@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { decide, main, archiveCalls, editPaths, findRoot, SHELL_TOOLS, EDIT_TOOLS } from '../scripts/hook.mjs';
-import { tempDir, write } from './helpers.mjs';
+import { tempDir, writeChecked as write } from './helpers.mjs';
 
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOOK = path.join(KIT, 'scripts/hook.mjs');
@@ -117,6 +117,8 @@ test('agents may not write the source, baselines, archives, schemas, settings or
   assert.match(edit(dir, 'openspec/spec-relay/plan.md', sub), /only the orchestrator writes/);
   assert.match(edit(dir, 'openspec/spec-relay/lessons.md', sub), /only the orchestrator writes/);
   assert.match(edit(dir, 'openspec/changes/port-billing-invoice/crosscheck.md', sub), /only the orchestrator writes/);
+  assert.match(edit(dir, 'openspec/changes/extract-billing-invoice/walkthrough.md', sub), /only the orchestrator writes/);
+  assert.equal(edit(dir, 'openspec/spec-relay/work/extract-billing-invoice/walkthrough/01.md', sub), null);
   assert.match(edit(dir, 'openspec/changes/port-billing-invoice/verify.json'), /only verify\.mjs writes/);
   assert.match(edit(dir, 'openspec/spec-relay/local/canvas-log.jsonl'), /only the canvas writes canvas-log/);
   assert.match(edit(dir, 'openspec/changes/port-billing-invoice/verify.json', sub), /only verify\.mjs writes/);

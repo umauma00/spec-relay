@@ -195,6 +195,12 @@ artifacts:
         designer file or XAML.
       - `mismatch`: the code does something else. Evidence: the line and what it
         really does.
+      - `incomplete`: what the text says is right, but the traced code does
+        more that no scenario states: another branch or condition, an error
+        case or message, a default, a limit, a rounding, a write. Evidence:
+        each such line and what it does. A scenario that leaves out the
+        value or the condition an implementer needs to reproduce the
+        behavior is `incomplete` too.
       - `unclear`: the code does not settle it (configuration, data,
         unreachable branch).
 
@@ -203,7 +209,7 @@ artifacts:
       Then resolve every row that is not `confirmed`: fix the spec, screens or
       trace and have the checker check that row again, or move it to
       questions.md and write `question Q<n>` as its verdict. `gate.mjs review`
-      fails while any row is missing, `mismatch` or `unclear`.
+      fails while any row is missing, `mismatch`, `incomplete` or `unclear`.
     requires:
       - trace
 
@@ -288,6 +294,65 @@ artifacts:
     requires:
       - trace
 
+  - id: walkthrough
+    generates: walkthrough.md
+    description: The walkthrough - each entry point followed through the code, every behavior on the way and the scenario that states it
+    template: walkthrough.md
+    instruction: |
+      An INDEPENDENT review of the specs from the outside in. The crosscheck
+      checks each requirement and the omission check each site; neither
+      follows one request from where it enters to where it ends, and a site
+      can be judged covered by a requirement whose scenarios never state one
+      of its branches. Here a `spec-relay-checker` starts at each entry
+      point of source-map.md (a page, a button's or a menu's handler, a
+      route, an API, a job, a public function other capabilities call),
+      follows the code to the end, into every file it calls (shared code,
+      base classes, includes, master pages, configuration, database
+      triggers and procedures), and lists every behavior a user or caller
+      can notice on the way: each input check and its message, each branch
+      that changes the result, calculations and rounding, defaults, the
+      order of lists, paging, permissions, writes, mails, files, redirects,
+      calls to other systems, error handling and what the user then sees.
+      It gets the specs, screens.md and source-map.md only (never trace.md
+      or the analysts' notes), so it finds the code itself. Give it its
+      entry points as `draft.mjs items --change <change>` prints them, with
+      the numbered requirement and screen names; for a large capability,
+      several checkers take groups of entry points in one wave, each writes
+      `openspec/spec-relay/work/<change>/walkthrough/<nn>.md`, merged into
+      this file by the kit's `merge.mjs`.
+
+      One table, `| Entry point | Behavior | Verdict | Evidence |`, with one
+      row per behavior and the entry point id in every row, exactly as
+      source-map.md lists it. The verdict is one of:
+      - `covered R<n>: <scenario name>`: that scenario states the behavior
+        with its condition and values (several as `covered R2: <a>; R5:
+        <b>`). `covered S<n>` for what screens.md states (a label, a
+        message, a transition).
+      - `vague R<n>: <scenario name>`: a scenario touches the behavior but
+        does not state the condition or the values an implementer needs.
+      - `other capability <path>`: the behavior is wholly another
+        capability's (a sign-in check in platform); the evidence cites the
+        line in a file the plan gives that capability.
+      - `question Q<n>`: the person must decide.
+      - `gap`: no scenario or screen states it.
+      An entry point the checker finds that source-map.md does not list is
+      walked too; the analyst then adds it to source-map.md. Resolve every
+      `gap` and `vague` row: an analyst adds the requirement it needs (with
+      its trace) at the END of the spec, or makes the scenario concrete, a
+      checker crosschecks that requirement and walks the entry point again
+      (a later part replaces all the rows of that entry point), or the
+      orchestrator moves it to questions.md and writes `question Q<n>`.
+      `gate.mjs review` fails while an entry point of source-map.md has no
+      row, a row walks an entry point source-map.md does not list, a row has
+      no behavior or no evidence, a verdict is `gap`, `vague`, blank or
+      another word, names a requirement, scenario, screen, question or
+      capability that does not exist, or names another capability without
+      citing its code.
+    requires:
+      - source-map
+      - specs
+      - screens
+
   - id: questions
     generates: questions.md
     description: Ambiguities, suspected bugs and assumptions that need a human decision
@@ -320,11 +385,12 @@ artifacts:
       review page shows the recommendation beside the decision and lets the
       reviewer take it as it is. `gate.mjs review` fails on a question
       without both lines.
-      Include every crosscheck row and coverage row that was resolved as
-      `question Q<n>`.
+      Include every crosscheck, coverage and walkthrough row that was
+      resolved as `question Q<n>`.
     requires:
       - crosscheck
       - coverage
+      - walkthrough
 
   - id: review
     generates: review.md
@@ -364,6 +430,7 @@ artifacts:
       - trace
       - crosscheck
       - coverage
+      - walkthrough
       - questions
 
 apply:

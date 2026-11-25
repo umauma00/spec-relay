@@ -7,7 +7,7 @@ import { checkReview } from '../scripts/gate.mjs';
 import { render } from '../scripts/render.mjs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { tempDir, write, crlf } from './helpers.mjs';
+import { tempDir, writeChecked as write, crlf } from './helpers.mjs';
 
 const KIT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 

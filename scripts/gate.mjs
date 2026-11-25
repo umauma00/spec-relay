@@ -34,8 +34,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkFinish } from './finish.mjs';
 import { COMPARE_COMMAND, casesDigest, isCompareCommand, parseOptions, portOptionProblem, readCases, words as commandWords } from './compare.mjs';
-import { checkSurveyCoverage, checkSourceMap, checkTrace, checkAmendSourceMap, checkCoverage, assignment } from './coverage.mjs';
+import { checkSurveyCoverage, checkSurveyCrosscheck, checkSourceMap, checkTrace, checkAmendSourceMap, checkCoverage, assignment } from './coverage.mjs';
 import { checkLedger } from './sites.mjs';
+import { checkWalkthrough } from './walkthrough.mjs';
 import { E2E_DIR, OLD_RECEIPT, capabilityFolder, e2eCommandOptions, e2eDigest, isE2eCommand, oldReceipt, screenTestFiles } from './e2e.mjs';
 
 // Same shapes OpenSpec 2.1.1 (and 1.17.0, 2.0.0) counts as tasks and requirements, so the gate never
@@ -470,7 +471,9 @@ function checkExtract(root, dir, boxes, problems) {
   }
   const asked = new Set((questions === null ? [] : questionIds(questions)).filter((id) => qItems.has(id)));
   checkCrosscheck(dir, requirements.map((r) => r.name), screens, problems, asked);
-  checkLedger(root, dir, { requirements: requirements.map((r) => r.name), screens, asked, assignment: assignment(root).map, own: specCapabilities(dir)[0] ?? '', boxes }, problems);
+  const plan = assignment(root).map;
+  checkLedger(root, dir, { requirements: requirements.map((r) => r.name), screens, asked, assignment: plan, own: specCapabilities(dir)[0] ?? '', boxes }, problems);
+  checkWalkthrough(root, dir, { requirements: requirements.map((r) => r.name), screens, asked, assignment: plan, own: specCapabilities(dir)[0] ?? '' }, problems);
   const advice = questionAdvice(questions);
   for (const id of questions === null ? [] : questionIds(questions)) {
     // The person decides; the agent gives the answer it recommends, and why, so the person can take it.
@@ -841,6 +844,7 @@ function checkSurvey(root, dir, boxes, problems) {
   for (const file of uncovered.slice(0, 20)) problems.push(`source file not in the inventory: ${file}`);
   if (uncovered.length > 20) problems.push(`...and ${uncovered.length - 20} more source files not in the inventory`);
   checkSurveyCoverage(root, dir, rows, problems);
+  checkSurveyCrosscheck(dir, rows, boxes, problems);
 
   const caps = capabilityList(readIf(path.join(dir, 'capabilities.md'), problems));
   if (caps.length === 0) problems.push('capabilities.md lists no capability ("1. `billing/invoice` ...")');
@@ -1037,8 +1041,8 @@ export function baselineHash(root, capability) {
 export const capabilitySegments = (capability) => capability.split(/[\\/]+/).filter((part) => part && part !== '.');
 
 // The files subagents must never write: every active change's review.md,
-// questions.md, crosscheck.md (merge.mjs writes it from the checkers' part
-// files) and verify.json (verify.mjs writes it), every active port's
+// questions.md, crosscheck.md and walkthrough.md (merge.mjs writes them from the
+// checkers' part files) and verify.json (verify.mjs writes it), every active port's
 // proposal.md and design.md (where its commands and follow-up live), the
 // finish change's checks.md and leftovers.md (finish.mjs writes the results,
 // the person decides the classes), the plan, the lessons, the baseline specs,
@@ -1052,7 +1056,7 @@ export function guardFiles(root, warnings = []) {
   const files = [];
   try {
     for (const e of fs.readdirSync(changes, { withFileTypes: true })) {
-      if (e.isDirectory() && e.name !== 'archive') files.push(...['review.md', 'questions.md', 'crosscheck.md', VERIFY_RECEIPT, OLD_RECEIPT, ...(/^port-/.test(e.name) ? ['proposal.md', 'design.md'] : []), ...(/^finish(?:-v\d+)?$/.test(e.name) ? ['checks.md', 'leftovers.md'] : [])].map((f) => path.join(changes, e.name, f)));
+      if (e.isDirectory() && e.name !== 'archive') files.push(...['review.md', 'questions.md', 'crosscheck.md', 'walkthrough.md', VERIFY_RECEIPT, OLD_RECEIPT, ...(/^port-/.test(e.name) ? ['proposal.md', 'design.md'] : []), ...(/^finish(?:-v\d+)?$/.test(e.name) ? ['checks.md', 'leftovers.md'] : [])].map((f) => path.join(changes, e.name, f)));
     }
   } catch { /* no changes yet */ }
   files.push(path.join(root, PLAN), path.join(root, LESSONS), ...walk(path.join(root, 'openspec/specs')), path.join(root, 'openspec/config.yaml'));

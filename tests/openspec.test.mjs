@@ -111,6 +111,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
     'glossary.md': '# Glossary\n',
     'capabilities.md': '# Capabilities\n\n### calc\n1. `calc/add` 足し算\n   - `src/`\n   - `openspec/spec-relay/db/calc/`\n',
     'database.md': `# Databases\n\n## Databases\n| Database | Product and version | Connection setting | Definitions |\n|---|---|---|---|\n| calc | SQL Server 2012 | CalcDb | \`openspec/spec-relay/db/calc/\` |\n\n## Logic in the database\n| Kind | Count | Contexts | Notes |\n|---|---|---|---|\n| trigger | 1 | calc | |\n\n## Missing definitions\nNone\n\n## Snapshot\nsha256: ${databaseHash(dir)}\n`,
+    'crosscheck.md': '| Path | Verdict | Evidence |\n|---|---|---|\n| src/ | confirmed | src/calc.py:1 the adder |\n| openspec/spec-relay/db/calc/ | confirmed | tables.sql: the sums table |\n',
     'review.md': 'Reviewer: Uma\n\n- [x] K1 platform\n- [x] K2 calc\n- [x] M1 map\n- [x] M2 owners\n- [x] M3 glossary\n- [x] M4 capabilities\n- [x] M5 carry\n- [x] C1 inventory\n- [x] D1 calc: definitions\n- [x] D90 missing definitions\n',
   });
   assert.deepEqual(checkReview(dir, 'survey'), { ok: true, problems: [] });
@@ -135,7 +136,8 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
   openspec(dir, 'new', 'change', 'extract-calc-add', '--schema', 'spec-relay-extract');
   const review = (box) => crlf(`﻿# Review\n\nReviewer: Uma\n\n## 1. Requirements\n- [${box}] R1 Add two numbers\n\n## 2. Screens\n- [${box}] S0 This capability has no screens\n`);
   fill(dir, 'extract-calc-add', {
-    'source-map.md': '# Source map\n\n| Path | Role | In scope |\n|---|---|---|\n| src/calc.py | adds | full |\n| openspec/spec-relay/db/calc/tables.sql | the sums table and its trigger | full |\n',
+    'source-map.md': '# Source map\n\n## Source files\n| Path | Role | In scope |\n|---|---|---|\n| src/calc.py | adds | full |\n| openspec/spec-relay/db/calc/tables.sql | the sums table and its trigger | full |\n\n## Entry points\n- `src/calc.py:add` - callers add two numbers\n',
+    'walkthrough.md': crlf('| Entry point | Behavior | Verdict | Evidence |\n|---|---|---|---|\n| `src/calc.py:add` | returns a + b | covered R1: Positive numbers | src/calc.py:2 - return a + b |\n| `src/calc.py:add` | the trigger stores the total | covered R1: Positive numbers | openspec/spec-relay/db/calc/tables.sql:2 - sums_total |\n'),
     'specs/calc/add/spec.md': crlf(SPEC),
     'screens.md': '# Screens\r\n\r\nNone\r\n',
     'trace.md': '# Trace\r\n\r\n| Requirement | Source | Existing tests |\r\n|---|---|---|\r\n| Add two numbers | src/calc.py:add:1-2<br>openspec/spec-relay/db/calc/tables.sql:sums_total | none |\r\n',
