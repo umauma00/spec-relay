@@ -329,6 +329,17 @@ test('screens show their table and messages, and the screenshot as a relative im
   assert.match(fs.readFileSync(path.join(dir, 'out/deep/page.html'), 'utf8'), /<img src="\.\.\/\.\.\/openspec\/spec-relay\/screens\/entry\.png"/);
 });
 
+test('the S0 item of a capability without screens shows what to confirm, not a missing screen', () => {
+  const dir = repo();
+  write(dir, `${CHANGE}/screens.md`, '# Screens\n\nNone\n');
+  write(dir, `${CHANGE}/review.md`, `${REVIEW}\n## 3. Screens\n- [ ] S0 This capability has no screens\n`);
+  render({ root: dir, change: 'extract-billing-invoice' });
+  const page = html(dir, 'extract-billing-invoice');
+  assert.match(page, /id="S0"[\s\S]*この機能には画面がない/);
+  assert.match(page, /画面のテスト（B2）とスクリーンショットの比較（C）を行わない/);
+  assert.doesNotMatch(page, /同じ名前の画面が screens\.md にありません/);
+});
+
 test('a survey shows each context as an item and keeps the relationships table', () => {
   const dir = repo();
   const page = change(dir, 'survey', 'spec-relay-survey', {

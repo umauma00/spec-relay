@@ -92,7 +92,10 @@ artifacts:
         a database object; if the port would need it, stop and ask the person.
       - **Verification**: A table `| Level | Covers | Command |`, one row for
         A and one for each of B1, B2 and C that verification.md chose for this
-        context, with what it covers here. Command is the one-line command
+        context, with what it covers here. When the screens.md of the
+        capability's archived extract says None, B2 and C do not apply: no
+        row for them (`gate.mjs port-done` stops on one), and no scenario is
+        `e2e`. Command is the one-line command
         that runs the level in the target root (PowerShell on Windows); for A
         leave it empty to use conventions.md's Test command. Add a
         `Boundary check` row with a command only when conventions.md's does

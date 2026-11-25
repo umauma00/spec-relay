@@ -786,7 +786,13 @@ Words); the finish step (step 6) lists it in the hand-over.
    or B2 command, choose each scenario's check in the Check column the
    script left open: `e2e` for what a user does on a web screen (B2),
    `compare` for what a recorded case covers (B1), `unit` for the rest
-   (without B1, B2 or C the script writes `unit` everywhere). If the archived
+   (without B1, B2 or C the script writes `unit` everywhere). When the
+   capability's archived extract says it has no screens (screens.md `None`,
+   which the person confirmed as S0), B2 and C do not apply to its port,
+   whatever verification.md chose for the context: the script reports them
+   as `notApplicable`, design.md gives them no row and no scenario is `e2e`.
+   Never write screen tests for such a capability; if it does have a screen,
+   it is extracted again so the person reviews the screen. If the archived
    target design has no ui.md (it was made before kit 0.8.0), ask the person
    for each screen's policy and record the answers under Decisions; never
    choose one yourself.

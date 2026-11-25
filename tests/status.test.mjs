@@ -26,7 +26,7 @@ const PLAN = `# Plan
 `;
 const EXTRACT = 'openspec/changes/extract-billing-invoice';
 const SPEC = '## Purpose\n\n## ADDED Requirements\n\n### Requirement: a\nThe system SHALL a.\n\n### Requirement: b\nThe system SHALL b.\n';
-const PASSING = 'Reviewer: Uma\n\n- [x] R1 a\n- [x] R2 b\n- [x] Q1 c decision: keep\n';
+const PASSING = 'Reviewer: Uma\n\n- [x] R1 a\n- [x] R2 b\n- [x] S0 This capability has no screens\n- [x] Q1 c decision: keep\n';
 
 function repo({ plan = PLAN, review = '- [x] R1 a\n- [ ] R2 b\n- [ ] Q1 c decision:\n', artifacts = true } = {}) {
   const dir = tempDir();

@@ -51,7 +51,7 @@ test('an archive waits for a passing gate, a change name and the orchestrator', 
   assert.match(why, /not ticked: R1 Add two numbers/);
   assert.match(why, /Tell the person: レビューで未承認の項目が 1 件あります/);
   assert.match(shell(dir, 'openspec archive --yes'), /name the change/);
-  write(dir, 'openspec/changes/extract-billing-invoice/review.md', 'Reviewer: Uma\n- [x] R1 Add two numbers\n');
+  write(dir, 'openspec/changes/extract-billing-invoice/review.md', 'Reviewer: Uma\n- [x] R1 Add two numbers\n- [x] S0 This capability has no screens\n');
   assert.equal(shell(dir, 'openspec archive extract-billing-invoice --yes'), null);
   // In a subfolder of the repository too.
   fs.mkdirSync(path.join(dir, 'ts/app'), { recursive: true });

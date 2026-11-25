@@ -13,7 +13,7 @@ const PHP = `<?php\n${'//\n'.repeat(40)}`;
 const CHANGE = 'openspec/changes/extract-calc';
 const SPEC = `## Purpose\n\nAdds numbers.\n\n## ADDED Requirements\n\n### Requirement: Add two numbers\nThe system SHALL add.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n\n### Requirement: Reject text\nThe system SHALL reject text.\n\n#### Scenario: t\n- **WHEN** x\n- **THEN** y\n`;
 const QUESTIONS = '# Questions\n\n## Suspected bugs\n- Q1. Overflow wraps - keep or fix?\n  - Recommended: keep\n  - Why: the old system does it\n\n## Ambiguities\nNone\n';
-const GOOD = 'Reviewer: Uma\n\n## 1. Requirements\n- [x] R1 Add two numbers\n- [x] R2 Reject text\n\n## 2. Questions\n- [x] Q1 Overflow: decision: keep\n';
+const GOOD = 'Reviewer: Uma\n\n## 1. Requirements\n- [x] R1 Add two numbers\n- [x] R2 Reject text\n\n## 2. Screens\n- [x] S0 This capability has no screens\n\n## 3. Questions\n- [x] Q1 Overflow: decision: keep\n';
 
 const CROSSCHECK = '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/calc.php:3 |\n| R2 Reject text | confirmed | src/calc.php:9 |\n';
 const SOURCE_MAP = '# Source map\n\n## Source files\n| Path | Role | In scope |\n|---|---|---|\n| `src/calc.php` | calculator | full |\n';
@@ -192,8 +192,15 @@ test('screens need review items and crosscheck rows; crosscheck verdicts must be
   let problems = checkReview(withScreen, 'extract-calc').problems.join('\n');
   assert.match(problems, /screen has no review item: "請求書入力"/);
   assert.match(problems, /screen has no crosscheck row: "請求書入力"/);
-  const ok = repo(GOOD.replace('## 2. Questions', '- [x] S1 請求書入力\n\n## 2. Questions'), { screens, crosscheck: `${CROSSCHECK}| S1 請求書入力 | confirmed | x |\n` });
+  assert.match(problems, /review.md has an S0 item \(no screens\), but screens.md lists screens/);
+  const ok = repo(GOOD.replace('- [x] S0 This capability has no screens', '- [x] S1 請求書入力'), { screens, crosscheck: `${CROSSCHECK}| S1 請求書入力 | confirmed | x |\n` });
   assert.deepEqual(checkReview(ok, 'extract-calc'), { ok: true, problems: [] });
+  // "None" is confirmed by the person with S0, ticked like any item.
+  problems = checkReview(repo(GOOD.replace('- [x] S0 This capability has no screens\n', '')), 'extract-calc').problems.join('\n');
+  assert.match(problems, /screens.md says None, but review.md has no S0 item/);
+  problems = checkReview(repo(GOOD.replace('- [x] S0', '- [ ] S0')), 'extract-calc').problems.join('\n');
+  assert.match(problems, /not ticked: S0 This capability has no screens/);
+  assert.ok(checkReview(repo(GOOD, { screens: '# Screens\r\n\r\nNone.\r\n' }), 'extract-calc').ok);
 
   assert.match(checkReview(repo(GOOD, { screens: null }), 'extract-calc').problems.join(), /screens.md is missing/);
   assert.match(checkReview(repo(GOOD, { crosscheck: null }), 'extract-calc').problems.join(), /crosscheck.md is missing/);
@@ -591,7 +598,7 @@ test('an extract or amend review needs the archived survey, a listed capability 
 });
 
 test('next separates what the person decides from what the agent fixes, in the person\'s language', () => {
-  const dir = repo('Reviewer: <name>\n- [ ] **R1** Add two numbers\n- [x] R2 Reject text\n- [ ] Q1 Overflow: decision:\n');
+  const dir = repo('Reviewer: <name>\n- [ ] **R1** Add two numbers\n- [x] R2 Reject text\n- [x] S0 This capability has no screens\n- [ ] Q1 Overflow: decision:\n');
   const result = checkReview(dir, 'extract-calc');
   const ja = nextSteps('review', result, 'ja');
   assert.deepEqual(ja.person, [

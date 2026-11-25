@@ -182,7 +182,7 @@ test('the extract gate needs one valid ledger row per site', () => {
   write(dir, `${C}/screens.md`, 'None\n');
   write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Total | confirmed | x |\n');
   write(dir, `${C}/questions.md`, '- Q1. Is save dead code?\n  - Recommended: keep\n  - Why: the old system does it\n');
-  write(dir, `${C}/review.md`, 'Reviewer: Uma\n- [x] R1 Total\n- [x] Q1 save: decision: keep\n');
+  write(dir, `${C}/review.md`, 'Reviewer: Uma\n- [x] R1 Total\n- [x] S0 This capability has no screens\n- [x] Q1 save: decision: keep\n');
   const ledger = (rows) => write(dir, `${C}/coverage.md`, `| Site | Verdict | Evidence |\n|---|---|---|\n${rows}`);
   const problems = () => checkReview(dir, 'extract-billing-invoice').problems;
 
@@ -417,7 +417,7 @@ test('the ledger: symbols keep their letter case, other capability must own the 
   write(dir, `${C}/screens.md`, 'None\n');
   write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Total | confirmed | x |\n');
   write(dir, `${C}/questions.md`, 'None\n');
-  write(dir, `${C}/review.md`, 'Reviewer: Uma\n- [x] R1 Total\n');
+  write(dir, `${C}/review.md`, 'Reviewer: Uma\n- [x] R1 Total\n- [x] S0 This capability has no screens\n');
   const ledger = (rows) => write(dir, `${C}/coverage.md`, `| Site | Verdict | Evidence |\n|---|---|---|\n${rows}`);
   const problems = () => checkReview(dir, 'extract-billing-invoice').problems;
   ledger('| `src/invoice.cs:Invoice.Total` | covered R1 | 2 |\n| `SRC/Invoice.cs:Invoice.total` | no behavior | unused |\n| `src/shared.php:tax` | other capability billing/tax | listed there |\n');
@@ -501,7 +501,7 @@ test('other capability needs the capability that owns the file most specifically
   write(dir, `${C}/screens.md`, 'None\n');
   write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Total | confirmed | x |\n');
   write(dir, `${C}/questions.md`, 'None\n');
-  write(dir, `${C}/review.md`, 'Reviewer: Uma\n- [x] R1 Total\n');
+  write(dir, `${C}/review.md`, 'Reviewer: Uma\n- [x] R1 Total\n- [x] S0 This capability has no screens\n');
   write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/Invoice.cs:Invoice.Total` | other capability billing/tax | x |\n');
   // billing/tax covers src/ as a folder, but billing/invoice lists the file itself, so the site is invoice's to judge.
   // (The folder row "src" without a trailing / still names the folder.)
@@ -549,7 +549,7 @@ test('the ledger: evidence for no behavior, two capabilities may not defer a sit
   write(dir, `${C}/screens.md`, 'None\n');
   write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Total | confirmed | x |\n');
   write(dir, `${C}/questions.md`, 'None\n');
-  write(dir, `${C}/review.md`, 'Reviewer: Uma\n- [x] R1 Total\n');
+  write(dir, `${C}/review.md`, 'Reviewer: Uma\n- [x] R1 Total\n- [x] S0 This capability has no screens\n');
   write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/God.cs:God.Total` | covered R1 | 2 |\n| `src/God.cs:God.Purge` | other capability billing/tax | tax owns it |\n| `src/Ops.vb:Ops./` | no behavior | |\n| `src/Ops.vb:Ops.\\` | no behavior | returns b |\n');
   write(dir, 'openspec/changes/extract-billing-tax/coverage.md', '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/God.cs:God.Purge` | other capability billing/invoice | invoice owns it |\n');
   assert.deepEqual(checkReview(dir, 'extract-billing-invoice').problems, [
@@ -738,7 +738,7 @@ test('"no behavior" on a site with marker lines needs the person\'s C1 item with
   write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Name | confirmed | x |\n');
   write(dir, `${C}/questions.md`, 'None\n');
   write(dir, `${C}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n| `src/log.php:audit` | no behavior | a log nobody reads |\n| `src/log.php:stamp` | no behavior | unused |\n| `src/log.php:name` | covered R1 | 4 |\n');
-  const review = (extra = '') => write(dir, `${C}/review.md`, `Reviewer: Uma\n- [x] R1 Name\n${extra}`);
+  const review = (extra = '') => write(dir, `${C}/review.md`, `Reviewer: Uma\n- [x] R1 Name\n- [x] S0 This capability has no screens\n${extra}`);
   const problems = () => checkReview(dir, 'extract-shop-orders').problems;
   review();
   const code = listCode(['src/log.php:audit', 'src/log.php:stamp']);
@@ -787,7 +787,7 @@ test('a marker line that holds no effect is set aside in the verdict, and the pe
   write(dir, `${C}/screens.md`, 'None\n');
   write(dir, `${C}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 List orders | confirmed | x |\n');
   write(dir, `${C}/questions.md`, 'None\n');
-  const review = (extra = '') => write(dir, `${C}/review.md`, `Reviewer: Uma\n- [x] R1 List orders\n${extra}`);
+  const review = (extra = '') => write(dir, `${C}/review.md`, `Reviewer: Uma\n- [x] R1 List orders\n- [x] S0 This capability has no screens\n${extra}`);
   const ledger = (verdict) => write(dir, `${C}/coverage.md`, `| Site | Verdict | Evidence |\n|---|---|---|\n| \`src/orders.php:(file)\` | ${verdict} | 4: script for the browser; 5: page text |\n`);
   const problems = () => checkReview(dir, 'extract-shop-orders').problems;
   review();

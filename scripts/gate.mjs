@@ -36,7 +36,7 @@ import { checkFinish } from './finish.mjs';
 import { COMPARE_COMMAND, casesDigest, isCompareCommand, parseOptions, portOptionProblem, readCases, words as commandWords } from './compare.mjs';
 import { checkSurveyCoverage, checkSourceMap, checkTrace, checkAmendSourceMap, checkCoverage, assignment } from './coverage.mjs';
 import { checkLedger } from './sites.mjs';
-import { E2E_DIR, OLD_RECEIPT, e2eCommandOptions, e2eDigest, isE2eCommand, oldReceipt } from './e2e.mjs';
+import { E2E_DIR, OLD_RECEIPT, capabilityFolder, e2eCommandOptions, e2eDigest, isE2eCommand, oldReceipt, screenTestFiles } from './e2e.mjs';
 
 // Same shapes OpenSpec 2.1.1 (and 1.17.0, 2.0.0) counts as tasks and requirements, so the gate never
 // sees fewer items than `openspec instructions apply` or `openspec archive` do.
@@ -375,6 +375,25 @@ export function screenNames(text) {
   return unfencedLines(stripComments(text ?? '')).map((line) => line.match(/^###\s*Screen:\s*(.+?)\s*$/i)).filter(Boolean).map((m) => m[1]);
 }
 
+// The review item that confirms a capability has no screens (screens.md: None).
+export const NO_SCREENS_ITEM = 'S0 This capability has no screens';
+
+// Whether a screens.md says the capability has no screens: no screen heading,
+// and nothing but "None" under the title. A missing file is not "None".
+export function noScreens(text) {
+  if (text === null || text === undefined || screenNames(text).length) return false;
+  return /^none\.?$/i.test(stripComments(text).replace(/^#.*$/gm, '').trim());
+}
+
+// The screens of a capability, from the screens.md of its newest archived
+// extract (reviewed by the person): { extract, screens, none }, where `none`
+// is true only when that file exists and says None.
+export function capabilityScreens(root, capability) {
+  const extract = archivedChange(root, `extract-${capabilitySegments(capability).join('-')}`);
+  const text = extract ? readIf(path.join(extract, 'screens.md'), []) : null;
+  return { extract: extract ? path.relative(root, extract).split(path.sep).join('/') : null, screens: screenNames(text ?? ''), none: noScreens(text) };
+}
+
 // Every requirement and screen needs a crosscheck row whose verdict is
 // `confirmed` or `question Q<n>`.
 // `questions` is the set of question ids with a review item, or null when the
@@ -422,10 +441,15 @@ function checkExtract(root, dir, boxes, problems) {
   if (screensText === null) problems.push('screens.md is missing (write "None" when the capability has no screens)');
   const screens = screenNames(screensText);
   // A heading the gate does not read (## Screen:, ### 画面:) would need no review.
-  if (screensText && screens.length === 0 && !/^none\.?$/i.test(stripComments(screensText).replace(/^#.*$/gm, '').trim())) {
+  if (screensText && screens.length === 0 && !noScreens(screensText)) {
     problems.push('screens.md has no "### Screen: <name>" heading; write each screen under one, or only "None" when there are no screens');
   }
   problems.push(...requireItems(boxes, 'S', screens, 'screen', 'screens.md'));
+  // "None" is a finding the person confirms: every port of the capability then
+  // skips the screen levels (B2, C) of its context.
+  const s0 = boxes.filter((b) => /^S0+\b/i.test(b.plain));
+  if (noScreens(screensText) && s0.length === 0) problems.push(`screens.md says None, but review.md has no S0 item to confirm it: add "- [ ] ${NO_SCREENS_ITEM}" under "2. Screens" (draft.mjs review --update); without screens, the ports of this capability skip the screen levels B2 and C`);
+  if (screens.length && s0.length) problems.push('review.md has an S0 item (no screens), but screens.md lists screens: remove the S0 item (draft.mjs review --update)');
 
   const questions = readIf(path.join(dir, 'questions.md'), problems);
   if (questions === null) problems.push('questions.md is missing');
@@ -1227,6 +1251,22 @@ export function chosenLevels(text, context, problems = []) {
   return null;
 }
 
+// The levels that compare screens: they need a screen to test.
+export const SCREEN_LEVELS = ['B2', 'C'];
+
+// The comparison levels a port of `capability` runs: the ones verification.md
+// chose for its context, less the screen levels (B2, C) when the reviewed
+// screens.md of the capability's archived extract says None. Only that file
+// decides it, so no port can drop a level by its own words:
+// { levels (null without a row for the context), notApplicable, extract }.
+export function portLevels(root, capability, verification, problems = []) {
+  const chosen = chosenLevels(verification, capability.split('/')[0], problems);
+  if (!chosen || !chosen.some((level) => SCREEN_LEVELS.includes(level))) return { levels: chosen, notApplicable: [], extract: null };
+  const { none, extract } = capabilityScreens(root, capability);
+  if (!none) return { levels: chosen, notApplicable: [], extract: null };
+  return { levels: chosen.filter((level) => !SCREEN_LEVELS.includes(level)), notApplicable: chosen.filter((level) => SCREEN_LEVELS.includes(level)), extract };
+}
+
 // The Verification table of a port's design.md (| Level | Covers | Command |):
 // the command of each level that names one (A, B1, B2, C, and `boundary` for a
 // Boundary check row, which replaces the conventions' command for this port).
@@ -1286,8 +1326,18 @@ export function verifyPlan(root, change, capability = portCapability(root, chang
   if (verification === null) problems.push('no archived target design with verification.md');
   const commands = conventionCommands(conventions);
   const design = designCommands(readIf(path.join(dir, 'design.md'), problems) ?? '');
-  const levels = chosenLevels(verification, context, problems);
+  const { levels, notApplicable, extract } = portLevels(root, capability, verification, problems);
   if (verification !== null && levels === null) problems.push(`verification.md of the archived target design has no row for context ${context} in a table with B1, B2 and C columns`);
+  // Without screens, a screen level's command or a screen test would check
+  // something the reviewed spec does not have.
+  for (const level of notApplicable) {
+    if (design[level]) problems.push(`level ${level} does not apply to ${capability}: the screens.md of its archived extract (${extract}) says None; remove the ${level} row from design.md's Verification table`);
+  }
+  if (notApplicable.length) {
+    const target = path.resolve(root, relPath(cleanValue(configValue(root, 'Target root', ''))) || '.');
+    const tests = screenTestFiles(target, capability);
+    if (tests.length) problems.push(`the screens.md of the archived extract of ${capability} (${extract}) says None, but ${E2E_DIR}/${capabilityFolder(capability)}/ holds screen tests (${tests.slice(0, 5).join(', ')}${tests.length > 5 ? ', ...' : ''}): when the capability has screens, extract it again so they are recorded and reviewed; otherwise remove the tests`);
+  }
   const runs = [];
   const add = (level, command, from, missing) => {
     if (!command) { problems.push(missing); return; }
@@ -1306,7 +1356,7 @@ export function verifyPlan(root, change, capability = portCapability(root, chang
   add('A', design.A ?? commands.test, design.A ? 'design.md' : 'conventions.md', 'conventions.md of the archived target design names no Test command (## Commands)');
   add('boundary', design.boundary ?? commands.boundary, design.boundary ? 'design.md' : 'conventions.md', 'conventions.md of the archived target design names no Boundary check command (## Commands)');
   for (const level of levels ?? []) add(level, design[level], 'design.md', `verification.md chose ${level} for context ${context}, but design.md's Verification table gives it no command (| ${level} | covers | command |)`);
-  return { runs, levels: levels ?? [], problems };
+  return { runs, levels: levels ?? [], notApplicable, extract, problems };
 }
 
 // The hash of what a `spec-relay-compare ...` command compares with, as the
@@ -1692,7 +1742,7 @@ function checkPortEvidence(root, change, dir, capability, problems) {
     else if (level === 'C' && !(ran.e2e.screenshots > 0)) problems.push(`level C runs the screen tests, but they took no screenshot from the old system: add expect(page).toHaveScreenshot() to the tests of the screens, run e2e.mjs old again, then ${again}`);
     else screenTests.push({ level, tests: ran.e2e.tests, screenshots: ran.e2e.screenshots, origin: old.receipt.origin, ranAt: old.receipt.ranAt ?? '', loosened: Array.isArray(ran.e2e.loosened) ? ran.e2e.loosened : [] });
   }
-  return { levels: ['A', ...plan.levels], equivalence: plan.levels.length ? 'compared' : 'inferred', commands: plan.runs, followUp, cases, screens: screenTests, scenarioChecks };
+  return { levels: ['A', ...plan.levels], equivalence: plan.levels.length ? 'compared' : 'inferred', notApplicable: plan.notApplicable ?? [], commands: plan.runs, followUp, cases, screens: screenTests, scenarioChecks };
 }
 
 // Checks design.md's Scenario checks against the baseline and the evidence, and
@@ -1753,7 +1803,8 @@ function checkScenarios(root, change, dir, capability, { plan, receipt, tags, sc
     } else if (kind === 'compare') {
       if (!caseFolders.length) problems.push(`${name} is checked by compare, but design.md's Verification has no spec-relay-compare command`);
       else if (!caseTags.some((t) => tagMatches(t, capability, s))) problems.push(`no recorded case in ${caseFolders.join(', ')} carries the tag of ${name} (a "scenario" key holding spec-relay: ${capability} | ${s.requirement} | ${s.scenario})`);
-    } else if (!e2eLevels.length) problems.push(`${name} is checked by e2e, but design.md's Verification has no spec-relay-e2e command`);
+    } else if (plan.notApplicable?.length) problems.push(`${name} is checked by e2e, but ${capability} has no screens (the screens.md of ${plan.extract} says None): check it by unit or compare`);
+    else if (!e2eLevels.length) problems.push(`${name} is checked by e2e, but design.md's Verification has no spec-relay-e2e command`);
     else if (!proven(oldTitles, s)) problems.push(`no screen test titled with the tag of ${name} passed on the old system (spec-relay: ${capability} | ${s.requirement} | ${s.scenario})`);
     else if (receipt && !proven(newTitles, s)) problems.push(`the screen test of ${name} did not pass on the new system in the last verify run`);
   }
@@ -1838,6 +1889,7 @@ const NEXT = {
     portArchive: 'Every task is done, the tests and the boundary check pass on the code as it is, and the independent crosscheck confirmed every requirement and screen. Answer whether the port may be archived.',
     inferred: 'Only level A ran: tests from the spec, which an AI wrote from reading the source code. The source program was not run, so that the new code behaves the same is inferred from the code, not compared.',
     compared: (levels) => `The source program was compared as well (${levels}).`,
+    noScreens: (levels) => `${levels} (comparing screens) did not apply: the extract's screens.md, which you reviewed, says this capability has no screens, so there was no screen to compare.`,
     cases: (level, n, rules) => `${level}: all ${n} recorded case${n === 1 ? '' : 's'} match${rules.length ? `, with the rules ${rules.join('; ')} (design.md's Decisions should say why)` : ''}`,
     screens: (e) => (e.level === 'C' ? `C: the new screens match the ${e.screenshots} screenshot${e.screenshots === 1 ? '' : 's'} taken from the source program${e.loosened.length ? `, with the comparison loosened at ${e.loosened.join(', ')} (design.md's Decisions should say why)` : ''}` : `${e.level}: all ${e.tests} screen test${e.tests === 1 ? '' : 's'} passed on the source program first (${e.origin}, ${e.ranAt.slice(0, 10)}), then on the new system`),
     scenarioChecks: (c) => `How the ${c.e2e + c.compare + c.unit} scenarios are checked: ${c.e2e} by screen tests run on both systems, ${c.compare} by cases recorded from the source program, ${c.unit} by unit tests.`,
@@ -1862,6 +1914,7 @@ const NEXT = {
     portArchive: 'すべてのタスクが完了し、今のコードでテストと境界チェックが通り、別の AI による照合ですべての要件と画面が確認できました。実装を archive してよいかを答えてください。',
     inferred: '比べ方は A（仕様のシナリオから作ったテスト）だけです。仕様は AI が元コードを読んで書いたもので、元のプログラムは動かしていません。同じ動きであることは、比べた結果ではなくコードを読んだうえでの推定です。',
     compared: (levels) => `元のプログラムとの比較（${levels}）も通りました。`,
+    noScreens: (levels) => `${levels}（画面の比較）は行っていません。レビュー済みの解析の screens.md で、この機能には画面がないとされているため、比べる画面がありません。`,
     cases: (level, n, rules) => `${level}: 記録された ${n} 件がすべて一致${rules.length ? `。比べ方をゆるめる規則 ${rules.join('; ')} を使用（理由は design.md の Decisions に）` : ''}`,
     screens: (e) => (e.level === 'C' ? `C: 元のシステムで撮った ${e.screenshots} 枚のスクリーンショットと新しい画面が一致${e.loosened.length ? `。比べ方をゆるめる設定 ${e.loosened.join(', ')} を使用（理由は design.md の Decisions に）` : ''}` : `${e.level}: 画面のテスト ${e.tests} 件が、元のシステム（${e.origin}、${e.ranAt.slice(0, 10)} の実行）で通ったあと、新しいシステムでも通過`),
     scenarioChecks: (c) => `シナリオ ${c.e2e + c.compare + c.unit} 件の確認方法: 画面のテスト（新旧の両方で実行）${c.e2e} 件、元のプログラムの記録との比較 ${c.compare} 件、単体テスト ${c.unit} 件。`,
@@ -1924,6 +1977,7 @@ export function nextSteps(command, result, lang = 'en') {
       return c ? words.cases(level, c.count, c.rules) : e ? words.screens(e) : level;
     };
     person.push(result.equivalence === 'compared' ? words.compared(levels.map(counted).join(', ')) : words.inferred);
+    if (result.notApplicable?.length) person.push(words.noScreens(result.notApplicable.join(lang === 'ja' ? '・' : ' and ')));
     const checks = result.scenarioChecks;
     if (checks && (checks.e2e || checks.compare)) person.push(words.scenarioChecks(checks));
     const commands = result.commands ?? [];

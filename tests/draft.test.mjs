@@ -57,12 +57,13 @@ test('--update keeps the person\'s ticks, decisions and notes, and unticks what 
   write(dir, `${X}/screens.md`, 'None\n');
   const result = review(dir, 'extract-calc', { update: true });
   assert.equal(result.written, true);
-  assert.deepEqual(result.added, ['R3 Clear']);
+  // The screen is gone, so the person confirms that none is left (S0).
+  assert.deepEqual(result.added, ['R3 Clear', 'S0 This capability has no screens']);
   // The renamed requirement keeps its place and notes, unticked.
   assert.deepEqual(result.changed, [{ was: 'R1 Add two numbers', now: 'R1 Add two integers', ticked: true }]);
   assert.deepEqual(result.removed, [{ item: 'S1 Calculator', ticked: true, lines: ['- [x] S1 Calculator', '  - hold: ask the accounting team'], why: 'its subject is gone' }]);
   const text = read(dir, `${X}/review.md`);
-  assert.equal(text, '# Review\n\nReviewer: Uma\n\n## 1. Requirements\n- [ ] R1 Add two integers\n- [ ] R2 Reject `text`\n  - fix: say what the error says\n  - fixed: added the message\n- [ ] R3 Clear\n\n## 2. Screens\n\n## 3. Questions\n- [x] Q1 Overflow wraps around at 2^31 - src/calc.php:4 - keep or fix?: decision: keep, the old system did the same\n- [x] Q2 Rounding of halves: decision:\n');
+  assert.equal(text, '# Review\n\nReviewer: Uma\n\n## 1. Requirements\n- [ ] R1 Add two integers\n- [ ] R2 Reject `text`\n  - fix: say what the error says\n  - fixed: added the message\n- [ ] R3 Clear\n\n## 2. Screens\n- [ ] S0 This capability has no screens\n\n## 3. Questions\n- [x] Q1 Overflow wraps around at 2^31 - src/calc.php:4 - keep or fix?: decision: keep, the old system did the same\n- [x] Q2 Rounding of halves: decision:\n');
   // Nothing changed: nothing is written.
   assert.equal(review(dir, 'extract-calc', { update: true }).written, false);
 });

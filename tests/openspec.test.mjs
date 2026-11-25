@@ -133,7 +133,7 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
 
   // 3. Extract, with CRLF and a UTF-8 BOM as Windows editors write them.
   openspec(dir, 'new', 'change', 'extract-calc-add', '--schema', 'spec-relay-extract');
-  const review = (box) => crlf(`﻿# Review\n\nReviewer: Uma\n\n## 1. Requirements\n- [${box}] R1 Add two numbers\n`);
+  const review = (box) => crlf(`﻿# Review\n\nReviewer: Uma\n\n## 1. Requirements\n- [${box}] R1 Add two numbers\n\n## 2. Screens\n- [${box}] S0 This capability has no screens\n`);
   fill(dir, 'extract-calc-add', {
     'source-map.md': '# Source map\n\n| Path | Role | In scope |\n|---|---|---|\n| src/calc.py | adds | full |\n| openspec/spec-relay/db/calc/tables.sql | the sums table and its trigger | full |\n',
     'specs/calc/add/spec.md': crlf(SPEC),

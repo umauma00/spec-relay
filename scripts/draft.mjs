@@ -35,7 +35,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   readIf, tableRows, headedRows, column, section, plain, norm, contextIds, archivedChange, changeSchema,
-  requirementNames, screenNames, questionIds, scenarioList, chosenLevels, capabilitySegments, portCapability,
+  requirementNames, screenNames, noScreens, NO_SCREENS_ITEM, portLevels, questionIds, scenarioList, capabilitySegments, portCapability,
   PLACEHOLDER, DB_KINDS, REMARK,
 } from './gate.mjs';
 import { assignment, traceSources } from './coverage.mjs';
@@ -225,7 +225,9 @@ function extractReview(root, dir, problems) {
   const titles = questionTitles(questions);
   const sections = [
     ['1. Requirements', requirements.map((name, i) => ({ key: `R:${norm(name)}`, text: `R${i + 1} ${oneLine(name)}` }))],
-    ['2. Screens', screens.map((name, i) => ({ key: `S:${norm(name)}`, text: `S${i + 1} ${oneLine(name)}` }))],
+    ['2. Screens', screensText !== null && noScreens(screensText)
+      ? [{ key: `S:${norm(NO_SCREENS_ITEM.replace(/^S0\s+/, ''))}`, text: NO_SCREENS_ITEM }]
+      : screens.map((name, i) => ({ key: `S:${norm(name)}`, text: `S${i + 1} ${oneLine(name)}` }))],
     ['3. Questions', ids.map((id) => ({ key: `Q:${norm(titles.get(id) ?? id)}`, fallback: id, text: `${id} ${titles.get(id) ?? id}: decision:`, question: true }))],
   ];
   // The C1 item, in the gate's own words, when the omission check set sites aside.
@@ -519,11 +521,12 @@ function screenPolicy(root, context) {
   return null;
 }
 
-// The levels verification.md chose for a context.
-function levelsFor(root, context) {
+// The levels a port of the capability runs: those verification.md chose for
+// its context, less B2 and C when its extract's screens.md says None.
+function levelsFor(root, capability) {
   const design = archivedChange(root, 'target-design');
   const text = design ? readIf(path.join(design, 'verification.md'), []) : null;
-  return text ? chosenLevels(text, context, []) : null;
+  return text ? portLevels(root, capability, text, []) : { levels: null, notApplicable: [] };
 }
 
 // The `## <title>` section of a Markdown text as { start, end } line indexes
@@ -578,7 +581,7 @@ export function portDesign(root, change, { update = false } = {}) {
   const screens = extract ? screenNames(readIf(path.join(extract, 'screens.md'), problems) ?? '') : [];
   const policy = screenPolicy(root, context);
   if (screens.length && !policy) problems.push(`the archived target design's ui.md gives context ${context} no screen policy; ask the person for each screen's policy and write it under Decisions`);
-  const levels = levelsFor(root, context);
+  const { levels, notApplicable } = levelsFor(root, capability);
   if (levels === null) problems.push(`the archived target design's verification.md has no row for context ${context}`);
   // Without B1, B2 or C every scenario is a unit test; otherwise the check is a choice.
   const fixedCheck = levels && !levels.some((l) => ['B1', 'B2', 'C'].includes(l)) ? 'unit' : null;
@@ -661,7 +664,7 @@ export function portDesign(root, change, { update = false } = {}) {
   }
   const out = lines.join('\n').replace(/\n*$/, '\n');
   if (out !== text.replace(/\r\n/g, '\n')) fs.writeFileSync(file, crlf ? out.replace(/\n/g, '\r\n') : out);
-  return { ok: problems.length === 0, file: rel, created, capability, scenarios: scenarios.length, requirements: requirements.length, screens: screens.length, ...result, problems };
+  return { ok: problems.length === 0, file: rel, created, capability, scenarios: scenarios.length, requirements: requirements.length, screens: screens.length, ...(notApplicable.length ? { notApplicable } : {}), ...result, problems };
 }
 
 // ---------------------------------------------------------------- CLI
