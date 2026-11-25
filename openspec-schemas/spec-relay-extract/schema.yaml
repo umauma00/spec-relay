@@ -21,8 +21,14 @@ artifacts:
         the plan assigns: give each one (or its folder) a row here too. When an
         assigned file belongs to another capability, report it instead of
         leaving it out; the orchestrator moves it in the plan.
-      - **Entry points**: Public functions, endpoints, commands, jobs or screens
-        through which callers reach this capability (path and symbol).
+      - **Entry points**: every way in: pages, the handlers of buttons and
+        menus, routes, endpoints, commands, jobs, and public functions other
+        capabilities call. One top-level item each, `path:symbol - how
+        callers reach it` (the id in backticks when it holds spaces); the
+        walkthrough starts from each. Write `- None (why)` only when nothing
+        calls into the capability (definitions only); the gate refuses it
+        when coverage.md judges code that writes, sends or ends a request
+        covered.
       - **Dependencies**: Other capabilities, libraries, databases, files,
         environment variables and external services it uses.
       - **Database**: the tables it reads and writes, and the database objects
@@ -340,14 +346,26 @@ artifacts:
       `gap` and `vague` row: an analyst adds the requirement it needs (with
       its trace) at the END of the spec, or makes the scenario concrete, a
       checker crosschecks that requirement and walks the entry point again
-      (a later part replaces all the rows of that entry point), or the
+      (merged on its own, its rows replace all the rows of that entry point), or the
       orchestrator moves it to questions.md and writes `question Q<n>`.
+      The evidence of every row cites the code: `path:line` (or
+      `path:symbol`, a path with spaces in backticks) of a file that exists,
+      with lines the file has, and what the code does.
       `gate.mjs review` fails while an entry point of source-map.md has no
-      row, a row walks an entry point source-map.md does not list, a row has
-      no behavior or no evidence, a verdict is `gap`, `vague`, blank or
-      another word, names a requirement, scenario, screen, question or
-      capability that does not exist, or names another capability without
-      citing its code.
+      row, a row walks an entry point source-map.md does not list or has an
+      empty Entry point cell, a row has no behavior or cites no existing
+      code, a verdict is `gap`, `vague`, blank or another word, names a
+      requirement, scenario, screen, question or capability that does not
+      exist, or names another capability without citing its code. It also
+      fails while a requirement has no row that names one of its scenarios
+      (a way in is missing or a walk stopped early), and while an effect
+      line (a write, a mail, an error, a redirect, the end of a request) of
+      a site coverage.md judges `covered` is cited by no row: a walk that
+      stops at the first file reaches none of them. Merge each wave of
+      checkers on its own: the rows one merge brings for an entry point, from
+      all its parts, replace the rows it had, and merge.mjs lists the `gap`
+      and `vague` rows that are gone, which the orchestrator confirms the
+      spec now states.
     requires:
       - source-map
       - specs

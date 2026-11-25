@@ -25,7 +25,7 @@ const PLAN = `# Plan
 - \`billing/refund\` fix the rounding bug after the port
 `;
 const EXTRACT = 'openspec/changes/extract-billing-invoice';
-const SPEC = '## Purpose\n\n## ADDED Requirements\n\n### Requirement: a\nThe system SHALL a.\n\n### Requirement: b\nThe system SHALL b.\n';
+const SPEC = '## Purpose\n\n## ADDED Requirements\n\n### Requirement: a\nThe system SHALL a.\n\n#### Scenario: sa\n- **WHEN** x\n- **THEN** y\n\n### Requirement: b\nThe system SHALL b.\n\n#### Scenario: sb\n- **WHEN** x\n- **THEN** y\n';
 const PASSING = 'Reviewer: Uma\n\n- [x] R1 a\n- [x] R2 b\n- [x] S0 This capability has no screens\n- [x] Q1 c decision: keep\n';
 
 function repo({ plan = PLAN, review = '- [x] R1 a\n- [ ] R2 b\n- [ ] Q1 c decision:\n', artifacts = true } = {}) {
@@ -50,7 +50,7 @@ function repo({ plan = PLAN, review = '- [x] R1 a\n- [ ] R2 b\n- [ ] Q1 c decisi
     write(dir, `${EXTRACT}/screens.md`, '# Screens\nNone\n');
     write(dir, `${EXTRACT}/coverage.md`, '| Site | Verdict | Evidence |\n|---|---|---|\n');
     write(dir, `${EXTRACT}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 a | confirmed | x |\n| R2 b | confirmed | x |\n');
-    write(dir, `${EXTRACT}/walkthrough.md`, '| Entry point | Behavior | Verdict | Evidence |\n|---|---|---|---|\n| `src/invoice.php` | a | question Q1 | src/invoice.php:1 - read |\n');
+    write(dir, `${EXTRACT}/walkthrough.md`, '| Entry point | Behavior | Verdict | Evidence |\n|---|---|---|---|\n| `src/invoice.php` | a | covered R1: sa | src/invoice.php:1 - read |\n| `src/invoice.php` | b | covered R2: sb | src/invoice.php:2 - read |\n| `src/invoice.php` | c | question Q1 | src/invoice.php:1 - read |\n');
     write(dir, `${EXTRACT}/questions.md`, '- Q1. c\n  - Recommended: keep\n  - Why: the old system does it\n');
     write(dir, `${EXTRACT}/review.md`, review.startsWith('Reviewer') ? review : `Reviewer: Uma\n\n${review}`);
   }

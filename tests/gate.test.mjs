@@ -17,7 +17,7 @@ const GOOD = 'Reviewer: Uma\n\n## 1. Requirements\n- [x] R1 Add two numbers\n- [
 
 const CROSSCHECK = '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | confirmed | src/calc.php:3 |\n| R2 Reject text | confirmed | src/calc.php:9 |\n';
 const SOURCE_MAP = '# Source map\n\n## Source files\n| Path | Role | In scope |\n|---|---|---|\n| `src/calc.php` | calculator | full |\n\n## Entry points\n- `src/calc.php` - the page\n';
-const WALK = walkthrough(['src/calc.php']);
+const WALK = `${walkthrough(['src/calc.php'])}| \`src/calc.php\` | the refusal | covered R2: t | src/calc.php:9 |\n`;
 const TRACE = '| Requirement | Source | Existing tests |\n|---|---|---|\n| Add two numbers | src/calc.php:add:3-5 | none |\n| R2 Reject text | `src/calc.php:add:9` | none |\n';
 
 // The archived survey that lists the capability the fixtures review.

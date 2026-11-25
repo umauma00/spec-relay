@@ -310,9 +310,13 @@ not wash out these instructions.
    (a `|` inside a cell written as `\|`),
    and `node "<kit>/scripts/merge.mjs" --into <artifact> --parts <folder>
    --clean` merges them into the artifact: a later part replaces the row with
-   the same key, and rows you edited yourself stay (in walkthrough.md, a later
-   part's rows of an entry point replace all the rows that entry point had,
-   so a walk again writes all of them). If merge reports one
+   the same key, and rows you edited yourself stay (in walkthrough.md, the
+   rows one merge brings for an entry point, from all its parts together,
+   replace all the rows that entry point had, so merge each wave on its own
+   and a walk again writes all of them; merge lists under `dropped` the `gap`
+   and `vague` rows that are gone: confirm the spec now states each). The
+   survey's crosscheck.md gets the code of each inventory row it judged
+   (`<!-- row ... -->`) only through merge.mjs. If merge reports one
    `R<n>` with two names because a requirement was renamed on purpose, delete
    the old row from the artifact and merge again.
 6. **Mixed waves** are fine when no file is written twice: the implementer of
@@ -583,8 +587,11 @@ the domain, not the folders.
      part file with a higher number), or, when only the person can decide
      (whether a page is still used, where a feature belongs), write
      `question` as the verdict yourself and keep the evidence: the person
-     decides those rows with item C2. When the inventory changes later (a
-     review's fix), have a checker judge the changed rows again.
+     decides those rows with item C2. Every row needs evidence, `confirmed`
+     too. When the inventory or capabilities.md changes later (a review's
+     fix), have a checker judge the changed rows again: the gate names each
+     inventory row whose context, handling or notes changed after it was
+     judged.
    Legacy code rarely has clean
    boundaries: propose owners for shared tables, split god classes by method,
    put technical shared parts in `platform`, and give the evidence for each
@@ -721,7 +728,9 @@ waves.
    `mismatch` and `unclear` row, have an analyst fix the spec, screens or trace
    and a new checker check that row again (a part file with a higher number,
    such as `crosscheck-02.md`, merged the same way), or move it to questions.md and write `question Q<n>` as its verdict
-   yourself.
+   yourself. For every `incomplete` row, have an analyst add a scenario for
+   each behavior the checker names (or a requirement at the END of the spec),
+   then check that row again.
 4. **Omission check.** In the same wave as the crosscheck (both need only
    trace.md, and the walkthrough of step 5 runs with them), run `node "<kit>/scripts/sites.mjs" --change
    extract-<capability>`. It lists the sites of the source map's files in
@@ -775,14 +784,21 @@ waves.
    --clean`. For every `gap` and `vague` row, have an analyst add the
    requirement (with its trace) at the END of the spec or make the scenario
    concrete, then a checker crosscheck that requirement and walk the entry
-   point again (a part file with a higher number; its rows replace all of
-   that entry point's rows), and judge again any site of coverage.md the new
+   point again (merged on its own; its rows replace all of that entry point's
+   rows), and judge again any site of coverage.md the new
    requirement covers; or move it to questions.md and write `question Q<n>`
    as its verdict yourself. When a checker reports an entry point the source
    map lacks, have the analyst add it under Entry points (the gate fails on
    a walked entry point the source map does not list, and on a listed one
    nobody walked). The gate also checks that each named scenario exists, so
-   a loose `covered` does not pass. A scenario renamed later breaks the rows
+   a loose `covered` does not pass; that each row cites code that exists;
+   that every requirement is named by some row; and that every effect line
+   of a site coverage.md judges `covered` is cited by some row. When it names
+   effect lines no row reaches, have the checker walk the entry point that
+   leads there to the end, or add the entry point the source map misses;
+   code that nothing reaches is a question. When source-map.md says
+   `- None (why)` under Entry points (definitions only), walkthrough.md keeps
+   its empty table. A scenario renamed later breaks the rows
    that name it: walk those entry points again.
 6. **Questions and review.** Write questions.md from the analysts' reported
    doubts and the rows moved to questions, each with the answer you recommend

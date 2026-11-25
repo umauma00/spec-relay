@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { checkReview } from '../scripts/gate.mjs';
-import { entryPoints, entryKey, parseWalkVerdict, walkthroughSummary } from '../scripts/walkthrough.mjs';
-import { surveyCheckSummary } from '../scripts/coverage.mjs';
+import { entryPoints, entryKey, parseWalkVerdict, walkthroughSummary, evidenceRefs } from '../scripts/walkthrough.mjs';
+import { surveyCheckSummary, surveyRowStamp } from '../scripts/coverage.mjs';
+import { changeSites } from '../scripts/sites.mjs';
 import { inventoryRows } from '../scripts/gate.mjs';
 import { merge } from '../scripts/merge.mjs';
 import { items, review } from '../scripts/draft.mjs';
@@ -43,13 +44,19 @@ const walkRow = (entry, behavior, verdict, evidence = 'src/billing/invoice.php:5
 
 test('entry points: bullets with or without backticks, a table, None, duplicates; keys ignore the letter case of the path only', () => {
   assert.deepEqual(entryPoints(MAP).map((e) => e.id), ['src/billing/invoice.php', 'src/billing/invoice.php:save']);
-  assert.deepEqual(entryPoints('## Entry points\n- None\n'), []);
+  assert.deepEqual([...entryPoints('## Entry points\n- None\n')], []);
+  assert.equal(entryPoints('## Entry points\n- None (only definitions)\n').none, true);
+  assert.equal(entryPoints(MAP).none, undefined);
   assert.equal(entryPoints('## Source files\n- `a.php`\n'), null);
   const table = '## Entry points\n| Entry point | How |\n|---|---|\n| `src/A.cs:Orders.btnSave_Click` | Save |\n\n- src/a.cs:Orders.btnSave_Click — again\n- **`src/b.php`**: the page\n';
   assert.deepEqual(entryPoints(table).map((e) => e.id), ['src/a.cs:Orders.btnSave_Click', 'src/b.php'], 'the same entry point once, whatever its path\'s letter case');
   assert.equal(entryKey('`.\\src\\A.cs:Orders.btnSave_Click`'), 'src/a.cs:Orders.btnSave_Click');
   assert.notEqual(entryKey('src/a.cs:Save'), entryKey('src/a.cs:save'));
   assert.deepEqual(entryPoints(crlf(MAP)).map((e) => e.id), entryPoints(MAP).map((e) => e.id));
+  // Nested items describe their parent; "path:symbol: how" ends the id at ": ";
+  // a backticked id may hold underscores; bold around it is fine.
+  const more = '## Entry points\n- src/a.py:main: the command\n  - `src/a.py:helper` - called by main\n- __`src/b.py:__init__`__ - the module\n';
+  assert.deepEqual(entryPoints(more).map((e) => e.id), ['src/a.py:main', 'src/b.py:__init__']);
 });
 
 test('walkthrough verdicts', () => {
@@ -61,6 +68,16 @@ test('walkthrough verdicts', () => {
   assert.equal(parseWalkVerdict('covered').kind, 'invalid');
   assert.equal(parseWalkVerdict('covered by R1').kind, 'invalid');
   assert.equal(parseWalkVerdict('').kind, 'blank');
+  // Only "; R<n>" or "; S<n>" starts the next reference: a scenario name may hold ";".
+  assert.deepEqual(parseWalkVerdict('`covered R1: Save; then close`； S1'), { kind: 'covered', refs: [{ letter: 'R', n: 1, scenario: 'Save; then close' }, { letter: 'S', n: 1 }] });
+});
+
+test('evidence is prose around source locations', () => {
+  const at = (text) => evidenceRefs(text).map((r) => `${r.file}|${r.symbol}|${r.from}-${r.to}`);
+  assert.deepEqual(at('src/a.php:12 - throws "Quantity"'), ['src/a.php||12-12']);
+  assert.deepEqual(at('`src/A.cs:Orders.btnSave_Click:3-9` saves, then src\\b.php:4, 7'), ['src/A.cs|Orders.btnSave_Click|3-9', 'src/b.php||4-4', 'src/b.php||7-7']);
+  assert.deepEqual(at('`src/My Project/a.vb:2` and lib/x.php:Foo::bar'), ['src/My Project/a.vb||2-2', 'lib/x.php|Foo::bar|null-null']);
+  assert.deepEqual(at('e.g. jQuery.ajax v1.2, the loop'), []);
 });
 
 test('a walkthrough of every entry point that names real scenarios passes', () => {
@@ -72,7 +89,11 @@ test('the extract gate needs the walkthrough, every entry point walked, and only
   assert.match(problems(extract({ walk: null })).join('\n'), /walkthrough.md is missing/);
   assert.match(problems(extract({ map: MAP.replace(/## Entry points[\s\S]*$/, '') })).join('\n'), /source-map.md lists no entry point/);
   const one = extract({ walk: WALK.split('\n').filter((l) => !l.includes(':save`')).join('\n') });
-  assert.deepEqual(problems(one), ['entry point has no row in walkthrough.md: src/billing/invoice.php:save (have a checker walk it)']);
+  assert.deepEqual(problems(one), [
+    'entry point has no row in walkthrough.md: src/billing/invoice.php:save (have a checker walk it)',
+    'no walkthrough row names a scenario of R2 "Reject a negative quantity": the entry point that leads there is missing from source-map.md or was not walked to its end; list it (a public function or a job counts) and walk it',
+  ]);
+  assert.match(problems(extract({ walk: `${WALK}| | rounds | covered R1: Two lines | src/billing/invoice.php:3 |\n` })).join('\n'), /1 row with an empty Entry point cell \("rounds"\)/);
   const extra = extract({ walk: `${WALK}${walkRow('src/billing/invoice.php:print', 'prints', 'covered R1: Two lines')}` });
   assert.match(problems(extra).join('\n'), /walks `src\/billing\/invoice.php:print`, which source-map.md does not list/);
   // The id is compared without the letter case of its path, and with backslashes as slashes.
@@ -92,8 +113,12 @@ test('a covered behavior names a scenario of that requirement; gaps, vague scena
   assert.match(add(walkRow('src/billing/invoice.php', 'rounds', 'looks fine')), /has the verdict "looks fine"; write only covered R<n>: <scenario name>/);
   assert.match(add(walkRow('src/billing/invoice.php', '', 'covered R1: Two lines')), /names no behavior/);
   assert.match(add(walkRow('src/billing/invoice.php', 'sums', 'covered R1: Two lines', '-')), /has no evidence/);
-  // Scenario names are compared without case, marks or quotes.
-  assert.equal(add(walkRow('src/billing/invoice.php', 'sums', 'covered R1: "two LINES"')), '');
+  // Scenario names are compared without case, marks, quotes or a final stop.
+  assert.equal(add(walkRow('src/billing/invoice.php', 'sums', 'covered R1: "two LINES".')), '');
+  // The evidence cites code that exists.
+  assert.match(add(walkRow('src/billing/invoice.php', 'sums', 'covered R1: Two lines', 'the loop sums the lines')), /cites no source location/);
+  assert.match(add(walkRow('src/billing/invoice.php', 'sums', 'covered R1: Two lines', 'src/billing/total.php:3')), /cites src\/billing\/total.php, which does not exist/);
+  assert.match(add(walkRow('src/billing/invoice.php', 'sums', 'covered R1: Two lines', 'src/billing/invoice.php:40-90')), /gives src\/billing\/invoice.php the lines 40-90, but the file has 41 lines/);
   assert.equal(add(walkRow('src/billing/invoice.php', 'rounding', 'question Q1')), '');
 });
 
@@ -104,9 +129,35 @@ test('another capability must be in the plan, not this one, and own the code the
   assert.match(add(walkRow('src/billing/invoice.php', 'x', 'other capability platform/auth', 'src/billing/invoice.php:7 - calls auth')), /cites no file the plan gives to that capability/);
 });
 
+test('every effect line of a covered site is reached by some walk; None passes only without such lines', () => {
+  const CODE = '<?php\nfunction save($db, $q) {\n  if ($q < 0) {\n    throw new Exception("Quantity must be positive");\n  }\n  $db->exec("INSERT INTO lines VALUES (1)");\n}\n';
+  const dir = extract();
+  write(dir, 'src/billing/invoice.php', CODE);
+  write(dir, `${X}/trace.md`, '| Requirement | Source | Existing tests |\n|---|---|---|\n| Total | src/billing/invoice.php:save | none |\n| Reject a negative quantity | src/billing/invoice.php:save | none |\n');
+  const sites = changeSites(dir, path.join(dir, X));
+  assert.ok(sites.length > 0 && sites.some((s) => s.markers.length), 'the fixture has effect lines');
+  write(dir, `${X}/coverage.md`, `| Site | Verdict | Evidence |\n|---|---|---|\n${sites.map((s) => `| \`${s.id}\` | covered R1, R2 | saves |`).join('\n')}\n`);
+  const shallow = WALK.replace(/invoice\.php:(3|4|9)\b/g, 'invoice.php:2');
+  write(dir, `${X}/walkthrough.md`, shallow);
+  assert.match(problems(dir).join('\n'), /no walkthrough row reaches the effect lines of src\/billing\/invoice.php:save \(.*4.*6.*\), which coverage.md judges covered/);
+  // Citing the member reaches every line of it.
+  write(dir, `${X}/walkthrough.md`, shallow.replace('invoice.php:2 - throws', 'invoice.php:save'));
+  assert.deepEqual(problems(dir), []);
+  // "None" is for a capability nothing calls into: not with effect lines judged covered.
+  const none = MAP.replace(/## Entry points[\s\S]*$/, '## Entry points\n- None (only definitions)\n');
+  write(dir, `${X}/source-map.md`, none);
+  write(dir, `${X}/walkthrough.md`, '# Walkthrough\n\n| Entry point | Behavior | Verdict | Evidence |\n|---|---|---|---|\n');
+  assert.match(problems(dir).join('\n'), /says the capability has no entry point \("None"\), but coverage.md judges src\/billing\/invoice.php:save/);
+  const quiet = extract({ map: none, walk: '# Walkthrough\n\n| Entry point | Behavior | Verdict | Evidence |\n|---|---|---|---|\n' });
+  assert.deepEqual(problems(quiet), []);
+});
+
 test('draft.mjs items gives the entry points; the review page counts the walkthrough', () => {
   const dir = extract();
   assert.deepEqual(items(dir, 'extract-billing-invoice').entryPoints, ['src/billing/invoice.php', 'src/billing/invoice.php:save']);
+  write(dir, `${X}/source-map.md`, MAP.replace(/## Entry points[\s\S]*$/, ''));
+  assert.match(items(dir, 'extract-billing-invoice').problems.join('\n'), /source-map.md has no "## Entry points" section/);
+  write(dir, `${X}/source-map.md`, MAP);
   const sum = walkthroughSummary(path.join(dir, X));
   assert.deepEqual([sum.entries, sum.behaviors, sum.counts.covered, sum.counts.other, sum.unwalked.length], [2, 4, 3, 1, 0]);
   render({ root: dir, change: 'extract-billing-invoice', lang: 'ja', now: new Date('2026-11-25T00:00:00Z') });
@@ -137,6 +188,17 @@ test('walkthrough parts merge by entry point: a later part replaces all the rows
   text = fs.readFileSync(path.join(dir, X, 'walkthrough.md'), 'utf8');
   assert.doesNotMatch(text, /\| gap \|/);
   assert.doesNotMatch(text, /saves/);
+  assert.deepEqual(result.dropped, ['`src/billing/invoice.php:save` | rejects -1 | gap']);
+  // Two checkers of one wave walked the same entry point: their rows add up.
+  write(dir, `${W}/04.md`, `${head}${walkRow('src/billing/invoice.php', 'shows 0', 'covered R1: No lines')}`);
+  write(dir, `${W}/05.md`, `${head}${walkRow('src/billing/invoice.php', 'shows the total', 'covered R1: Two lines')}`);
+  result = merge(dir, { into: `${X}/walkthrough.md`, parts: [W], clean: true });
+  assert.deepEqual([result.ok, result.rows, result.replaced], [true, 3, 1]);
+  // A table headed "Entry" is a walkthrough too, for the merge as for the gate.
+  write(dir, `${W}/06.md`, `| Entry | Behavior | Verdict | Evidence |\n|---|---|---|---|\n${walkRow('src/billing/invoice.php', 'shows the total', 'covered R1: Two lines')}`);
+  write(dir, `${X}/walkthrough.md`, '');
+  result = merge(dir, { into: `${X}/walkthrough.md`, parts: [W], clean: true });
+  assert.deepEqual([result.ok, result.entries], [true, 1]);
 });
 
 // ---------------------------------------------------------------- survey crosscheck
@@ -145,6 +207,15 @@ const S = 'openspec/changes/survey';
 const INVENTORY = '| Path | Context | Handling | Notes |\n|---|---|---|---|\n| src/billing/ | billing | port | |\n| src/common/S1.php | platform | port | |\n| src/vendor/ | excluded | | library |\n';
 const CHECK = '# Crosscheck\n\n| Path | Verdict | Evidence |\n|---|---|---|\n| `src/billing/` | confirmed | invoice.php: the page |\n| src/common/S1.php | confirmed | the db helper |\n| src/vendor/ | confirmed | jQuery 1.4 |\n';
 const SURVEY_REVIEW = 'Reviewer: Uma\n\n## 1. Contexts\n- [x] K1 platform: 共通\n- [x] K2 billing: 請求\n\n## 2. Map\n- [x] M1 a\n- [x] M2 b\n- [x] M3 c\n- [x] M4 d\n- [x] M5 e\n\n## 3. Coverage\n- [x] C1 excluded\n';
+
+// The code merge.mjs writes into each crosscheck row: of the inventory row as it is.
+function stamped(text, inventory = INVENTORY) {
+  const rows = new Map(inventoryRows(inventory).map((r) => [r.path.toLowerCase(), r]));
+  return text.replace(/^\|([^|\n]*)\|([^|\n]*)\|/gm, (all, where, verdict) => {
+    const row = rows.get(where.trim().replace(/`/g, '').toLowerCase());
+    return row ? `|${where}| ${verdict.trim()} <!-- row ${surveyRowStamp(row)} --> |` : all;
+  });
+}
 
 function survey({ check = CHECK, reviewText = SURVEY_REVIEW } = {}) {
   const dir = tempDir();
@@ -155,7 +226,7 @@ function survey({ check = CHECK, reviewText = SURVEY_REVIEW } = {}) {
   write(dir, `${S}/inventory.md`, INVENTORY);
   write(dir, `${S}/capabilities.md`, '### platform\n1. `platform/db`\n   - `src/common/`\n\n### billing\n1. `billing/invoice`\n   - `src/billing/`\n');
   write(dir, `${S}/database.md`, '## Databases\nNone\n\n## Logic in the database\nNone\n\n## Missing definitions\nNone\n\n## Snapshot\nsha256: none\n');
-  if (check !== null) write(dir, `${S}/crosscheck.md`, check);
+  if (check !== null) write(dir, `${S}/crosscheck.md`, stamped(check));
   if (reviewText !== null) write(dir, `${S}/review.md`, reviewText);
   return dir;
 }
@@ -169,6 +240,15 @@ test('the survey gate needs one confirmed crosscheck row per inventory row', () 
   assert.match(surveyProblems(survey({ check: `${CHECK}| SRC/vendor/ | confirmed | x |\n` })).join('\n'), /more than one crosscheck row: SRC\/vendor\//);
   const wrong = surveyProblems(survey({ check: CHECK.replace('| src/vendor/ | confirmed | jQuery 1.4 |', '| src/vendor/ | mismatch | lib.php:3 writes orders |') }));
   assert.deepEqual(wrong, ['crosscheck of src/vendor/ is "mismatch"; fix the survey and have a checker judge the row again, or write "question" for the person to decide (item C2)']);
+  assert.deepEqual(surveyProblems(survey({ check: CHECK.replace('| jQuery 1.4 |', '| - |') })), ['crosscheck of src/vendor/ is confirmed with no evidence; say which files the checker read and what it found there']);
+  // A row judged before the inventory row changed, or written without merge.mjs, is not a check of the row as it is.
+  const dir = survey();
+  write(dir, `${S}/inventory.md`, INVENTORY.replace('| library |', '| library, patched |'));
+  assert.deepEqual(surveyProblems(dir), ['inventory row src/vendor/ changed after the crosscheck judged it (context, handling or notes); have a checker judge the row again and merge its part']);
+  write(dir, `${S}/inventory.md`, INVENTORY);
+  write(dir, `${S}/crosscheck.md`, CHECK);
+  assert.equal(surveyProblems(dir).length, 3);
+  assert.match(surveyProblems(dir)[0], /crosscheck row of src\/billing\/ carries no code of the inventory row it judged; merge the checker's part with merge.mjs/);
 });
 
 test('rows left to the person need C2 with the code of the list as it is', () => {
@@ -184,12 +264,12 @@ test('rows left to the person need C2 with the code of the list as it is', () =>
   write(dir, `${S}/review.md`, `${SURVEY_REVIEW}- [x] ${c2[1]}\n`);
   assert.deepEqual(surveyProblems(dir), []);
   // Another row left to the person changes the code: the tick no longer counts.
-  write(dir, `${S}/crosscheck.md`, asked.replace('| src/common/S1.php | confirmed | the db helper |', '| src/common/S1.php | question | also billing? |'));
+  write(dir, `${S}/crosscheck.md`, stamped(asked.replace('| src/common/S1.php | confirmed | the db helper |', '| src/common/S1.php | question | also billing? |')));
   assert.match(surveyProblems(dir).join('\n'), /review item C2 is not for the list as it is now/);
   // A question needs its evidence; a C2 without questions is stale.
-  write(dir, `${S}/crosscheck.md`, CHECK.replace('| src/vendor/ | confirmed | jQuery 1.4 |', '| src/vendor/ | question | |'));
+  write(dir, `${S}/crosscheck.md`, stamped(CHECK.replace('| src/vendor/ | confirmed | jQuery 1.4 |', '| src/vendor/ | question | |')));
   assert.match(surveyProblems(dir).join('\n'), /crosscheck of src\/vendor\/ is a question with no evidence/);
-  write(dir, `${S}/crosscheck.md`, CHECK);
+  write(dir, `${S}/crosscheck.md`, stamped(CHECK));
   assert.match(surveyProblems(dir).join('\n'), /review.md has a C2 item, but the survey crosscheck leaves no row to the person/);
 });
 
@@ -203,6 +283,7 @@ test('survey crosscheck: items lists the rows, parts merge by path, the review p
   const result = merge(dir, { into: `${S}/crosscheck.md`, parts: [W], clean: true });
   assert.equal(result.ok, true, result.problems?.join('\n'));
   assert.equal(result.rows, 3, 'a path like S1.php is a path, not the id S1');
+  assert.match(fs.readFileSync(path.join(dir, S, 'crosscheck.md'), 'utf8'), new RegExp(`\\| src/vendor/ \\| confirmed <!-- row ${surveyRowStamp(inventoryRows(INVENTORY)[2])} --> \\|`));
   const sum = surveyCheckSummary(path.join(dir, S), inventoryRows(INVENTORY));
   assert.deepEqual([sum.rows, sum.confirmed, sum.questions.length, sum.open.length, sum.unchecked.length], [3, 2, 1, 0, 0]);
   render({ root: dir, change: 'survey', lang: 'ja', now: new Date('2026-11-25T00:00:00Z') });

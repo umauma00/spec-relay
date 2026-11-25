@@ -111,9 +111,14 @@ test('survey -> target design -> extract -> review gate -> archive -> port -> am
     'glossary.md': '# Glossary\n',
     'capabilities.md': '# Capabilities\n\n### calc\n1. `calc/add` 足し算\n   - `src/`\n   - `openspec/spec-relay/db/calc/`\n',
     'database.md': `# Databases\n\n## Databases\n| Database | Product and version | Connection setting | Definitions |\n|---|---|---|---|\n| calc | SQL Server 2012 | CalcDb | \`openspec/spec-relay/db/calc/\` |\n\n## Logic in the database\n| Kind | Count | Contexts | Notes |\n|---|---|---|---|\n| trigger | 1 | calc | |\n\n## Missing definitions\nNone\n\n## Snapshot\nsha256: ${databaseHash(dir)}\n`,
-    'crosscheck.md': '| Path | Verdict | Evidence |\n|---|---|---|\n| src/ | confirmed | src/calc.py:1 the adder |\n| openspec/spec-relay/db/calc/ | confirmed | tables.sql: the sums table |\n',
+    // Without the code of the inventory row (merge.mjs writes it below), the gate does not count the check.
+    'crosscheck.md': '| Path | Verdict | Evidence |\n|---|---|---|\n| src/ | confirmed | src/calc.py:1 the adder |\n',
     'review.md': 'Reviewer: Uma\n\n- [x] K1 platform\n- [x] K2 calc\n- [x] M1 map\n- [x] M2 owners\n- [x] M3 glossary\n- [x] M4 capabilities\n- [x] M5 carry\n- [x] C1 inventory\n- [x] D1 calc: definitions\n- [x] D90 missing definitions\n',
   });
+  assert.match(checkReview(dir, 'survey').problems.join('\n'), /crosscheck row of src\/ carries no code of the inventory row/);
+  // The checker's part goes in through merge.mjs, which stamps each row with its inventory row.
+  write(dir, 'openspec/spec-relay/work/survey/crosscheck/01.md', '| Path | Verdict | Evidence |\n|---|---|---|\n| src/ | confirmed | src/calc.py:1 the adder |\n| openspec/spec-relay/db/calc/ | confirmed | tables.sql: the sums table |\n');
+  assert.equal(merge(dir, { into: 'openspec/changes/survey/crosscheck.md', parts: ['openspec/spec-relay/work/survey/crosscheck'], clean: true }).ok, true);
   assert.deepEqual(checkReview(dir, 'survey'), { ok: true, problems: [] });
   openspec(dir, 'archive', 'survey', '--yes');
   write(dir, 'openspec/spec-relay/plan.md', '## Capabilities\n\n### calc\n1. `calc/add` 足し算\n');

@@ -979,7 +979,7 @@ export function untracedEffects(site, refs) {
 
 // Rows are matched by site id: the path ignores letter case (Windows), the
 // symbol does not (Total and total are two methods).
-const ledgerKey = (text) => {
+export const ledgerKey = (text) => {
   const id = text.replace(/<!--[\s\S]*?-->/g, '').trim().replace(/^`(.*)`$/, '$1').trim().replace(/\\\|/g, '|');
   const colon = id.indexOf(':');
   const where = (p) => p.replace(/\\/g, '/').replace(/^(\.\/)+/, '').toLowerCase();

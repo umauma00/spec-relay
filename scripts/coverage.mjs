@@ -315,7 +315,7 @@ export function traceRefs(dir, root = null) {
 // starts no line), or null when it cannot be read. Bytes are enough for every
 // encoding old sources use except UTF-16, which is read by its byte order mark.
 const lineCounts = new Map();
-function lineCount(root, file) {
+export function lineCount(root, file) {
   const full = path.join(root, file);
   let stat;
   try { stat = fs.statSync(full); } catch { return null; }
@@ -456,13 +456,34 @@ export function checkCoverage(root) {
 
 const pathKey = (p) => repoPath(stripComments(p)).toLowerCase();
 
-// The rows of the tables whose first column is Path: { path, key, verdict, evidence }.
+// The rows of the tables whose first column is Path: { path, key, verdict,
+// evidence, stamp }. The stamp (`<!-- row 1a2b3c -->`, which merge.mjs writes
+// into the Verdict cell) is the code of the inventory row the checker judged.
 export function surveyCheckRows(text) {
+  // Comments are gone from the cells headedRows gives, so the stamps are read from the lines.
+  const stamps = new Map();
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const code = /^\s*\|/.test(line) && line.match(ROW_STAMP);
+    if (code) stamps.set(pathKey(line.trim().replace(/^\|/, '').split(/(?<!\\)\|/)[0]), code[1].toLowerCase());
+  }
   return headedRows(text ?? '').filter(({ header }) => /^(path|パス)(?![a-z0-9_])/i.test(header[0] ?? '')).map(({ cells }) => {
     const [where = '', verdict = '', evidence = ''] = cells;
-    return { path: repoPath(stripComments(where)), key: pathKey(where), verdict: plain(verdict).toLowerCase().replace(/[.。]$/, ''), evidence: stripComments(evidence).trim() };
+    const stamp = stamps.get(pathKey(where)) ?? null;
+    return { path: repoPath(stripComments(where)), key: pathKey(where), verdict: plain(stripComments(verdict)).toLowerCase().replace(/[.。]$/, ''), evidence: stripComments(evidence).trim(), stamp };
   }).filter((row) => row.key);
 }
+
+export const ROW_STAMP = /<!--\s*row\s+([0-9a-f]{6})\s*-->/i;
+
+// The code of what an inventory row says (its context, handling and notes): a
+// crosscheck row judged a row as it was, so a row changed since needs a new look.
+export const surveyRowStamp = (row) => crypto.createHash('sha256').update([row.context, row.handling, row.notes].map((c) => String(c ?? '').trim().toLowerCase()).join('\n')).digest('hex').slice(0, 6);
+
+// An Evidence cell that says nothing: empty, a dash, n/a, none, a lone mark.
+const saysNothing = (cell) => {
+  const t = stripComments(cell).replace(/[`'"*_]/g, '').trim();
+  return PLACEHOLDER.test(t) || /^(?:[-–—―‐ー.。?？!・…]+|none|nothing|nil|null|na|ok|なし|無し|特になし|不明)$/i.test(t);
+};
 
 // A short code for the list the person decides with C2, as sites.mjs codes C1:
 // a list that changed, even to one of the same length, needs a new look.
@@ -474,7 +495,8 @@ export const SURVEY_CHECK_VERDICTS = ['confirmed', 'question'];
 export function surveyQuestionWording(rows) {
   const asked = rows.filter((r) => r.verdict === 'question');
   if (!asked.length) return null;
-  return `C2 The survey crosscheck leaves ${asked.length} row${asked.length === 1 ? '' : 's'} for you to decide (list ${listCode(asked.map((r) => r.key))})`;
+  // The code covers what the checker found too: new findings on the same rows need a new look.
+  return `C2 The survey crosscheck leaves ${asked.length} row${asked.length === 1 ? '' : 's'} for you to decide (list ${listCode(asked.map((r) => `${r.key}\t${r.evidence.replace(/\s+/g, ' ')}`))})`;
 }
 
 // Survey review: one crosscheck row per inventory row, each `confirmed` or a
@@ -488,18 +510,28 @@ export function checkSurveyCrosscheck(dir, inventory, boxes, problems) {
   const duplicates = new Set();
   for (const row of rows) { if (byKey.has(row.key)) duplicates.add(row.path); byKey.set(row.key, row); }
   const listed = new Set(inventory.map((r) => r.path.toLowerCase()));
+  const stamps = new Map(inventory.map((r) => [r.path.toLowerCase(), surveyRowStamp(r)]));
   capped(problems, inventory.filter((r) => !byKey.has(r.path.toLowerCase())).map((r) => r.path), (p) => `inventory row has no crosscheck row: ${p} (have a checker judge it)`);
   capped(problems, [...duplicates], (p) => `inventory row has more than one crosscheck row: ${p}; keep only the current verdict`);
   capped(problems, rows.filter((r) => !listed.has(r.key)).map((r) => r.path), (p) => `crosscheck.md has a row for ${p}, which is not a row of inventory.md (a mistyped path, or a row that moved: delete it, and check the new row)`);
   const bad = [];
+  const stale = [];
+  const unstamped = [];
   for (const row of [...byKey.values()].filter((r) => listed.has(r.key))) {
-    if (row.verdict === 'confirmed') continue;
+    if (!row.stamp) unstamped.push(row.path);
+    else if (row.stamp !== stamps.get(row.key)) stale.push(row.path);
+    if (row.verdict === 'confirmed') {
+      if (saysNothing(row.evidence)) bad.push(`crosscheck of ${row.path} is confirmed with no evidence; say which files the checker read and what it found there`);
+      continue;
+    }
     if (row.verdict === 'question') {
-      if (PLACEHOLDER.test(row.evidence.replace(/[`*_]/g, '').trim())) bad.push(`crosscheck of ${row.path} is a question with no evidence; say what the checker found and what the person decides`);
+      if (saysNothing(row.evidence)) bad.push(`crosscheck of ${row.path} is a question with no evidence; say what the checker found and what the person decides`);
       continue;
     }
     bad.push(`crosscheck of ${row.path} is "${row.verdict || 'blank'}"; fix the survey and have a checker judge the row again, or write "question" for the person to decide (item C2)`);
   }
+  capped(problems, unstamped, (p) => `crosscheck row of ${p} carries no code of the inventory row it judged; merge the checker's part with merge.mjs, which writes it (<!-- row ... -->)`);
+  capped(problems, stale, (p) => `inventory row ${p} changed after the crosscheck judged it (context, handling or notes); have a checker judge the row again and merge its part`);
   capped(problems, bad, (p) => p);
   const wording = surveyQuestionWording([...byKey.values()].filter((r) => listed.has(r.key)));
   if (wording && boxes) {

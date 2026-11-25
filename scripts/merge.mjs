@@ -7,8 +7,9 @@
 // Used for the survey's inventory.md and crosscheck.md (rows keyed by path),
 // for crosscheck.md of the other changes (a table whose first column is `Item`,
 // rows keyed by R<n> / S<n>), for coverage.md (keyed by site), and for an
-// extract's walkthrough.md (any number of rows per entry point: a part's rows
-// for an entry point replace all the rows that entry point had). A port
+// extract's walkthrough.md (any number of rows per entry point: the rows one
+// merge brings for an entry point, from all its parts together, replace all the
+// rows that entry point had; merge each wave of checkers on its own). A port
 // change's crosscheck.md also gets a stamp with the hash of the target code it
 // was merged on (`<!-- spec-relay: code checked sha256:... -->`), which
 // gate.mjs port-done compares with the code as it is.
@@ -34,7 +35,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readIf, changeSchema, plain, norm, targetHash, CODE_STAMP } from './gate.mjs';
+import { readIf, changeSchema, plain, norm, targetHash, CODE_STAMP, inventoryRows } from './gate.mjs';
+import { surveyRowStamp, ROW_STAMP } from './coverage.mjs';
+import { WALK_HEADER, parseWalkVerdict } from './walkthrough.mjs';
 
 const SEPARATOR = /^\s*\|?\s*:?-{2,}/;
 const cellsOf = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
@@ -170,7 +173,19 @@ export function merge(root, { into, parts, clean = false }) {
   const byId = table.names[0] === 'item' || (path.basename(into).toLowerCase() === 'crosscheck.md' && !/^(path|パス)$/.test(table.names[0]));
   // A walkthrough lists several behaviors per entry point: rows are grouped by
   // the entry point, and a later part (a walk again after a fix) replaces the group.
-  if (table.names[0] === 'entry point' || table.names[0] === '入口') return writeGrouped(root, { into, target, lines, table, incoming, files, parts, clean, eol });
+  if (WALK_HEADER.test(table.names[0] ?? '')) return writeGrouped(root, { into, target, lines, table, incoming, files, parts, clean, eol });
+  // The survey's crosscheck judges inventory rows as they are now: each incoming
+  // row gets the code of its inventory row, so gate.mjs sees a row that changed later.
+  if (!byId && changeSchema(path.dirname(target)) === 'spec-relay-survey' && path.basename(into).toLowerCase() === 'crosscheck.md') {
+    const inventory = new Map(inventoryRows(readIf(path.join(path.dirname(target), 'inventory.md'), []) ?? '').map((r) => [r.path.toLowerCase(), r]));
+    for (const item of incoming) {
+      const cells = cellsOf(item.row);
+      const row = inventory.get(rowKey(item.row, false).key);
+      if (!row || cells.length < 2) continue;
+      cells[1] = `${cells[1].replace(new RegExp(ROW_STAMP.source, 'gi'), '').trim()} <!-- row ${surveyRowStamp(row)} -->`;
+      item.row = `| ${cells.join(' | ')} |`;
+    }
+  }
   const rows = new Map();
   const claim = (row, where) => {
     const { key, name } = rowKey(row, byId);
@@ -237,20 +252,28 @@ function writeGrouped(root, { into, target, lines, table, incoming, files, parts
     groups.get(key).push(row);
   }
   let added = 0; let replaced = 0;
-  const byFile = new Map();
+  // Two checkers of one wave may both walk an entry point (a shared handler):
+  // their rows add up. A walk again after a fix is merged on its own and replaces.
+  const fresh = new Map();
   for (const { row, file } of incoming) {
     const { key } = rowKey(row, false);
     if (!key) return { ok: false, problems: [`${show(file)}: row has an empty first cell: ${row}`] };
-    if (!byFile.has(file)) byFile.set(file, new Map());
-    const mine = byFile.get(file);
-    if (!mine.has(key)) mine.set(key, []);
-    mine.get(key).push(row);
+    if (!fresh.has(key)) fresh.set(key, []);
+    if (!fresh.get(key).includes(row)) fresh.get(key).push(row);
   }
-  for (const mine of byFile.values()) {
-    for (const [key, rows] of mine) {
-      if (groups.has(key)) replaced += 1; else added += 1;
-      groups.set(key, rows);
-    }
+  // A gap or a vague row that a walk again leaves out must have been fixed in the
+  // spec: the orchestrator confirms each one instead of letting it vanish.
+  const dropped = [];
+  for (const [key, rows] of fresh) {
+    if (groups.has(key)) {
+      replaced += 1;
+      for (const old of groups.get(key)) {
+        const cells = cellsOf(old);
+        const kind = parseWalkVerdict(cells[2] ?? '').kind;
+        if ((kind === 'gap' || kind === 'vague') && !rows.includes(old)) dropped.push(`${visible(cells[0])} | ${visible(cells[1] ?? '')} | ${visible(cells[2] ?? '')}`);
+      }
+    } else added += 1;
+    groups.set(key, rows);
   }
   const sorted = [...groups.keys()].sort(compareKeys).flatMap((key) => groups.get(key));
   const head = lines.slice(0, table.start);
@@ -262,7 +285,7 @@ function writeGrouped(root, { into, target, lines, table, incoming, files, parts
   if (!text.endsWith(eol)) text += eol;
   try { fs.writeFileSync(target, text, 'utf8'); } catch (e) { return { ok: false, problems: [`could not write ${into}: ${e.message}`] }; }
   if (clean) cleanParts(root, files, parts);
-  return { ok: true, into: show(target), rows: sorted.length, entries: groups.size, added, replaced, parts: files.map(show), ...(clean ? { cleaned: true } : {}), problems: [] };
+  return { ok: true, into: show(target), rows: sorted.length, entries: groups.size, added, replaced, ...(dropped.length ? { dropped, note: 'these gap or vague rows are gone after the walk again: confirm the spec now states each behavior' } : {}), parts: files.map(show), ...(clean ? { cleaned: true } : {}), problems: [] };
 }
 
 function cleanParts(root, files, parts) {

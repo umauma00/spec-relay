@@ -130,8 +130,10 @@ verdict, every `gap` row, and how many source files you read.
 When the task says `walkthrough` and gives you entry points, you review the
 specs from the outside in. You get the change's specs, screens.md and
 source-map.md, the numbered requirement and screen names, the capabilities of
-the plan that own parts of shared files, and your entry points. You do not get
-trace.md: find the code yourself, from the entry point.
+the plan that own parts of shared files, and your entry points. Do not open
+trace.md, coverage.md, crosscheck.md or the analysts' notes, even when they are
+in the folder: find the code yourself, from the entry point, so that you do
+not follow the analysts into the same blind spot.
 
 For every entry point, start where a user or caller enters (the page, the
 button's or menu's handler, the route, the job, the public function) and
@@ -169,7 +171,12 @@ Then name where the specs state it:
 The table is `| Entry point | Behavior | Verdict | Evidence |`: the entry point
 id in every row, exactly as the task gives it (backticks included), one short
 behavior per row, the verdict alone in its cell, and `path:line - what the code
-does` as the evidence. When you find an entry point that is not in your list
+does` as the evidence (a path with spaces in backticks). Cite the line that
+does it, also in other files: the write, the mail, the throw, the redirect, not
+only the call that leads there. The gate checks that each cited file and line
+exists, that every requirement is named by some row, and that every effect line
+of a site the omission check judged covered is cited by some row, so a walk
+that stops at the first file fails. When you find an entry point that is not in your list
 (a handler the source map left out), walk it too and write its id as
 `path:symbol`. Be strict: a behavior is covered only by a scenario that would
 fail if the code stopped doing it. When the task names an entry point to walk
@@ -203,7 +210,8 @@ of the rest to judge them). For each row decide:
 
 Write your verdict file as one Markdown table, `| Path | Verdict | Evidence |`,
 one row per inventory row you were given, with its path exactly as the task
-gives it. Give evidence in every row (for `confirmed`, the files you read and
+gives it, in a part file the orchestrator merges with merge.mjs (which records
+the inventory row you judged; a row that changes later is judged again). Give evidence in every row (for `confirmed`, the files you read and
 what they hold, in a few words). Return the file's path, the number of rows
 per verdict, every row that is not `confirmed`, and how many source files you
 read.

@@ -104,7 +104,10 @@ export function items(root, change) {
     requirements = changeRequirements(dir, problems);
     if (schema === 'spec-relay-extract') {
       screens = screenNames(readIf(path.join(dir, 'screens.md'), problems) ?? '');
-      entries = (entryPoints(readIf(path.join(dir, 'source-map.md'), problems) ?? '') ?? []).map((e) => e.id);
+      const map = readIf(path.join(dir, 'source-map.md'), problems);
+      const listed = map === null ? [] : entryPoints(map);
+      if (listed === null) problems.push('source-map.md has no "## Entry points" section: the analyst lists every way in there (path:symbol - how callers reach it), or "- None (why)"; the walkthrough starts from it');
+      entries = (listed ?? []).map((e) => e.id);
     }
   } else if (schema === 'spec-relay-port') {
     const capability = portCapability(root, change);
