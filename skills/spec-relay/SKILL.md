@@ -77,7 +77,10 @@ need the reasoning behind a step.
   `spec-relay-port`). Implements the baseline spec (step 5).
 - **Amend change**: `openspec/changes/amend-<capability>` (schema
   `spec-relay-amend`). Corrects a baseline spec that misread or left out what
-  the source code does.
+  the source code does. An amendment has no screens.md: when its capability's
+  extract says it has no screens and the correction is behaviour a user sees
+  on a screen, extract the capability again (`extract-<capability>-v<n>`)
+  so the person reviews the screen, instead of amending.
 - **Finish change**: `openspec/changes/finish` (schema `spec-relay-finish`).
   Once every capability is ported: the whole-system checks, the leftovers and
   the hand-over report (step 6). Archiving it completes the migration.
@@ -974,7 +977,10 @@ changes no behavior.
    run leaves that cell open (or writes `fail` when the level failed in
    another port) and names the port in `problems`: ask the person whether to
    add the command through a port change. Write not-run only when the level
-   truly cannot run, never over a failure in another port. A context without a
+   truly cannot run, never over a failure in another port. A capability
+   whose extract says it has no screens runs no B2 or C, and a context
+   whose every capability has none gets `-` for them in the draft (with a
+   note); leave that `-` as it is. A context without a
    capability of its own gets the Test command's result as its A. For each
    cross-context flow, name the test that covers it, or `none`. A
    failure is fixed, never accepted: show it to the person and fix it through

@@ -63,6 +63,11 @@ test('an archive waits for a passing gate, a change name and the orchestrator', 
   // Changes that are not spec-relay's are left to OpenSpec.
   write(dir, 'openspec/changes/add-login/.openspec.yaml', 'schema: spec-driven\n');
   assert.equal(shell(dir, 'openspec archive add-login --yes'), null);
+  // A change with a kit step's name is that step, whatever schema it claims.
+  write(dir, 'openspec/changes/extract-billing-invoice-v2/.openspec.yaml', 'schema: spec-driven\n');
+  assert.match(shell(dir, 'openspec archive extract-billing-invoice-v2 --yes --skip-specs'), /has the name of a spec-relay step but the schema spec-driven: create it with the schema spec-relay-extract/);
+  write(dir, 'openspec/changes/target-design/.openspec.yaml', 'schema: spec-driven\n');
+  assert.match(shell(dir, 'openspec archive target-design --yes'), /schema spec-relay-target/);
   assert.equal(shell(dir, 'openspec list --json'), null);
   // A port archive needs gate.mjs port-done.
   write(dir, 'openspec/changes/port-billing-invoice/.openspec.yaml', 'schema: spec-relay-port\n');

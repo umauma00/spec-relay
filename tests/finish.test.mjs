@@ -117,6 +117,8 @@ test('a context whose every capability has no screens drops B2 and C; one screen
   // The extract's screens.md is not None (here: missing), so B2 and C stay.
   assert.deepEqual(collect(dir).levels[1], { context: 'billing', chosen: ['A', 'B1', 'B2', 'C'] });
   write(dir, 'openspec/changes/archive/2026-11-03-extract-billing-invoice/screens.md', '# Screens\n\nNone\n');
+  write(dir, 'openspec/changes/archive/2026-11-03-extract-billing-invoice/.openspec.yaml', 'schema: spec-relay-extract\n');
+  write(dir, 'openspec/changes/archive/2026-11-03-extract-billing-invoice/review.md', 'Reviewer: Uma\n- [x] R1 a\n- [x] S0 This capability has no screens\n');
   const facts = collect(dir);
   assert.deepEqual(facts.levels[1], { context: 'billing', chosen: ['A', 'B1'], notApplicable: ['B2', 'C'] });
   write(dir, `${F}/.openspec.yaml`, 'schema: spec-relay-finish\n');

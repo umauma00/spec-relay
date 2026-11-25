@@ -201,6 +201,9 @@ test('screens need review items and crosscheck rows; crosscheck verdicts must be
   problems = checkReview(repo(GOOD.replace('- [x] S0', '- [ ] S0')), 'extract-calc').problems.join('\n');
   assert.match(problems, /not ticked: S0 This capability has no screens/);
   assert.ok(checkReview(repo(GOOD, { screens: '# Screens\r\n\r\nNone.\r\n' }), 'extract-calc').ok);
+  // S0 confirms exactly that there are no screens, not something else.
+  problems = checkReview(repo(GOOD.replace('S0 This capability has no screens', 'S0 Screens look fine')), 'extract-calc').problems.join('\n');
+  assert.match(problems, /the S0 item must read "S0 This capability has no screens", not "S0 Screens look fine"/);
 
   assert.match(checkReview(repo(GOOD, { screens: null }), 'extract-calc').problems.join(), /screens.md is missing/);
   assert.match(checkReview(repo(GOOD, { crosscheck: null }), 'extract-calc').problems.join(), /crosscheck.md is missing/);

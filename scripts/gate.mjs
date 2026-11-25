@@ -386,12 +386,21 @@ export function noScreens(text) {
 }
 
 // The screens of a capability, from the screens.md of its newest archived
-// extract (reviewed by the person): { extract, screens, none }, where `none`
-// is true only when that file exists and says None.
-export function capabilityScreens(root, capability) {
+// extract: { extract, screens, none }. `none` is true only when that file says
+// None and the folder is a reviewed extract: it names the extract schema and
+// its review.md has a reviewer and no open item. A folder dropped into the
+// archive by other means keeps the screen levels.
+export function capabilityScreens(root, capability, problems = []) {
   const extract = archivedChange(root, `extract-${capabilitySegments(capability).join('-')}`);
-  const text = extract ? readIf(path.join(extract, 'screens.md'), []) : null;
-  return { extract: extract ? path.relative(root, extract).split(path.sep).join('/') : null, screens: screenNames(text ?? ''), none: noScreens(text) };
+  const text = extract ? readIf(path.join(extract, 'screens.md'), problems) : null;
+  const meta = extract ? readIf(path.join(extract, '.openspec.yaml'), []) ?? '' : '';
+  const reviewed = () => {
+    if (!/^schema:\s*["']?spec-relay-extract["']?\s*$/m.test(meta)) return false;
+    const found = [];
+    const boxes = commonReview(extract, found);
+    return boxes !== null && boxes.length > 0 && found.length === 0;
+  };
+  return { extract: extract ? path.relative(root, extract).split(path.sep).join('/') : null, screens: screenNames(text ?? ''), none: noScreens(text) && reviewed() };
 }
 
 // Every requirement and screen needs a crosscheck row whose verdict is
@@ -447,7 +456,8 @@ function checkExtract(root, dir, boxes, problems) {
   problems.push(...requireItems(boxes, 'S', screens, 'screen', 'screens.md'));
   // "None" is a finding the person confirms: every port of the capability then
   // skips the screen levels (B2, C) of its context.
-  const s0 = boxes.filter((b) => /^S0\b/i.test(b.plain));
+  const s0 = boxes.filter((b) => /^S0+\b/i.test(b.plain));
+  for (const box of s0.filter((b) => withoutId(b.plain, 'S') !== norm(NO_SCREENS_ITEM.replace(/^S0\s+/, '')))) problems.push(`the S0 item must read "${NO_SCREENS_ITEM}", not "${box.body}" (draft.mjs review --update)`);
   if (noScreens(screensText) && s0.length === 0) problems.push(`screens.md says None, but review.md has no S0 item to confirm it: add "- [ ] ${NO_SCREENS_ITEM}" under "2. Screens" (draft.mjs review --update); without screens, the ports of this capability skip the screen levels B2 and C`);
   if (screens.length && s0.length) problems.push('review.md has an S0 item (no screens), but screens.md lists screens: number the screens from S1 and drop the S0 item (draft.mjs review --update)');
 
@@ -1284,6 +1294,20 @@ export function designCommands(text) {
   return out;
 }
 
+// The levels the Verification table of a port's design.md has a row for,
+// with a command or without one.
+function designLevelRows(text) {
+  const out = new Set();
+  for (const table of tablesWithHeader(text)) {
+    if (!/^level|^方式|^比べ方/.test(table.header[0] ?? '')) continue;
+    for (const row of table.rows) {
+      const level = plain(row[0] ?? '').match(/^(A|B1|B2|C)\b/i)?.[1]?.toUpperCase();
+      if (level) out.add(level);
+    }
+  }
+  return out;
+}
+
 const levelName = (level) => (level === 'boundary' ? 'the boundary check' : `level ${level}`);
 
 // How a scenario is checked: `e2e` (a Playwright screen test that passed on the
@@ -1325,15 +1349,22 @@ export function verifyPlan(root, change, capability = portCapability(root, chang
   if (conventions === null) problems.push('no archived target design with conventions.md');
   if (verification === null) problems.push('no archived target design with verification.md');
   const commands = conventionCommands(conventions);
-  const design = designCommands(readIf(path.join(dir, 'design.md'), problems) ?? '');
+  const designText = readIf(path.join(dir, 'design.md'), problems) ?? '';
+  const design = designCommands(designText);
   const { levels, notApplicable, extract } = portLevels(root, capability, verification, problems);
   if (verification !== null && levels === null) problems.push(`verification.md of the archived target design has no row for context ${context} in a table with B1, B2 and C columns`);
-  // Without screens, a screen level's command or a screen test would check
-  // something the reviewed spec does not have.
-  for (const level of notApplicable) {
-    if (design[level]) problems.push(`level ${level} does not apply to ${capability}: the screens.md of its archived extract (${extract}) says None; remove the ${level} row from design.md's Verification table`);
+  // Without screens, a screen level's row, an e2e scenario or a screen test
+  // would check something the reviewed spec does not have. An archived port
+  // (the finish step) cannot be changed any more: its screen levels just do
+  // not run.
+  const active = !/^archive[\\/]/.test(change);
+  const rows = designLevelRows(designText);
+  for (const level of active ? notApplicable : []) {
+    if (rows.has(level)) problems.push(`level ${level} does not apply to ${capability}: the screens.md of its archived extract (${extract}) says None; remove the ${level} row from design.md's Verification table`);
   }
-  if (notApplicable.length) {
+  if (active && notApplicable.length) {
+    const e2e = (designScenarioChecks(designText) ?? []).filter((row) => row.check === 'e2e');
+    if (e2e.length) problems.push(`${capability} has no screens (the screens.md of ${extract} says None), but design.md's Scenario checks gives e2e to ${e2e.length} scenario${e2e.length === 1 ? '' : 's'} (${e2e.slice(0, 3).map((r) => `"${r.scenario}"`).join(', ')}${e2e.length > 3 ? ', ...' : ''}): check them by unit or compare`);
     const target = path.resolve(root, relPath(cleanValue(configValue(root, 'Target root', ''))) || '.');
     const tests = screenTestFiles(target, capability);
     if (tests.length) problems.push(`the screens.md of the archived extract of ${capability} (${extract}) says None, but ${E2E_DIR}/${capabilityFolder(capability)}/ holds screen tests (${tests.slice(0, 5).join(', ')}${tests.length > 5 ? ', ...' : ''}): when the capability has screens, extract it again so they are recorded and reviewed; otherwise remove the tests`);
@@ -1698,7 +1729,7 @@ function checkPortEvidence(root, change, dir, capability, problems) {
   const followUp = [...new Set(todos.filter((t) => accepted.get(t.file) === true).map((t) => t.file))];
 
   // 4. The independent crosscheck of the port, merged on the code as it is now.
-  const { screens } = capabilityScreens(root, capability);
+  const { screens } = capabilityScreens(root, capability, problems);
   const crosscheck = readIf(path.join(dir, 'crosscheck.md'), []);
   checkCrosscheck(dir, requirementNames(spec), screens, problems);
   if (crosscheck !== null && files !== null) {

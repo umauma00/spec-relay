@@ -94,8 +94,8 @@ artifacts:
         A and one for each of B1, B2 and C that verification.md chose for this
         context, with what it covers here. When the screens.md of the
         capability's archived extract says None, B2 and C do not apply: no
-        row for them (`gate.mjs port-done` stops on one), and no scenario is
-        `e2e`. Command is the one-line command
+        row for them, with or without a command, and no scenario is `e2e`
+        (`verify.mjs` and `gate.mjs port-done` stop on either). Command is the one-line command
         that runs the level in the target root (PowerShell on Windows); for A
         leave it empty to use conventions.md's Test command. Add a
         `Boundary check` row with a command only when conventions.md's does
@@ -183,7 +183,8 @@ artifacts:
         and its database is at the starting state; no driver is written, and
         a second task writes the map when design.md names one. Give each
         request or input of a `compare` scenario its tag in a `"scenario"`
-        key (`http.mjs record` keeps it in the case). For B2: one task writes
+        key (`http.mjs record` keeps it in the case). For B2 (never for a
+        capability whose extract's screens.md says None): one task writes
         the screen tests in `tests/e2e/<capability with - for />/`
         (`node "<kit>/scripts/e2e.mjs" init` creates `tests/e2e/` the first
         time, then `npm ci` there), one Playwright test per `e2e` scenario,
@@ -226,7 +227,10 @@ artifacts:
       the trace cites and the new code side by side, and the tests tagged for
       its scenarios (screen tests in `tests/e2e/` too), and the row of each
       scenario in design.md's Scenario checks (a scenario a user performs on
-      a web screen is `e2e` when B2 was chosen), and decides:
+      a web screen is `e2e` when B2 was chosen; when the extract's
+      screens.md says None and a scenario is still performed on a screen,
+      report a `mismatch` saying the capability has a screen and needs a new
+      extract, not that the check should be `e2e`), and decides:
       - `confirmed`: the new code does what the source code does, for every
         scenario and for the inputs the scenarios do not show (rounding, null
         and empty values, encodings, dates, ordering, errors, as listed in
