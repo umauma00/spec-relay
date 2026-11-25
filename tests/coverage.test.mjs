@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { capabilitySources, ownersOf, checkCoverage, checkTrace, contextOf, inventoryRows } from '../scripts/coverage.mjs';
+import { capabilitySources, ownersOf, checkCoverage, checkTrace, contextOf, inventoryRows, traceRefs } from '../scripts/coverage.mjs';
 import { checkReview, main } from '../scripts/gate.mjs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -120,9 +120,46 @@ test('the extract gate needs a trace row with existing source files for every re
   assert.deepEqual(problems(dir), ['trace.md is missing']);
 });
 
+test('trace references to files without an extension, dotfiles, dotted folders and backslashes pass the gate', () => {
+  const files = ['src/billing/Makefile', 'src/billing/.gitignore', 'src/billing/v1.2/Dockerfile', 'src/billing/bin/console'];
+  const dir = project({ sourceMap: ['src/billing/invoice.php', 'src/billing/print.php', ...files] });
+  for (const f of files) write(dir, f, 'a\nb\nc\nd\n');
+  write(dir, `${CHANGE}/coverage.md`, `| Site | Verdict | Evidence |\n|---|---|---|\n${files.map((f) => `| \`${f}:(file)\` | covered: R1 | x |`).join('\n')}\n`);
+  const trace = (source) => write(dir, `${CHANGE}/trace.md`, `| Requirement | Source | Existing tests |\n|---|---|---|\n| Total | ${source} | none |\n`);
+  // Each alone: a cell whose only reference was dropped used to stop the gate.
+  for (const source of ['src/billing/Makefile:build:2-3', 'src/billing/.gitignore:1-2', 'src\\billing\\v1.2\\Dockerfile:4', 'src/billing/bin/console:main']) {
+    trace(source);
+    assert.deepEqual(problems(dir), [], source);
+  }
+  // Together: none is dropped beside another.
+  trace('`src/billing/Makefile:build:2-3`<br>src/billing/.gitignore:1-2; src\\billing\\v1.2\\Dockerfile:4, src/billing/bin/console:main');
+  assert.deepEqual(problems(dir), []);
+  assert.deepEqual(traceRefs(path.join(dir, CHANGE), dir).get('total').map((r) => r.file), files);
+  trace('src/billing/Makefile:2-9');
+  assert.deepEqual(problems(dir), ['the trace of "Total" gives src/billing/Makefile the lines 2-9, but the file has 4 lines']);
+  trace('src/billing/.gitignore');
+  assert.deepEqual(problems(dir), ['the trace of "Total" names only the file src/billing/.gitignore; add the symbol or the lines (path:symbol:lines)']);
+  trace('src/billing/GNUmakefile:1');
+  assert.deepEqual(problems(dir), ['the trace of "Total" points to src/billing/GNUmakefile, which does not exist']);
+  // A "," or a note inside a cell is not a file: cells that passed before still pass.
+  for (const source of ['src/billing/invoice.php:Page_Load, btnSave_Click:3-9', 'src/billing/invoice.php:total(int $qty, \\App\\Money $rate):3-9', 'src/billing/invoice.php:Invoice.total:3<br>注: 税は別']) {
+    trace(source);
+    assert.deepEqual(problems(dir), [], source);
+  }
+  for (const prose of ['see the Makefile', '注: 税は別', 'InvoiceController:index', 'src/billing:Invoice.total', 'Billing::Total', 'TODO: fill in later', 'n/a']) {
+    trace(prose);
+    assert.deepEqual(problems(dir), ['the trace row of "Total" names no source location (path:symbol:lines)'], prose);
+  }
+});
+
 test('reading listings: first path of an item, tabs, items that end a capability, links and symbols', () => {
   const text = '1. `billing/invoice`\n   - `src/common/God.php` (`formatMoney`, `roundTax`)\n\t- `src/tabbed/`\n   - [src/linked.php](../src/linked.php)\n   - N/A\n   - src/print/, and its helpers\n2. **`billing/tax`** 税\n   - `src/tax/`\n';
   assert.deepEqual([...capabilitySources(text)], [['billing/invoice', ['src/common/God.php', 'src/tabbed/', 'src/linked.php', 'src/print/']]]);
+});
+
+test('reading listings: dotfiles and backticked files without an extension', () => {
+  const text = '1. `ops/build`\n   - .gitignore\n   - .editorconfig (root)\n   - `Makefile` (build)\n   - `docker\\Dockerfile`\n   - Makefile and friends\n   - .. and more\n   - Billing\\Invoice 名前空間のクラス\n';
+  assert.deepEqual([...capabilitySources(text)], [['ops/build', ['.gitignore', '.editorconfig', 'Makefile', 'docker/Dockerfile']]]);
 });
 
 test('source maps: the Source files table only, any letter case, rows marked out of scope do not count', () => {

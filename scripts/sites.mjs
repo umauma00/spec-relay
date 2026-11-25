@@ -1087,7 +1087,7 @@ export function checkLedger(root, dir, { requirements, screens, asked, assignmen
   capped(problems, [...rows.keys()].filter((key) => !ids.has(key)).map((key) => rows.get(key).site), (site) => `coverage.md has a row for a site the scanner does not find: ${site} (a mistyped id, a renamed member, or a file no longer in source-map.md; delete the row)`);
   const bad = [];
   const others = new Map();
-  const traced = traceRefs(dir);
+  const traced = traceRefs(dir, root);
   const refsOf = (ref) => traced.get(traceKey(requirements[Number(ref.slice(1)) - 1])) ?? [];
   const quiet = [];
   for (const site of sites) {
@@ -1180,7 +1180,7 @@ export function ledgerSummary(root, dir) {
   if (text === null) return null;
   const counts = { covered: 0, 'no-behavior': 0, other: 0, question: 0, gap: 0, open: 0 };
   const questions = []; const unmarked = []; const open = []; const quiet = [];
-  const traced = traceRefs(dir);
+  const traced = traceRefs(dir, root);
   const names = specRequirements(dir, []).map((r) => r.name);
   for (const site of sites) {
     const row = rows.get(ledgerKey(site.id));
@@ -1211,7 +1211,7 @@ export function writeParts(root, change, per = 40) {
   fs.mkdirSync(out, { recursive: true });
   const parts = [];
   // Effect lines that the trace of no requirement reaches: behavior the specs most likely left out.
-  const allRefs = [...traceRefs(dir).values()].flat();
+  const allRefs = [...traceRefs(dir, root).values()].flat();
   let untraced = 0;
   for (const s of sites) untraced += untracedEffects(s, allRefs).length;
   for (let k = 0; k * per < sites.length; k += 1) {
