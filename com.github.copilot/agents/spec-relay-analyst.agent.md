@@ -66,7 +66,8 @@ instructions), and the exact file paths you may write.
   file for it; when only the person can know the answer, recommend what the
   code suggests and write "a guess from the code" in Why. Give the other
   choices honestly, each with what follows from it. Never recommend a `new`
-  screen look, and never leave Answer filled: the person answers.
+  screen look, and never write or change an Answer line: the person's
+  answers stay as they are when you update an entry.
 - **Corrections**: when the task gives a reviewer's request (a `fix:` line),
   change only what it asks for in the files named, keep every other line,
   and say in your report, in one line, what you changed.

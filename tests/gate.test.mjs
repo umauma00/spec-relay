@@ -597,7 +597,7 @@ test('next separates what the person decides from what the agent fixes, in the p
   assert.deepEqual(ja.person, [
     'レビューで未承認の項目が 2 件あります（R1, Q1）。チャットで承認を伝えるか、review.md で自分でチェックしてください。',
     'review.md に承認者の名前（Reviewer:）がありません。記録する名前を教えてください。',
-    '判断がまだの質問があります（Q1）。新しいシステムでどうするかを決めてください。',
+    '判断がまだの質問があります（Q1）。新しいシステムでどうするかを決めてください（各質問に AI の推奨と理由があります）。',
   ]);
   assert.deepEqual(ja.agent, []);
   write(dir, `${CHANGE}/crosscheck.md`, '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 Add two numbers | mismatch | x |\n| R2 Reject text | confirmed | x |\n');

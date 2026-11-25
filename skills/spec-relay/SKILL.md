@@ -361,10 +361,14 @@ why, so that they can take it in one step:
 3. When only the person can know the answer (who uses the screens, whether the
    old system still runs, a business rule), recommend what the code suggests
    and say that it is a guess from the code; when nothing suggests anything,
-   say so instead of recommending.
-4. A recommendation is never the answer: wait for theirs. Never recommend what
-   the kit leaves to the person alone (a `new` screen look, leaving a file out),
-   and never present a choice the kit forbids (skipping a gate).
+   say so and what would decide it instead of recommending (in questions.md,
+   `Recommended: none` with the reason).
+4. A recommendation is never the answer: wait for theirs. Never recommend a
+   `new` screen look (only the person picks it), and never present a choice
+   the kit forbids (skipping a gate). Questions that come in sets (the levels
+   or the screen policy of each context) are one question whose recommended
+   choice is "all as recommended", with the list in the question, and a
+   choice to change some of them.
 
 ## Reviews: what every human review shares
 
@@ -389,7 +393,8 @@ you assist. This gate is the point of the kit.
    the person's own edit. You cannot write through it. `invoke_canvas_action`
    `get_review_edits` lists what they changed there.
 2. Ask how they want to review. Offer these choices, with these words (the
-   first only when the canvas is available), and never pick for them:
+   first only when the canvas is available), recommending the first one that
+   is available (it records every answer for them), and never pick for them:
    - ja: 「HTML ビューでレビュー（チャットの横に画面を開き、ボタンで確認・修正の依頼・保留を記録）」
      / en: "Review in the HTML view (a page beside the chat; buttons record
      confirm, needs a change, on hold)"
@@ -454,7 +459,7 @@ you assist. This gate is the point of the kit.
 4. When every box is ticked, or the person says the review is complete (a
    `[canvas] ... のレビューが終わりました` / `[canvas] The review of ... is
    complete` message from the HTML view's button, or 「<change> のレビュー完了」
-   in the chat), read `review.md` again and run `node "<kit>/scripts/gate.mjs" review --change
+   / "Review of <change> complete" in the chat), read `review.md` again and run `node "<kit>/scripts/gate.mjs" review --change
    <change>`. `node "<kit>/scripts/openspec.mjs" archive --yes` checks none of what the gate checks, so
    never archive while the gate fails; report the failure as When something
    stops says. Then ask whether to archive, recommending it when the gate
@@ -616,8 +621,9 @@ the domain, not the folders.
    database.md, glossary, capabilities), the source's build and
    configuration files and `openspec/schemas/spec-relay-target/schema.yaml`,
    and fills `openspec/schemas/spec-relay-target/templates/proposals.md`
-   into `openspec/spec-relay/work/<change>/proposals.md` (the only file it
-   writes). Its entries P1 to P7 are the questions the code cannot answer:
+   into `openspec/spec-relay/work/target-design/proposals.md` (the name of
+   the target design change, also when it runs during the survey review and
+   that change does not exist yet; the only file it writes). Its entries P1 to P7 are the questions the code cannot answer:
    the architecture style and modules, the runtime and frameworks, whether
    the old system runs here as a test copy, the verification levels of each
    context, resetting the test databases, the screens (users, look,
@@ -644,7 +650,9 @@ the domain, not the folders.
    conventions.md, ui.md and data.md to three analysts in one wave, then
    verification.md (it suggests level C from ui.md's policies). Each task
    names proposals.md: the analysts follow the answers, and write the reason
-   from the entry for each decision the artifact records. Read only what the
+   from the entry for each decision the artifact records, so that the
+   archived target design keeps what the person chose and why (proposals.md
+   itself stays a scratch file). Read only what the
    person must decide on (the Modules table, the policies, the levels) to
    check that it matches their answers.
 5. Write review.md with `node "<kit>/scripts/draft.mjs" review --change

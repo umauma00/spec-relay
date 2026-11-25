@@ -75,9 +75,10 @@ artifacts:
       today's look they keep. Every extract and port follows this file, so
       the look does not drift from one port to the next. Read the archived
       survey (inventory.md for the files marked carry, context-map.md for
-      each context's entry points) and the screens themselves; ask the person
-      what only they know: who uses the screens, whether manuals, training or
-      printed forms show them, and which target UI technology they want.
+      each context's entry points) and the screens themselves; what only the
+      person knows (who uses the screens, whether manuals, training or printed
+      forms show them, and which target UI technology they want) is in their
+      answers in the target design's proposals.md (P6), which the task names.
 
       Sections:
       - **Screens**: a table with at least one row per context: context id,
@@ -130,7 +131,9 @@ artifacts:
     template: verification.md
     instruction: |
       Choose, per context, how the port proves it behaves like the source
-      program. Ask the person; offer the lightest level that is enough.
+      program. The person chose the levels in the target design's
+      proposals.md (P4, P3 and P5), which the task names; offer the lightest
+      level that is enough when you recommend one there.
       - **A - scenario tests** (every context, required): each spec scenario
         becomes a test in the target language.
       - **B1 - logic comparison**: record what the source program does as
@@ -224,8 +227,9 @@ artifacts:
       database.md (`openspec/changes/archive/*-survey*/database.md`, the newest
       one). When it says None, write only "None" under the first heading.
       Keep the template's English headings and table headers, and the words
-      `keep` and `move`: `gate.mjs review` reads them. Ask the person; the
-      code cannot tell you how the switch to the new system will happen.
+      `keep` and `move`: `gate.mjs review` reads them. The code cannot tell
+      you how the switch to the new system will happen: follow the person's
+      answer in the target design's proposals.md (P7), which the task names.
 
       The migration keeps behavior, so the default keeps the database as it is.
       - **Schema policy**: `keep` (the default: the new code reads and writes

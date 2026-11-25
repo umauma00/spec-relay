@@ -128,7 +128,7 @@ export function reviewRemarks(text) {
 // nothing is left: the page then offers "review complete". The gate still checks
 // everything else (the artifacts) before an archive.
 export function reviewProgress(text) {
-  const review = String(text ?? '');
+  const review = String(text ?? '').replace(/^\uFEFF/, '');
   const boxes = checkboxes(review);
   const idOf = (b) => { const k = b.plain.match(ITEM_ID); return k ? `${k[1].toUpperCase()}${Number(k[2])}` : b.plain.slice(0, 40); };
   const notes = reviewRemarks(review);
@@ -171,63 +171,94 @@ export function requirementNames(text) {
 
 export function questionIds(text) {
   const ids = new Set();
-  for (const line of unfencedLines(stripComments(text))) {
+  // A recommendation or its reason may mention Q4 (a quarter) or another
+  // question: it names no question of its own.
+  for (const line of unfencedLines(stripComments(text)).filter((l) => !ADVICE.test(l))) {
     for (const m of line.matchAll(/\bQ(\d+)\b/gi)) ids.add(`Q${Number(m[1])}`);
   }
   return [...ids];
 }
 
 // The answer the agent recommends for each question of questions.md, and why:
-// Map id -> { recommended, why }. Written as two list lines under the question,
-// "  - Recommended: ..." and "  - Why: ..." (推奨 / 理由 are read too), or as the
-// Recommended and Why columns of a table that lists the questions. The person
-// still decides; the review shows the recommendation beside the decision.
+// Map id -> { recommended, why, none }. Written as two list lines under the
+// question, "  - Recommended: ..." and "  - Why: ..." (推奨 / 理由 are read too;
+// a line that wraps continues on lines indented deeper), or as the Recommended
+// and Why columns of a table that lists the questions. "Recommended: none"
+// (なし) says the agent cannot recommend; Why then says why. The person still
+// decides; the review shows the recommendation beside the decision.
 export const ADVICE = /^\s*(?:[-*+]|\d+[.)])\s+(?:\*\*|__)?(recommended|recommendation|推奨|why|reason|理由)(?:\*\*|__)?\s*[:：](?:\*\*|__)?\s*(.*)$/i;
+const NO_ADVICE = /^(none|no recommendation|なし|無し|推奨なし)[.。]?$/i;
 const adviceKind = (word) => (/^(recommended|recommendation|推奨)$/i.test(word) ? 'recommended' : 'why');
+const indentOf = (line) => line.match(/^\s*/)[0].replace(/\t/g, '    ').length;
+// The question a line starts: its text, after a heading's #s or a list marker,
+// begins with the id ("- Q1. x", "### Q2 x", "1. **Q3** x", "- [Q4] x").
+export function questionStart(line) {
+  const m = plain(line.replace(/^\s*(?:#{1,6}\s+|(?:[-*+]|\d+[.)])\s+)/, '')).match(/^Q(\d+)\b/i);
+  return m ? `Q${Number(m[1])}` : null;
+}
 export function questionAdvice(text) {
   const map = new Map();
   let current = null;
+  let depth = 0;
   let header = null;
+  let open = null;
+  const entry = (id) => { if (!map.has(id)) map.set(id, { recommended: '', why: '', none: false }); return map.get(id); };
   for (const line of unfencedLines(stripComments(text ?? ''))) {
     const advice = line.match(ADVICE);
     if (advice) {
+      open = null;
       if (current) {
-        const entry = map.get(current);
         const kind = adviceKind(advice[1]);
-        entry[kind] ||= advice[2].trim();
+        const e = entry(current);
+        if (!e[kind]) { e[kind] = advice[2].trim(); open = { kind, indent: indentOf(line) }; }
       }
       continue;
     }
+    // A wrapped advice line goes on, indented deeper and not a list item of its own.
+    if (open && line.trim() && indentOf(line) > open.indent && !/^\s*(?:[-*+]|\d+[.)])\s/.test(line)) {
+      const e = entry(current);
+      e[open.kind] = `${e[open.kind]} ${line.trim()}`.trim();
+      continue;
+    }
+    if (line.trim()) open = null;
     if (/^\s*\|/.test(line)) {
       const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.trim());
       if (/^\s*\|?\s*:?-{2,}/.test(line)) continue;
       const id = cells.map((c) => plain(c).match(/^Q(\d+)\b/i)).find(Boolean);
       if (!id) { header = cells.map((c) => norm(c)); current = null; continue; }
       current = `Q${Number(id[1])}`;
-      if (!map.has(current)) map.set(current, { recommended: '', why: '' });
-      const entry = map.get(current);
+      const e = entry(current);
       (header ?? []).forEach((h, i) => {
-        if (/^(recommended|recommendation|推奨)/.test(h)) entry.recommended ||= cells[i] ?? '';
-        else if (/^(why|reason|理由)/.test(h)) entry.why ||= cells[i] ?? '';
+        if (/^(recommended|recommendation|推奨)/.test(h)) e.recommended ||= cells[i] ?? '';
+        else if (/^(why|reason|理由)/.test(h)) e.why ||= cells[i] ?? '';
       });
       continue;
     }
     header = null;
-    // A question starts on a heading or an unindented line that names it, or a
-    // line that begins with its id; an indented line that only mentions another
-    // question ("see Q1") does not move the advice to that one.
-    const id = line.match(/\bQ(\d+)\b/i);
-    const starts = id && (/^(?:#{1,6}\s|\S)/.test(line) || /^Q\d/i.test(plain(line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, ''))));
-    if (starts) {
-      current = `Q${Number(id[1])}`;
-      if (!map.has(current)) map.set(current, { recommended: '', why: '' });
+    // A new question starts only on a line that begins with its id, no deeper
+    // than the question before; a mention inside a sentence or a sub-item
+    // ("  - Q2 と同じ箇所") leaves the advice with the question it is under.
+    const id = questionStart(line);
+    if (id && (current === null || /^#/.test(line) || indentOf(line) <= depth)) {
+      current = id;
+      depth = /^#/.test(line) ? 0 : indentOf(line);
+      entry(current);
     } else if (/^#{1,6}\s/.test(line)) current = null;
   }
-  for (const entry of map.values()) {
-    entry.recommended = entry.recommended.trim();
-    entry.why = entry.why.trim();
+  for (const e of map.values()) {
+    e.recommended = e.recommended.trim();
+    e.why = e.why.trim();
+    e.none = NO_ADVICE.test(plain(e.recommended));
   }
   return map;
+}
+
+// What a question still lacks of its advice, or null: a recommendation (or
+// "none") and the reason for it.
+export function adviceProblem(advice) {
+  if (!advice || PLACEHOLDER.test(plain(advice.recommended))) return 'recommendation';
+  if (PLACEHOLDER.test(plain(advice.why))) return 'reason';
+  return null;
 }
 
 // Drops Markdown emphasis, brackets and comment markers so "**Q1**" and "[Q1]" read as "Q1".
@@ -409,11 +440,12 @@ function checkExtract(root, dir, boxes, problems) {
   const advice = questionAdvice(questions);
   for (const id of questions === null ? [] : questionIds(questions)) {
     // The person decides; the agent gives the answer it recommends, and why, so the person can take it.
-    const given = advice.get(id);
-    if (!given || PLACEHOLDER.test(plain(given.recommended)) || PLACEHOLDER.test(plain(given.why))) {
-      problems.push(`question has no recommended answer and reason: ${id} (write "  - Recommended: <answer>" and "  - Why: <reason>" under it in questions.md)`);
-    }
     const item = qItems.get(id);
+    // A question the person already decided before 0.27.0 needs no advice after the fact.
+    const decidedBefore = item && boxes.find((b) => b.plain === item)?.done && !PLACEHOLDER.test((item.match(/decision:\s*(.*)$/i)?.[1] ?? '').trim());
+    if (adviceProblem(advice.get(id)) && !decidedBefore) {
+      problems.push(`question has no recommended answer and reason: ${id} (write "  - Recommended: <answer, or none>" and "  - Why: <reason>" under it in questions.md)`);
+    }
     if (!item) { problems.push(`question has no review item: ${id}`); continue; }
     const decision = item.match(/decision:\s*(.*)$/i);
     if (!decision || PLACEHOLDER.test(decision[1].trim())) problems.push(`question has no recorded decision: ${id}`);
@@ -1801,7 +1833,7 @@ const NEXT = {
     reviewer: 'review.md has no reviewer name ("Reviewer:"). Tell me the name to record.',
     fixing: (n, list) => `You asked for a change on ${n} item${n === 1 ? '' : 's'} (${list}). I correct the artifacts, write what I changed under each ("fixed:"), and ask you to look again.`,
     onHold: (n, list) => `${n} item${n === 1 ? ' is' : 's are'} on hold (${list}). When you have decided, confirm it, or write what should change ("fix:").`,
-    decision: (list) => `These questions have no decision yet: ${list}. Decide what the new system should do.`,
+    decision: (list) => `These questions have no decision yet: ${list}. Decide what the new system should do (the agent's recommendation and its reason are under each question).`,
     archive: 'Everything is reviewed. Answer whether this change may be archived (that makes it final).',
     portArchive: 'Every task is done, the tests and the boundary check pass on the code as it is, and the independent crosscheck confirmed every requirement and screen. Answer whether the port may be archived.',
     inferred: 'Only level A ran: tests from the spec, which an AI wrote from reading the source code. The source program was not run, so that the new code behaves the same is inferred from the code, not compared.',
@@ -1825,7 +1857,7 @@ const NEXT = {
     reviewer: 'review.md に承認者の名前（Reviewer:）がありません。記録する名前を教えてください。',
     fixing: (n, list) => `直してほしいと書いた項目が ${n} 件あります（${list}）。AI が成果物を直し、各項目の下に直した内容（fixed:）を書くので、もう一度確認してください。`,
     onHold: (n, list) => `保留中の項目が ${n} 件あります（${list}）。決まったら確認済みにするか、直してほしい点（fix:）を書いてください。`,
-    decision: (list) => `判断がまだの質問があります（${list}）。新しいシステムでどうするかを決めてください。`,
+    decision: (list) => `判断がまだの質問があります（${list}）。新しいシステムでどうするかを決めてください（各質問に AI の推奨と理由があります）。`,
     archive: 'すべてレビュー済みです。この change を archive（確定）してよいかを答えてください。',
     portArchive: 'すべてのタスクが完了し、今のコードでテストと境界チェックが通り、別の AI による照合ですべての要件と画面が確認できました。実装を archive してよいかを答えてください。',
     inferred: '比べ方は A（仕様のシナリオから作ったテスト）だけです。仕様は AI が元コードを読んで書いたもので、元のプログラムは動かしていません。同じ動きであることは、比べた結果ではなくコードを読んだうえでの推定です。',

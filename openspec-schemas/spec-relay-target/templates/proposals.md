@@ -1,7 +1,8 @@
 # Proposals for the target design
 
 <!-- Written before the target design's artifacts, to
-openspec/spec-relay/work/<change>/proposals.md (not an artifact of the change).
+openspec/spec-relay/work/target-design/proposals.md (target-design-v2 and so on
+for a rerun; not an artifact of the change).
 An analyst fills Question, Recommended, Why and Other choices for every entry
 from the survey (context-map.md, inventory.md, database.md, glossary.md,
 capabilities.md) and the source's build and configuration files, following
@@ -16,7 +17,7 @@ after "Answer:". The analysts who write the artifacts follow the answers.
   only the person can know the answer, recommend what the code suggests and
   write "a guess from the code".
 - Other choices: one line each, with what follows from it.
-- Answer: left empty for the orchestrator.
+- Answer: written only by the orchestrator. Never write or change it.
 Never recommend a `new` screen look: only the person picks it. Keep the
 headings P1-P7 in English as they are. -->
 
@@ -76,7 +77,8 @@ best as one command. Never a connection string or a password. -->
 ## P6 Screens: users, look and technology
 <!-- Who uses the screens and whether manuals, training or printed forms show
 them; the target UI technology; the policy of each context (same, layout,
-none), as ui.md's instruction suggests them. -->
+none), as ui.md's instruction suggests them. Offer `new` (a new look) among
+the other choices, but never recommend it: only the person picks it. -->
 - Question:
 - Recommended:
 - Why:

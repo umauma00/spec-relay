@@ -308,7 +308,11 @@ artifacts:
       decision>` and `  - Why: <the reason, with the source reference or the
       fact that supports it>`. For a suspected bug, the usual recommendation
       is to keep the behavior (a fix is follow-up work after the migration);
-      say when the evidence points the other way. The reviewer decides; the
+      say when the evidence points the other way. When nothing in the code or
+      the artifacts supports any answer, write `Recommended: none` and say in
+      Why what would decide it (whom to ask, which record to look at); never
+      guess without saying so. Keep each line on one line where you can; a
+      line that wraps continues indented deeper. The reviewer decides; the
       review page shows the recommendation beside the decision and lets the
       reviewer take it as it is. `gate.mjs review` fails on a question
       without both lines.

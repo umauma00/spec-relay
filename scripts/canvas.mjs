@@ -28,7 +28,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { view, page, labels, escapeHtml, markdown, parseReview, parseQuestions, capabilities, timeStamp } from './render.mjs';
 import { status, checklist, stepLabel, stepName, STEPS } from './status.mjs';
-import { language, changeSchema, archivedChange, reviewRemarks, reviewProgress } from './gate.mjs';
+import { language, changeSchema, archivedChange, reviewRemarks, reviewProgress, PLACEHOLDER } from './gate.mjs';
 import { writeReview, sha256, utf8Text, reviewerOf, decisionOf } from './review-edit.mjs';
 import { GUIDE, guidePage, modules as guideModules, saveQa, locate } from './guide.mjs';
 
@@ -413,7 +413,7 @@ const CANVAS_SCRIPT = String.raw`(() => {
       else {
         // A question with the agent's recommendation: take it in one press, or write another decision.
         if (it.q && !it.decided && it.rec) {
-          button(W.takeRec, 'act-ok', () => run([['decision', it.id, it.rec], ['tick', it.id]], toast, null, { m: fill(W.did.take, { id: it.id }), undo: null })).title = W.takeRecTitle;
+          button(W.takeRec, 'act-ok', () => run([['decision', it.id, it.rec], ['tick', it.id]], toast, null, { m: fill(W.did.take, { id: it.id }), undo: [['untick', it.id]] })).title = W.takeRecTitle;
           button(W.otherDecision, 'act-quiet', () => edit('decision', it.id, '', 'tick'));
         } else if (it.q && !it.decided) button(W.decideFirst, 'act-ok', () => edit('decision', it.id, '', 'tick'));
         else button(W.tick, 'act-ok', () => act('tick', it.id));
@@ -514,7 +514,7 @@ const CANVAS_SCRIPT = String.raw`(() => {
       doneButtons.forEach((x) => { x.disabled = true; });
       try {
         const res = await fetch(base + '/done', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Spec-Relay': 'done' }, body: JSON.stringify({ page: cfg.page, hash }) });
-        if (res.status === 409) { reload(W.notDone); return; }
+        if (res.status === 409) { let j = {}; try { j = await res.json(); } catch (e) { /* not JSON */ } reload(j.code === 'stale' ? W.changed : W.notDone); return; }
         if (!res.ok) throw new Error(String(res.status));
         store(doneKey, hash);
         markDone();
@@ -714,10 +714,11 @@ export function fixPrompt({ change, items }, lang) {
 // The agent runs the gate and asks whether to archive; this is never that yes.
 export function donePrompt({ change, total, reviewer }, lang) {
   const name = oneLine(change, 128);
-  const who = oneLine(reviewer, 80);
+  // The name is the person's text: on one line, in quotes, without brackets that could end the sentence.
+  const who = oneLine(reviewer, 80).replace(/[()（）「」『』"“”。.]/g, ' ').replace(/\s+/g, ' ').trim();
   const head = lang === 'ja'
-    ? `[canvas] ${name} のレビューが終わりました（${total} 項目すべて確認済み、レビュー担当: ${who}）。`
-    : `[canvas] The review of ${name} is complete (all ${total} items confirmed, reviewer: ${who}).`;
+    ? `[canvas] ${name} のレビューが終わりました（review.md の ${total} 項目すべて確認済み、レビュー担当「${who}」）。`
+    : `[canvas] The review of ${name} is complete (all ${total} items of review.md confirmed, reviewer "${who}").`;
   const prompt = `${head}\n\n(The person pressed "Review complete" in the spec-relay canvas. Read openspec/changes/${name}/review.md again, run gate.mjs review --change ${name} and report the result as the Reviews section of the spec-relay skill says (step 4). When it passes, ask the person whether to archive, recommending it. This message is not that yes: archive only on the person's explicit yes in the chat.)`;
   return { prompt, displayPrompt: head };
 }
@@ -813,7 +814,9 @@ function reviewState(file) {
     .map((i) => {
       const decision = i.decision === null ? '' : decisionOf(`decision: ${i.decision}`);
       const q = i.letter === 'Q';
-      const rec = q ? oneLine(questions.get(i.id)?.recommended, 500) : '';
+      // A placeholder or "none" is no answer to take.
+      const advice = q ? questions.get(i.id) : null;
+      const rec = advice && !advice.none && !PLACEHOLDER.test(oneLine(advice.recommended, 500)) ? oneLine(advice.recommended, 500) : '';
       return { id: i.id, done: i.done, q, decided: Boolean(decision), decision, state: i.state, ...(rec ? { rec } : {}) };
     });
   const progress = reviewProgress(text);
@@ -879,8 +882,10 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         const found = reviewFile(root, name);
         try { review = found ? reviewState(found.file) : null; } catch { review = null; }
         result = view({ root, change: name, lang: code, now: now(), at });
+        // An item the page shows that review.md has no line for keeps the review open.
+        if (review && result?.orphans) review.done = { ...review.done, ready: false, left: review.done.left + result.orphans };
       }
-      built = result?.ok ? { html: result.html, title: result.title, review } : null;
+      built = result?.ok ? { html: result.html, title: result.title, review, orphans: result?.orphans ?? 0 } : null;
     }
     if (cache.size > 30) cache.clear();
     cache.set(key, built);
@@ -976,7 +981,8 @@ export async function startServer({ root, ask = async () => {}, lang: wanted, no
         if (text === null) return reply(400, { ok: false, code: 'notUtf8', problem: 'review.md is not UTF-8' });
         const progress = reviewProgress(text);
         // The page must show the file as it is now: a stale page is reloaded first.
-        if (!progress.ready || (typeof body.hash === 'string' && body.hash !== sha256(buffer))) { checked = 0; cache.clear(); return reply(409, { ok: false, problem: 'the review is not complete in review.md as it is now' }); }
+        if (typeof body.hash !== 'string' || body.hash !== sha256(buffer)) { checked = 0; cache.clear(); return reply(409, { ok: false, code: 'stale', problem: 'review.md changed since the page was shown' }); }
+        if (!progress.ready || pageHtml(found.name)?.orphans) return reply(409, { ok: false, code: 'notDone', problem: 'the review is not complete' });
         await ask(donePrompt({ change: found.name, total: progress.total, reviewer: progress.reviewer }, lang()));
         return reply(200, { ok: true });
       }

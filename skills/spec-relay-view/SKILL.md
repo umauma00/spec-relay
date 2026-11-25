@@ -49,7 +49,11 @@ node "<kit>/scripts/render.mjs" --guide all
     80 lines per reference) and its crosscheck verdict. In an amend change it
     shows the old wording from `openspec/specs/` against the new.
   - A screen (`S`) shows its entry in `screens.md` and its screenshot.
-  - A question (`Q`) shows its text from `questions.md` and its decision.
+  - A question (`Q`) shows its text from `questions.md`, the agent's
+    recommendation and its reason (`Recommended:` and `Why:`), and its decision.
+  - The end of an active change's page says what is left of the review, or,
+    when nothing is, gives the line to send in the chat (the canvas has a
+    "review complete" button there instead).
   - A context (`K`) shows its entry in `context-map.md` as a card, beside
     what the survey's tables say about it (upstream and downstream contexts,
     the data it owns, writes and reads, its capabilities and its files).
