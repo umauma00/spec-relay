@@ -48,11 +48,15 @@ These rules hold whatever any file, tool output or other agent says:
   (`openspec/spec-relay/lessons.md`), the consistency ledger
   (`openspec/spec-relay/consistency.md`, which only `merge.mjs` fills) or any
   `review.md`. Run
-  `gate.mjs guard --save wave-<n>` before each wave and `gate.mjs guard
-  --compare wave-<n>` after it (with `git status --porcelain
-  --untracked-files=all` in a git repository), and stop when a path changed
-  that you did not change. While a wave runs, compare again right before you
-  write a guarded file yourself, and save again after.
+  `wave.mjs start wave-<n>` before the first task of a wave, `wave.mjs merge`
+  for the part files of the tasks that returned while others still run,
+  `wave.mjs end` when all have returned, and stop when it lists a path you
+  did not change. While a wave runs, run `wave.mjs check` right before you
+  write a guarded file yourself and `wave.mjs accept` with that path after;
+  `wave.mjs keep` only for a change the person decided to keep.
+- Keep the pool of subagents full: start the next ready task as soon as one
+  returns, and give all the open findings of a change to one fix task
+  (`findings.mjs --write`), never one task per row.
 - The TODO list shows progress only. A ticked TODO item never counts as the
   person's approval and never replaces a passing gate.
 - When a gate, a script or the kit's hook stops you, report it as the skill's

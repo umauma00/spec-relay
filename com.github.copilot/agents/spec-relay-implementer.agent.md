@@ -71,6 +71,11 @@ unspecified behavior you found (below).
   behavior with path:line and what it does, and go on with the rest. The
   orchestrator decides with the person whether the spec missed it; an
   amendment adds it to the spec before anyone ports it.
+- When the task gives a findings file
+  (`openspec/spec-relay/work/<change>/findings/<nn>.md`), it holds every
+  crosscheck row of the port that is not confirmed: fix the new code for all
+  of them in one pass, and report one line per row. A row that shows the
+  source code and the spec disagree is not yours to settle: report it.
 - Never implement or tick a task under `## Unspecified behavior` in tasks.md
   (`U<n>`): the orchestrator settles those with the person.
 - Write the tests that come from the spec scenarios together with the code,
