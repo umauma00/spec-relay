@@ -24,24 +24,29 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readIf, tableRows, plain, changeSchema, reviewRemarks } from './gate.mjs';
+import { readIf, tableRows, plain, changeSchema, reviewRemarks, REMARK } from './gate.mjs';
 import { readLedger } from './sites.mjs';
 import { walkthroughRows } from './walkthrough.mjs';
 import { items as consistencyItems, ledgerRows, pairKey, topicKey, LEDGER } from './consistency.mjs';
 
 const WORK = 'openspec/spec-relay/work';
 const stripComments = (text) => String(text ?? '').replace(/<!--[\s\S]*?-->/g, '').trim();
-const verdictWord = (cell) => plain(stripComments(cell)).toLowerCase().match(/^[a-z-]+/)?.[0] ?? '';
+// A verdict that holds as the gate reads it: the whole cell, not its first word
+// ("confirmed, but ..." is not confirmed). A question names its Q id, except in
+// the survey, where the person decides the row with C2.
+const settled = (cell, survey) => {
+  const v = plain(stripComments(cell)).toLowerCase().replace(/[.。]$/, '').trim();
+  return v === 'confirmed' || (survey ? v === 'question' : /^question\s*:?\s*q0*\d+$/.test(v));
+};
 
 // Crosscheck rows (extract, amend, port: | Item | Verdict | Evidence |; survey:
 // | Path | Verdict | Evidence |) that need a correction: not confirmed, and not
 // left to the person as a question.
-function crosscheckFindings(dir) {
+function crosscheckFindings(dir, survey) {
   const text = readIf(path.join(dir, 'crosscheck.md'), []);
   if (text === null) return [];
   return tableRows(text).filter(([item = '']) => stripComments(item)).flatMap(([item = '', verdict = '', evidence = '']) => {
-    const word = verdictWord(verdict);
-    if (word === 'confirmed' || word === 'question') return [];
+    if (settled(verdict, survey)) return [];
     return [{ from: 'crosscheck', key: stripComments(item), verdict: stripComments(verdict) || 'blank', evidence: stripComments(evidence) }];
   });
 }
@@ -90,13 +95,43 @@ function consistencyFindings(root, change) {
   return { findings, recheck };
 }
 
-// The person's change requests that no fixed: line answers yet.
+// The notes under each item of review.md, in order, each with the lines indented
+// under it (a request the person wrote over several lines).
+function notesByItem(text) {
+  const lines = String(text ?? '').replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\r\n]/g, ' ')).split(/\r?\n/);
+  const items = [];
+  let item = null;
+  let note = null;
+  let fenced = false;
+  for (const line of lines) {
+    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; item = null; note = null; continue; }
+    if (fenced) continue;
+    const box = line.match(/^\s*(?:[-*+]|\d+[.)])\s+\[.?\]\s*(.*)$/);
+    // As reviewRemarks reads them: only a box whose text starts with an id is an item.
+    if (box) { item = /^[A-Za-z]\d+\b/.test(plain(box[1])) ? [] : null; if (item) items.push(item); note = null; continue; }
+    if (/^#{1,6}\s/.test(line)) { item = null; note = null; continue; }
+    if (!item) continue;
+    const r = line.match(REMARK);
+    if (r) { note = { kind: r[1].toLowerCase(), text: r[2].trim(), indent: line.search(/\S/) }; item.push(note); continue; }
+    if (note && line.trim() && line.search(/\S/) > note.indent && !/^\s*(?:[-*+]|\d+[.)])\s/.test(line)) { note.text = `${note.text} ${line.trim()}`.trim(); continue; }
+    if (line.trim() && !/^\s/.test(line)) { item = null; note = null; }
+  }
+  return items;
+}
+
+// The person's change requests that no fixed: line answers yet: every fix: after
+// the last fixed:, with the lines under each, so none of their words is lost.
 function reviewFindings(dir) {
   const text = readIf(path.join(dir, 'review.md'), []);
   if (text === null) return [];
-  return reviewRemarks(text).filter((item) => item.openFix).map((item) => {
-    const fixes = item.remarks.filter((r) => r.kind === 'fix');
-    return { from: 'review', key: item.id, verdict: 'fix', evidence: fixes.at(-1)?.text ?? '' };
+  const items = reviewRemarks(text);
+  const notes = notesByItem(text);
+  if (notes.length !== items.length) return items.filter((item) => item.openFix).map((item) => ({ from: 'review', key: item.id, verdict: 'fix', evidence: item.remarks.filter((r) => r.kind === 'fix').map((r) => r.text).join(' / ') }));
+  return items.flatMap((item, i) => {
+    if (!item.openFix) return [];
+    const list = notes[i];
+    const last = list.map((n) => n.kind).lastIndexOf('fixed');
+    return list.slice(last + 1).filter((n) => n.kind === 'fix').map((n) => ({ from: 'review', key: item.id, verdict: 'fix', evidence: n.text }));
   });
 }
 
@@ -108,7 +143,7 @@ export function findings(root, change) {
   const schema = changeSchema(dir);
   const consistency = consistencyFindings(root, change);
   const list = [
-    ...crosscheckFindings(dir),
+    ...crosscheckFindings(dir, schema === 'spec-relay-survey'),
     ...(schema === 'spec-relay-extract' ? coverageFindings(root, dir) : []),
     ...walkthroughFindings(dir),
     ...consistency.findings,
@@ -116,7 +151,9 @@ export function findings(root, change) {
   ];
   const counts = {};
   for (const f of list) counts[f.from] = (counts[f.from] ?? 0) + 1;
-  return { ok: true, change, schema, counts, total: list.length, findings: list, recheck: consistency.recheck };
+  // done: nothing to fix and nothing to compare again; run it after the fix task
+  // returns, since a fix that changes the spec makes its consistency rows stale.
+  return { ok: true, change, schema, counts, total: list.length, done: list.length === 0 && consistency.recheck.length === 0, findings: list, recheck: consistency.recheck };
 }
 
 const TITLES = {

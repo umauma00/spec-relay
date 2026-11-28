@@ -82,3 +82,31 @@ test('a change with nothing open writes nothing; an unknown change is refused', 
   assert.equal(findings(dir, '../x').ok, false);
   assert.equal(quiet(() => main(['--root', dir])), 2);
 });
+
+test('every unanswered fix: of an item is listed, with the lines written under it', () => {
+  const dir = repo();
+  write(dir, 'openspec/changes/extract-billing/review.md', [
+    '# Review', '', '## 1. Requirements',
+    '- [ ] R1 Create', '  - fix: the limit is 10,', '    not 5', '  - fixed: changed', '  - fix: and the message says "too many"', '  - fix: the button is grey',
+    '- [ ] R2 Total', '  - hold: ask accounting', '',
+  ].join('\n'));
+  const got = findings(dir, 'extract-billing').findings.filter((f) => f.from === 'review').map((f) => `${f.key}: ${f.evidence}`);
+  assert.deepEqual(got, ['R1: and the message says "too many"', 'R1: the button is grey']);
+  write(dir, 'openspec/changes/extract-billing/review.md', '- [ ] R1 Create\n  - fix: the limit is 10,\n    not 5\n');
+  assert.deepEqual(findings(dir, 'extract-billing').findings.filter((f) => f.from === 'review').map((f) => f.evidence), ['the limit is 10, not 5']);
+});
+
+test('a verdict holds only as a whole cell; done means nothing to fix and nothing to compare again', () => {
+  const dir = tempDir();
+  write(dir, 'openspec/config.yaml', 'x\n');
+  write(dir, 'openspec/changes/extract-x/.openspec.yaml', 'schema: spec-relay-extract\n');
+  write(dir, 'openspec/changes/extract-x/crosscheck.md', '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 A | confirmed, but the default differs | a:1 |\n| R2 B | question | a:2 |\n| R3 C | question Q2 | a:3 |\n| R4 D | Confirmed. | a:4 |\n');
+  const result = findings(dir, 'extract-x');
+  assert.deepEqual(result.findings.map((f) => f.key), ['R1 A', 'R2 B']);
+  assert.equal(result.done, false);
+  write(dir, 'openspec/changes/survey/.openspec.yaml', 'schema: spec-relay-survey\n');
+  write(dir, 'openspec/changes/survey/crosscheck.md', '| Path | Verdict | Evidence |\n|---|---|---|\n| `src/a.php` | question | used? |\n| `src/b.php` | mismatch | belongs to billing |\n');
+  assert.deepEqual(findings(dir, 'survey').findings.map((f) => f.key), ['`src/b.php`']);
+  write(dir, 'openspec/changes/extract-x/crosscheck.md', '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 A | confirmed | a:1 |\n');
+  assert.equal(findings(dir, 'extract-x').done, true);
+});

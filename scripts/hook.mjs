@@ -16,8 +16,8 @@
 //     e2e-old.json (e2e.mjs writes it after the screen tests passed on the old system), or of
 //     openspec/spec-relay/local/canvas-log.jsonl (the canvas writes it);
 //   - subagent edits of review.md, questions.md, crosscheck.md, walkthrough.md, a port's proposal.md and design.md, the plan, the lessons and consistency.md,
-//     and a subagent's run of draft.mjs review or port-design, finish.mjs run or wave.mjs start, merge,
-//     accept or end, which write them (or the wave guard);
+//     and a subagent's run of draft.mjs review or port-design, finish.mjs run, wave.mjs start, merge,
+//     accept, keep or end, or gate.mjs guard --save, which write them (or the wave guard);
 //   - shell commands that write a verify.json, an e2e-old.json or the canvas log;
 //   - shell commands that mention the "Hook enforcement" setting.
 // Shell commands that write files some other way are not parsed; the wave guard
@@ -63,7 +63,7 @@ export const writesOldRun = (command) => /e2e-old(?:\.json|\*)/i.test(command) &
 const CANVAS_LOG_WRITES = writesTo(String.raw`[^\s;|&]*canvas-log(?:\.jsonl|\*)`);
 // The kit's scripts that write review.md, a port's design.md or the finish
 // checks: only the orchestrator runs them.
-export const runsOrchestratorScript = (command) => /draft\.mjs["']?\s+(?:review|port-design)\b/i.test(command) || /finish\.mjs["']?\s+run\b/i.test(command) || /wave\.mjs["']?\s+(?:start|merge|accept|end)\b/i.test(command);
+export const runsOrchestratorScript = (command) => /draft\.mjs["']?\s+(?:review|port-design)\b/i.test(command) || /finish\.mjs["']?\s+run\b/i.test(command) || /wave\.mjs["']?\s+(?:start|merge|accept|keep|end)\b/i.test(command) || /gate\.mjs["']?\s+guard\s+--save\b/i.test(command);
 export const writesCanvasLog = (command) => /canvas-log(?:\.jsonl|\*)/i.test(command) && CANVAS_LOG_WRITES.some((pattern) => pattern.test(command));
 
 // The repository root above `start` that spec-relay set up, or null.
@@ -259,7 +259,7 @@ export function decide(payload, { pluginRoot = process.env.PLUGIN_ROOT || proces
         return 'only e2e.mjs writes e2e-old.json, the record of the screen tests passing on the old system; run node "<kit>/scripts/e2e.mjs" old --change <port change> --base <old system> instead';
       }
       if (subagent && runsOrchestratorScript(command)) {
-        return 'only the orchestrator runs draft.mjs review and port-design, finish.mjs run and wave.mjs start, merge, accept and end: they write review.md, a port\'s design.md, the finish checks, the merged artifacts and the wave guard';
+        return 'only the orchestrator runs draft.mjs review and port-design, finish.mjs run, wave.mjs start, merge, accept, keep and end, and gate.mjs guard --save: they write review.md, a port\'s design.md, the finish checks, the merged artifacts and the wave guard';
       }
       if (writesCanvasLog(command)) {
         return 'only the canvas writes canvas-log.jsonl, the record of the person\'s own edits in the canvas';

@@ -345,12 +345,23 @@ not wash out these instructions.
      with `merge.mjs --clean` and takes the merged artifacts into the
      snapshot. Name the part files the returned tasks wrote, never their
      folder (another task may still be writing there; it refuses a folder).
+     walkthrough.md is the exception: merge a change's walkthrough parts in
+     one call, as their folder, once every walkthrough task of that change
+     has returned (two checkers who both walk a shared handler add up only
+     within one merge; it refuses part files).
    - `check wave-<n>` right before you write a guarded file yourself while
-     tasks still run (a tick, a question, a lesson, an archive): a path that
-     already changed was changed by someone else. Then write, and run
-     `accept wave-<n> <path> [<path>...]` (a folder covers what is under it:
-     an archive moves the change folder and adds to `openspec/specs/`) so
-     the rest of the wave is compared from there.
+     tasks still run (a tick, a question, a lesson, the plan, an archive, or
+     a script that writes one: `draft.mjs review`, `verify.mjs`, `e2e.mjs
+     old`, `finish.mjs run`): a path that already changed was changed by
+     someone else. Then write, and run `accept wave-<n> <path> [<path>...]`
+     so the rest of the wave is compared from there. A folder covers what is
+     under it; for an archive, name the change folder (it covers the
+     archived copy) and `openspec/specs/<capability>`. It refuses the source
+     code, the config and folders that hold many changes.
+   - `keep wave-<n> <path> [<path>...]` only after the person decided to keep
+     a change nobody assigned (they edited `openspec/config.yaml`, a source
+     file, a review.md outside the canvas): it takes those paths in too, so
+     the wave can go on.
    - `end wave-<n> [--into ... --parts <file or folder> ...]` when every task
      has returned: the last check and merges, and the snapshot is removed.
    Each one prints `ok` and, when something changed that nobody assigned,
@@ -361,9 +372,10 @@ not wash out these instructions.
    `next.person` sentence), and do not use those results until they decide.
    A `canvas` list names the `review.md` files the person changed in the
    canvas meanwhile: those are theirs, never a problem; read them again
-   before you use them. Start a new wave (a new snapshot) only after the
-   last one ended; `gate.mjs guard --save` and `--compare` still work as
-   before for a host where you prefer them.
+   before you use them. Keep one wave open at a time (`start` refuses a
+   name whose wave is open): a task you start while it is open joins it,
+   also a single task. `gate.mjs guard --save` and `--compare` still work
+   as before.
 5. **Tables split across subagents** (inventory, crosscheck, coverage,
    walkthrough, the consistency ledger): each subagent
    writes its rows as a Markdown table to its own part file in the work folder
@@ -374,10 +386,9 @@ not wash out these instructions.
    rows one merge brings for an entry point, from all its parts together,
    replace all the rows that entry point had, so merge each wave on its own
    and a walk again writes all of them; merge lists under `dropped` the `gap`
-   and `vague` rows that are gone: confirm the spec now states each; a part
-   file holds whole entry points, so merging each part on its own as its
-   task returns keeps that). Merge with `wave.mjs merge` or `end` (above),
-   which run `merge.mjs` for you. The
+   and `vague` rows that are gone: confirm the spec now states each; merge all of a change's walkthrough
+   parts of one round in one call). Merge with `wave.mjs merge` or `end` (above), which
+   run `merge.mjs` for you. The
    survey's crosscheck.md gets the code of each inventory row it judged
    (`<!-- row ... -->`) only through merge.mjs. If merge reports one
    `R<n>` with two names because a requirement was renamed on purpose, delete
@@ -399,14 +410,19 @@ not wash out these instructions.
    only the person can decide; answer a fix whose new words you already know
    and write `fixed:`), then run it. Give the file to ONE analyst (the
    spec, screens, trace and source map of a capability are one writer's)
-   with the files it may change, and read only its report. Then recheck in
-   one go everything the fix touched, all at once: the checker for each
-   changed or added requirement and screen, the sites of coverage.md the
-   new requirements cover, the entry points whose behavior changed (walked
-   again), and the consistency links that `findings.mjs` lists under
-   `recheck` (stale after the spec changed). Run `findings.mjs` again on
-   the merged results: usually nothing is left; whatever is, is the next
-   round. In a port, the same list goes to the implementer.
+   with the files it may change, and read only its report. One fix task per
+   change at a time: while it runs, new findings and `fix:` notes of that
+   change wait for the next round; when it returns, write the `fixed:`
+   lines first, then run `findings.mjs` again. When the fix task has
+   returned, run `findings.mjs --change <change>` (without `--write`) for
+   its `recheck` list: a fix that changes the spec makes its consistency
+   rows stale only then. Then recheck in one go everything the fix touched:
+   the checker for each changed or added requirement and screen, the sites
+   of coverage.md the new requirements cover, the entry points whose
+   behavior changed (walked again), and the links under `recheck`. After
+   those are merged, `findings.mjs` says `done` when nothing is left to fix
+   or compare again; whatever is left is the next round. In a port, the
+   same list goes to the implementer.
 8. **Ahead of the review, not further.** Start an extract change only for a
    capability in `nextToAnalyze`. A longer queue only waits, and what the
    person finds in one review (a misread pattern, a glossary term, a wish about
@@ -543,7 +559,8 @@ you assist. This gate is the point of the kit.
      any open check rows) in one file; give that file, the files to change
      and the schema artifact, and read only its report. The person goes on
      with the other items meanwhile: say so, and never make them wait for
-     one fix before they send the next. Tell it to add a new requirement at the end of its spec file
+     one fix before they send the next; requests they send while the fix
+     task runs go to the next round, after you wrote its `fixed:` lines. Tell it to add a new requirement at the end of its spec file
      and to report every requirement or screen it added or renamed, so that
      you untick those and run `draft.mjs review --update`. Never give it
      review.md, questions.md, impact.md, crosscheck.md, a port's proposal
@@ -955,7 +972,7 @@ waves.
    holds only during this change's review (step 4 says what to do after the
    archive). Any later change to this spec makes its rows stale: compare
    those pairs again before the review ends.
-7. **Fix round.** When every check of steps 3 to 6 has returned and its
+7. **Fix round.** When every check of items 3 to 6 has returned and its
    parts are merged, move what only the person can decide to questions.md
    (as each step says), then run `node "<kit>/scripts/findings.mjs" --change
    extract-<capability> --write` and give its file to one analyst with the
@@ -963,9 +980,10 @@ waves.
    (Working in parallel, Fix rounds). From its report, recheck in one go:
    crosscheck the requirements and screens it changed or added, judge again
    the sites of coverage.md they cover, walk again the entry points whose
-   behavior changed, and compare again the links `findings.mjs` lists under
-   `recheck`. Run sites.mjs again first when the source map changed. Merge,
-   and run `findings.mjs` again: what is left is the next round.
+   behavior changed, and compare again the links `findings.mjs` (run again
+   after the fix) lists under `recheck`. Run sites.mjs again first when the
+   source map changed. Merge, and run `findings.mjs` again: `done` means
+   nothing is left; otherwise that is the next round.
 8. **Questions and review.** Write questions.md from the analysts' reported
    doubts and the rows moved to questions, each with the answer you recommend
    and why (`  - Recommended:` and `  - Why:` under it, as the schema says; ask

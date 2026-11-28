@@ -555,7 +555,7 @@ test('guard --save and --compare list only the protected files that changed', as
     added: ['src/c.php'],
     removed: ['src/b.php'],
   });
-  assert.match(guardCompare(dir, 'wave-2').problems.join(), /no snapshot .*wave-2\.json; run gate\.mjs guard --save wave-2/);
+  assert.match(guardCompare(dir, 'wave-2').problems.join(), /no snapshot .*wave-2\.json; run wave\.mjs start wave-2 \(or gate\.mjs guard --save wave-2\)/);
   // The lessons file appears with the first lesson; a subagent creating or deleting it shows too.
   fs.rmSync(path.join(dir, 'openspec/spec-relay/lessons.md'));
   guardSave(dir, 'wave-3');

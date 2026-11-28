@@ -1120,7 +1120,7 @@ function guardDiff(root, name) {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(name)) return { ok: false, problems: [`not a snapshot name: ${name} (letters, digits and hyphens)`] };
   let before;
   try { before = JSON.parse(fs.readFileSync(snapshotFile(root, name), 'utf8')); } catch {
-    return { ok: false, problems: [`no snapshot ${GUARD_DIR}/${name}.json; run gate.mjs guard --save ${name} before the wave`] };
+    return { ok: false, problems: [`no snapshot ${GUARD_DIR}/${name}.json; run wave.mjs start ${name} (or gate.mjs guard --save ${name}) before the wave`] };
   }
   const at = logSize(root);
   const now = guardFiles(root);
@@ -1152,7 +1152,7 @@ function guardDiff(root, name) {
   const changed = touched.filter((f) => !canvas.includes(f)).sort();
   const added = Object.keys(now).filter((f) => !(f in before)).sort();
   const removed = Object.keys(before).filter((f) => !(f in now)).sort();
-  return { ok: changed.length + added.length + removed.length === 0, changed, added, removed, canvas, now, at };
+  return { ok: changed.length + added.length + removed.length === 0, changed, added, removed, canvas, now, before, at };
 }
 
 // Lists only the paths that differ, so a large source tree never floods the
@@ -1165,12 +1165,12 @@ export function guardCompare(root, name) {
 }
 
 // While a wave still runs, the orchestrator writes guarded files itself (a merge,
-// a tick, an archive). `own(path)` says which paths it just wrote. When every
-// path that differs from the snapshot is its own or the person's canvas edit,
-// the snapshot moves to the files as they are now (and the canvas mark to the
-// log as it was read), so the rest of the wave is compared from here. Otherwise
-// nothing moves and the other paths are listed: someone else changed them.
-// With `dry`, nothing moves either way (a check).
+// a tick, an archive). `own(path)` says which paths it just wrote (or the person
+// decided to keep). Those paths and the person's canvas edits move into the
+// snapshot (and the canvas mark to the log as it was read), so the rest of the
+// wave is compared from there. Every other path that differs stays as it was in
+// the snapshot and is listed: someone else changed it, and it keeps being
+// reported until the person decides. With `dry`, nothing moves (a check).
 export function guardTake(root, name, own = () => false, { dry = false } = {}) {
   const diff = guardDiff(root, name);
   if (diff.problems) return diff;
@@ -1178,19 +1178,23 @@ export function guardTake(root, name, own = () => false, { dry = false } = {}) {
   const changed = others(diff.changed);
   const added = others(diff.added);
   const removed = others(diff.removed);
-  if (changed.length + added.length + removed.length) {
-    return { ok: false, changed, added, removed, ...(diff.canvas.length ? { canvas: diff.canvas } : {}) };
+  const taken = [...diff.changed, ...diff.added, ...diff.removed].filter((f) => own(f)).sort();
+  const ok = changed.length + added.length + removed.length === 0;
+  const result = { ok, changed, added, removed, taken, ...(diff.canvas.length ? { canvas: diff.canvas } : {}) };
+  if (dry) return result;
+  const next = { ...diff.before };
+  for (const f of [...taken, ...diff.canvas]) {
+    if (f in diff.now) next[f] = diff.now[f];
+    else delete next[f];
   }
-  const taken = [...diff.changed, ...diff.added, ...diff.removed].sort();
-  if (dry) return { ok: true, taken, ...(diff.canvas.length ? { canvas: diff.canvas } : {}) };
   // A canvas edit logged after `at` was read but before its file was hashed is
   // then in the snapshot already, and replaying it later breaks its chain: the
   // file is reported as changed, a false alarm the person settles, never a miss.
   try {
     fs.writeFileSync(logMark(root, name), `${diff.at}\n`);
-    fs.writeFileSync(snapshotFile(root, name), `${JSON.stringify(diff.now, null, 1)}\n`);
+    fs.writeFileSync(snapshotFile(root, name), `${JSON.stringify(next, null, 1)}\n`);
   } catch (error) { return { ok: false, problems: [`could not write ${GUARD_DIR}/${name}.json: ${error.message}`] }; }
-  return { ok: true, taken, ...(diff.canvas.length ? { canvas: diff.canvas } : {}) };
+  return result;
 }
 
 export const guardSnapshot = (root, name) => path.join(root, GUARD_DIR, `${name}.json`);
