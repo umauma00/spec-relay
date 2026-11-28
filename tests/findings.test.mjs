@@ -110,3 +110,14 @@ test('a verdict holds only as a whole cell; done means nothing to fix and nothin
   write(dir, 'openspec/changes/extract-x/crosscheck.md', '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 A | confirmed | a:1 |\n');
   assert.equal(findings(dir, 'extract-x').done, true);
 });
+
+test('second review: nested lines under a fix: and the question verdicts each gate accepts', () => {
+  const dir = repo();
+  write(dir, 'openspec/changes/extract-billing/review.md', '- [ ] R1 Create\n  - fix: line one\n    - nested detail\n');
+  assert.deepEqual(findings(dir, 'extract-billing').findings.filter((f) => f.from === 'review').map((f) => f.evidence), ['line one - nested detail']);
+  write(dir, 'openspec/changes/port-x/.openspec.yaml', 'schema: spec-relay-port\n');
+  write(dir, 'openspec/changes/port-x/crosscheck.md', '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 A | question Q1 | a:1 |\n| R2 B | confirmed | a:2 |\n');
+  assert.deepEqual(findings(dir, 'port-x').findings.map((f) => f.key), ['R1 A'], 'a port holds only confirmed rows');
+  write(dir, 'openspec/changes/extract-billing/crosscheck.md', '| Item | Verdict | Evidence |\n|---|---|---|\n| R1 A | question: Q1 | a:1 |\n| R2 B | question Q2 | a:2 |\n');
+  assert.deepEqual(findings(dir, 'extract-billing').findings.filter((f) => f.from === 'crosscheck').map((f) => f.key), ['R1 A']);
+});

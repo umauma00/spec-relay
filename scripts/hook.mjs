@@ -63,7 +63,7 @@ export const writesOldRun = (command) => /e2e-old(?:\.json|\*)/i.test(command) &
 const CANVAS_LOG_WRITES = writesTo(String.raw`[^\s;|&]*canvas-log(?:\.jsonl|\*)`);
 // The kit's scripts that write review.md, a port's design.md or the finish
 // checks: only the orchestrator runs them.
-export const runsOrchestratorScript = (command) => /draft\.mjs["']?\s+(?:review|port-design)\b/i.test(command) || /finish\.mjs["']?\s+run\b/i.test(command) || /wave\.mjs["']?\s+(?:start|merge|accept|keep|end)\b/i.test(command) || /gate\.mjs["']?\s+guard\s+--save\b/i.test(command);
+export const runsOrchestratorScript = (command) => /draft\.mjs["']?\s+(?:review|port-design)\b/i.test(command) || /finish\.mjs["']?\s+run\b/i.test(command) || /wave\.mjs["']?\s+(?:start|merge|accept|keep|end)\b/i.test(command) || /gate\.mjs["']?\s+guard\b[^;|&]*--save\b/i.test(command);
 export const writesCanvasLog = (command) => /canvas-log(?:\.jsonl|\*)/i.test(command) && CANVAS_LOG_WRITES.some((pattern) => pattern.test(command));
 
 // The repository root above `start` that spec-relay set up, or null.

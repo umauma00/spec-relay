@@ -34,19 +34,23 @@ const stripComments = (text) => String(text ?? '').replace(/<!--[\s\S]*?-->/g, '
 // A verdict that holds as the gate reads it: the whole cell, not its first word
 // ("confirmed, but ..." is not confirmed). A question names its Q id, except in
 // the survey, where the person decides the row with C2.
-const settled = (cell, survey) => {
+// Amend and port crosschecks hold only when confirmed, as their gates read them.
+const settled = (cell, schema) => {
   const v = plain(stripComments(cell)).toLowerCase().replace(/[.。]$/, '').trim();
-  return v === 'confirmed' || (survey ? v === 'question' : /^question\s*:?\s*q0*\d+$/.test(v));
+  if (v === 'confirmed') return true;
+  if (schema === 'spec-relay-survey') return v === 'question';
+  if (schema === 'spec-relay-extract') return /^question\s+q0*\d+$/.test(v);
+  return false;
 };
 
 // Crosscheck rows (extract, amend, port: | Item | Verdict | Evidence |; survey:
 // | Path | Verdict | Evidence |) that need a correction: not confirmed, and not
 // left to the person as a question.
-function crosscheckFindings(dir, survey) {
+function crosscheckFindings(dir, schema) {
   const text = readIf(path.join(dir, 'crosscheck.md'), []);
   if (text === null) return [];
   return tableRows(text).filter(([item = '']) => stripComments(item)).flatMap(([item = '', verdict = '', evidence = '']) => {
-    if (settled(verdict, survey)) return [];
+    if (settled(verdict, schema)) return [];
     return [{ from: 'crosscheck', key: stripComments(item), verdict: stripComments(verdict) || 'blank', evidence: stripComments(evidence) }];
   });
 }
@@ -113,7 +117,8 @@ function notesByItem(text) {
     if (!item) continue;
     const r = line.match(REMARK);
     if (r) { note = { kind: r[1].toLowerCase(), text: r[2].trim(), indent: line.search(/\S/) }; item.push(note); continue; }
-    if (note && line.trim() && line.search(/\S/) > note.indent && !/^\s*(?:[-*+]|\d+[.)])\s/.test(line)) { note.text = `${note.text} ${line.trim()}`.trim(); continue; }
+    // Every deeper line under a note is part of it, nested bullets too.
+    if (note && line.trim() && line.search(/\S/) > note.indent) { note.text = `${note.text} ${line.trim()}`.trim(); continue; }
     if (line.trim() && !/^\s/.test(line)) { item = null; note = null; }
   }
   return items;
@@ -126,7 +131,13 @@ function reviewFindings(dir) {
   if (text === null) return [];
   const items = reviewRemarks(text);
   const notes = notesByItem(text);
-  if (notes.length !== items.length) return items.filter((item) => item.openFix).map((item) => ({ from: 'review', key: item.id, verdict: 'fix', evidence: item.remarks.filter((r) => r.kind === 'fix').map((r) => r.text).join(' / ') }));
+  if (notes.length !== items.length) {
+    // The two readings disagree: fall back to the gate's notes, after the last fixed: line.
+    return items.filter((item) => item.openFix).flatMap((item) => {
+      const last = item.remarks.map((r) => r.kind).lastIndexOf('fixed');
+      return item.remarks.slice(last + 1).filter((r) => r.kind === 'fix').map((r) => ({ from: 'review', key: item.id, verdict: 'fix', evidence: r.text }));
+    });
+  }
   return items.flatMap((item, i) => {
     if (!item.openFix) return [];
     const list = notes[i];
@@ -143,7 +154,7 @@ export function findings(root, change) {
   const schema = changeSchema(dir);
   const consistency = consistencyFindings(root, change);
   const list = [
-    ...crosscheckFindings(dir, schema === 'spec-relay-survey'),
+    ...crosscheckFindings(dir, schema),
     ...(schema === 'spec-relay-extract' ? coverageFindings(root, dir) : []),
     ...walkthroughFindings(dir),
     ...consistency.findings,

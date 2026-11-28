@@ -83,7 +83,9 @@ export function gitChanges(root) {
     const entry = parts[i];
     if (entry.length < 4) continue;
     const p = rel(entry.slice(3));
-    if (p.startsWith(prefix)) paths.add(p.slice(prefix.length));
+    // Under the root by the pathspec; a prefix in another letter case (Windows) still matches,
+    // and a path that does not is kept whole, so it is reported rather than lost.
+    paths.add(fold(p).startsWith(fold(prefix)) ? p.slice(prefix.length) : p);
     // A rename or copy is followed by its old path.
     if (/^(?:[RC].|.[RC])/.test(entry)) i += 1;
   }
@@ -115,16 +117,18 @@ function outside(root, name, alsoGuarded = []) {
   const before = readJson(gitFile(root, name), null);
   if (!Array.isArray(before)) return { list: [], git: false };
   const now = gitChanges(root);
-  if (now === null) return { list: [], git: true, problem: 'git status worked when the wave started and fails now: the files outside the guarded ones were not compared; run git status yourself' };
+  if (now === null) return { list: [], git: true, problem: `git status worked when the wave started and fails now, so the files outside the guarded ones were not compared: fix git, or run git status yourself and then delete ${path.relative(root, gitFile(root, name)).split(path.sep).join('/')} to go on without it` };
   const had = new Set(before.map((e) => fold(e)));
   const ok = assigned(root);
   // The snapshot's paths (and the guarded files added since) are compared by hash already.
   const guarded = new Set([...Object.keys(readJson(guardSnapshot(root, name), {})), ...alsoGuarded].map(fold));
   const list = now.filter((p) => !had.has(fold(p)) && !ok(p) && !guarded.has(fold(p)));
-  return { list, git: true, now };
+  return { list, git: true, now, before };
 }
 
-const saveGit = (root, name, paths) => fs.writeFileSync(gitFile(root, name), `${JSON.stringify(paths)}\n`);
+function saveGit(root, name, paths) {
+  try { fs.writeFileSync(gitFile(root, name), `${JSON.stringify([...new Set(paths)].sort())}\n`); return null; } catch (error) { return `could not write the git list of wave ${name}: ${error.message}`; }
+}
 
 export function start(root, name) {
   if (!NAME.test(name)) return badName(name);
@@ -134,7 +138,8 @@ export function start(root, name) {
   const saved = guardSave(root, name);
   if (!saved.ok) return saved;
   const paths = gitChanges(root);
-  try { if (paths) saveGit(root, name, paths); else fs.rmSync(gitFile(root, name), { force: true }); } catch (error) { return { ok: false, problems: [`could not write the git list: ${error.message}`] }; }
+  const failed = paths ? saveGit(root, name, paths) : (fs.rmSync(gitFile(root, name), { force: true }), null);
+  if (failed) return { ok: false, problems: [failed] };
   return { ...saved, git: paths !== null };
 }
 
@@ -151,7 +156,8 @@ function ownPaths(root, list, { kept = false } = {}) {
     const p = repoPath(root, raw);
     if (!p || p === '.' || p.split('/').includes('..')) { problems.push(`not a path inside the repository: ${raw}`); continue; }
     const f = fold(p);
-    if (!kept && (WIDE.has(f) || 'openspec/config.yaml'.startsWith(`${f}/`))) { problems.push(`${p} holds the config or many changes: name the files or the one change folder you wrote`); continue; }
+    if (WIDE.has(f) || 'openspec/config.yaml'.startsWith(`${f}/`)) { problems.push(`${p} holds the config or many changes: name the files${kept ? '' : ' or the one change folder you wrote'}`); continue; }
+    if (kept && fs.existsSync(path.join(root, p)) && fs.statSync(path.join(root, p)).isDirectory()) { problems.push(`${p} is a folder: name each file the person decided to keep`); continue; }
     if (!kept && (f === 'openspec/config.yaml' || sources.some((s) => s === f || s.startsWith(`${f}/`)))) {
       problems.push(`${p} holds the source code or the person's settings, which the orchestrator never writes; when the person decided to keep a change there, run wave.mjs keep`);
       continue;
@@ -176,9 +182,11 @@ function compare(root, name, own = () => false, take = false) {
   if (guard.problems) return guard;
   const out = outside(root, name, [...(guard.added ?? []), ...(guard.taken ?? [])]);
   const strangers = out.list.filter((p) => !own(p));
-  if (take && out.now && strangers.length === 0) saveGit(root, name, out.now);
-  const ok = guard.ok && strangers.length === 0 && !out.problem;
-  return { ok, guard, outside: strangers, git: out.git, gitProblem: out.problem };
+  // Own paths are taken in any case; a stranger stays out of the list, so it keeps being reported.
+  const saved = take && out.now ? saveGit(root, name, strangers.length ? [...out.before, ...out.now.filter((p) => own(p))] : out.now) : null;
+  const gitProblem = out.problem ?? saved ?? undefined;
+  const ok = guard.ok && strangers.length === 0 && !gitProblem;
+  return { ok, guard, outside: strangers, git: out.git, gitProblem };
 }
 
 function report(root, result, extra = {}, agent = []) {
@@ -208,14 +216,26 @@ export function check(root, name) {
 const isFolder = (root, p) => { try { return fs.statSync(path.resolve(root, p)).isDirectory(); } catch { return false; } };
 const isWalkthrough = (into) => /(^|[\\/])walkthrough\.md$/i.test(into);
 
+// One merge per artifact: parts named under the same --into twice go in one call
+// (rows of one walkthrough entry point add up only within one merge).
+function coalesce(root, pairs) {
+  const byInto = new Map();
+  for (const { into, parts } of pairs) {
+    const key = fold(repoPath(root, into));
+    if (!byInto.has(key)) byInto.set(key, { into, parts: [] });
+    byInto.get(key).parts.push(...parts);
+  }
+  return [...byInto.values()];
+}
+
 function runMerges(root, pairs, { midWave }) {
-  return pairs.map(({ into, parts }) => {
+  return coalesce(root, pairs).map(({ into, parts }) => {
     if (midWave && isWalkthrough(into) && !parts.every((p) => isFolder(root, p))) {
       return { ok: false, into, problems: [`${into}: merge the walkthrough parts of this change in one call, as their folder, once every walkthrough task of it has returned (the rows of one merge for an entry point replace the rows it had)`] };
     }
     const folder = midWave && !isWalkthrough(into) && parts.find((p) => isFolder(root, p));
     if (folder) return { ok: false, into, problems: [`${folder} is a folder: while tasks still run, merge the part files of the tasks that returned, by name (wave.mjs end merges folders)`] };
-    return merge(root, { into, parts, clean: true });
+    return { into, ...merge(root, { into, parts, clean: true }) };
   });
 }
 

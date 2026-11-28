@@ -199,3 +199,37 @@ test('git: a root below the top of the repository, the guide, and staging during
   write(dir, '.vscode/settings.json', '{}\n');
   assert.deepEqual(check(dir, 'wave-8').outside, ['.vscode/settings.json']);
 });
+
+test('second review: one merge per artifact at end, keep names files, own outside paths are taken', () => {
+  const dir = repo();
+  start(dir, 'wave-9');
+  const into = 'openspec/changes/extract-a/walkthrough.md';
+  const head = '| Entry point | Behavior | Verdict | Evidence |\n|---|---|---|---|\n';
+  write(dir, 'openspec/spec-relay/work/extract-a/w/03.md', `${head}| \`src/a.php:save\` | logs out | gap | \`src/a.php:1\` |\n`);
+  write(dir, 'openspec/spec-relay/work/extract-a/w/04.md', `${head}| \`src/a.php:save\` | saves | covered R1: Saved | \`src/a.php:1\` |\n`);
+  const ended = end(dir, 'wave-9', [{ into, parts: ['openspec/spec-relay/work/extract-a/w/03.md'] }, { into, parts: ['openspec/spec-relay/work/extract-a/w/04.md'] }]);
+  assert.equal(ended.ok, true, JSON.stringify(ended));
+  assert.equal(ended.merged.length, 1, 'the same --into twice is one merge');
+  assert.match(fs.readFileSync(path.join(dir, into), 'utf8'), /logs out \| gap/);
+  start(dir, 'wave-10');
+  write(dir, 'src/a.php', '<?php echo 3;\n');
+  assert.match(keep(dir, 'wave-10', ['src']).problems[0], /is a folder/);
+  assert.match(keep(dir, 'wave-10', ['openspec']).problems[0], /many changes/);
+  assert.equal(keep(dir, 'wave-10', ['src/a.php']).ok, true);
+  write(dir, PART(1), row('R1 a'));
+  const failed = mergeParts(dir, 'wave-10', [{ into: CROSS, parts: [PART(1)] }, { into: 'openspec/changes/extract-a/walkthrough.md', parts: [PART(1)] }]);
+  assert.match(failed.next.agent.join(), /merge openspec\/changes\/extract-a\/walkthrough\.md: /);
+});
+
+test('second review: an outside path of the orchestrator is taken while a stranger stays reported', { skip: !hasGit }, () => {
+  const dir = repo({ git: true });
+  start(dir, 'wave-11');
+  write(dir, '.github/mine.md', 'x\n');
+  write(dir, '.github/stranger.md', 'x\n');
+  const taken = accept(dir, 'wave-11', ['.github/mine.md']);
+  assert.equal(taken.ok, false);
+  assert.deepEqual(taken.outside, ['.github/stranger.md']);
+  assert.deepEqual(check(dir, 'wave-11').outside, ['.github/stranger.md'], 'mine.md was taken');
+  assert.equal(keep(dir, 'wave-11', ['.github/stranger.md']).ok, true);
+  assert.equal(check(dir, 'wave-11').ok, true);
+});
