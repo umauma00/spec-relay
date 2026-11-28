@@ -392,3 +392,23 @@ test('second review: data links of an object whose owner context has no capabili
   write(dir, 'openspec/changes/archive/2026-11-02-extract-sales-order/source-map.md', '# Source map\n\n## Database\n| Table or object | Kind | Use | Definition |\n|---|---|---|---|\n| AuditLog | table | write | - |\n');
   assert.ok(links(dir, scope).some((l) => l.pair === 'billing/invoice <-> sales/order' && l.topic === 'data auditlog'));
 });
+
+test('findings.mjs lists the links whose row disagrees and the links that need a checker again', async () => {
+  const { findings } = await import('../scripts/findings.mjs');
+  const dir = project();
+  const [uses, data] = links(dir, scope).map((l) => l.code);
+  assert.deepEqual(findings(dir, 'extract-billing-invoice').recheck.map((r) => r.status), ['missing', 'missing']);
+  part(dir, [
+    `| billing/invoice <-> platform/auth | uses | conflict <!-- pair ${uses} --> | "Issue an invoice" expects a session "Check the session" never makes |`,
+    `| billing/invoice <-> platform/auth | data users | consistent <!-- pair ${data} --> | "Issue an invoice" reads users; platform/auth: nothing about invoices |`,
+  ]);
+  assert.equal(doMerge(dir).ok, true);
+  let result = findings(dir, 'extract-billing-invoice');
+  assert.deepEqual(result.findings.map((f) => `${f.from} ${f.key} ${f.verdict}`), ['consistency billing/invoice <-> platform/auth, uses conflict']);
+  assert.deepEqual(result.recheck, []);
+  // A fix of this spec makes both rows stale: they need the checker again, not a fix.
+  write(dir, `${X}/specs/billing/invoice/spec.md`, BILL_SPEC.replace('month ends', 'month closes'));
+  result = findings(dir, 'extract-billing-invoice');
+  assert.equal(result.counts.consistency, undefined);
+  assert.deepEqual(result.recheck.map((r) => `${r.topic} ${r.status}`), ['uses stale', 'data users stale']);
+});

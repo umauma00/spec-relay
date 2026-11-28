@@ -1113,14 +1113,16 @@ export function guardSave(root, name) {
   return { ok: true, snapshot: `${GUARD_DIR}/${name}.json`, files: Object.keys(files).length, ...(warnings.length ? { warnings } : {}) };
 }
 
-// Lists only the paths that differ, so a large source tree never floods the
-// orchestrator's context. The orchestrator ignores the paths it changed itself.
-export function guardCompare(root, name) {
+// Every path that differs from the snapshot, uncapped, with the hashes it was
+// read from. `at` is the size of the canvas log read before the files were
+// hashed, so a canvas edit logged while they are hashed is still replayed later.
+function guardDiff(root, name) {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(name)) return { ok: false, problems: [`not a snapshot name: ${name} (letters, digits and hyphens)`] };
   let before;
   try { before = JSON.parse(fs.readFileSync(snapshotFile(root, name), 'utf8')); } catch {
     return { ok: false, problems: [`no snapshot ${GUARD_DIR}/${name}.json; run gate.mjs guard --save ${name} before the wave`] };
   }
+  const at = logSize(root);
   const now = guardFiles(root);
   // A review.md the person changed in the canvas is theirs, not a subagent's: the
   // canvas edits logged after the snapshot, replayed in order, lead without a gap
@@ -1150,8 +1152,53 @@ export function guardCompare(root, name) {
   const changed = touched.filter((f) => !canvas.includes(f)).sort();
   const added = Object.keys(now).filter((f) => !(f in before)).sort();
   const removed = Object.keys(before).filter((f) => !(f in now)).sort();
+  return { ok: changed.length + added.length + removed.length === 0, changed, added, removed, canvas, now, at };
+}
+
+// Lists only the paths that differ, so a large source tree never floods the
+// orchestrator's context. The orchestrator ignores the paths it changed itself.
+export function guardCompare(root, name) {
+  const diff = guardDiff(root, name);
+  if (diff.problems) return diff;
   const cap = (list) => (list.length > 50 ? [...list.slice(0, 50), `...and ${list.length - 50} more`] : list);
-  return { ok: changed.length + added.length + removed.length === 0, changed: cap(changed), added: cap(added), removed: cap(removed), ...(canvas.length ? { canvas } : {}) };
+  return { ok: diff.ok, changed: cap(diff.changed), added: cap(diff.added), removed: cap(diff.removed), ...(diff.canvas.length ? { canvas: diff.canvas } : {}) };
+}
+
+// While a wave still runs, the orchestrator writes guarded files itself (a merge,
+// a tick, an archive). `own(path)` says which paths it just wrote. When every
+// path that differs from the snapshot is its own or the person's canvas edit,
+// the snapshot moves to the files as they are now (and the canvas mark to the
+// log as it was read), so the rest of the wave is compared from here. Otherwise
+// nothing moves and the other paths are listed: someone else changed them.
+// With `dry`, nothing moves either way (a check).
+export function guardTake(root, name, own = () => false, { dry = false } = {}) {
+  const diff = guardDiff(root, name);
+  if (diff.problems) return diff;
+  const others = (list) => list.filter((f) => !own(f));
+  const changed = others(diff.changed);
+  const added = others(diff.added);
+  const removed = others(diff.removed);
+  if (changed.length + added.length + removed.length) {
+    return { ok: false, changed, added, removed, ...(diff.canvas.length ? { canvas: diff.canvas } : {}) };
+  }
+  const taken = [...diff.changed, ...diff.added, ...diff.removed].sort();
+  if (dry) return { ok: true, taken, ...(diff.canvas.length ? { canvas: diff.canvas } : {}) };
+  // A canvas edit logged after `at` was read but before its file was hashed is
+  // then in the snapshot already, and replaying it later breaks its chain: the
+  // file is reported as changed, a false alarm the person settles, never a miss.
+  try {
+    fs.writeFileSync(logMark(root, name), `${diff.at}\n`);
+    fs.writeFileSync(snapshotFile(root, name), `${JSON.stringify(diff.now, null, 1)}\n`);
+  } catch (error) { return { ok: false, problems: [`could not write ${GUARD_DIR}/${name}.json: ${error.message}`] }; }
+  return { ok: true, taken, ...(diff.canvas.length ? { canvas: diff.canvas } : {}) };
+}
+
+export const guardSnapshot = (root, name) => path.join(root, GUARD_DIR, `${name}.json`);
+
+// Removes a wave's snapshot and its canvas mark once the wave is over.
+export function guardDrop(root, name) {
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(name)) return;
+  for (const file of [snapshotFile(root, name), logMark(root, name)]) fs.rmSync(file, { force: true });
 }
 
 export function checkPortReady(root, capability) {

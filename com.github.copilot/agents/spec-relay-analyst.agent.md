@@ -88,6 +88,14 @@ instructions), and the exact file paths you may write.
 - **Corrections**: when the task gives a reviewer's request (a `fix:` line),
   change only what it asks for in the files named, keep every other line,
   and say in your report, in one line, what you changed.
+- **Findings files**: when the task gives a findings file
+  (`openspec/spec-relay/work/<change>/findings/<nn>.md`), it lists every open
+  finding of the change at once: the checkers' rows and the reviewer's
+  requests. Read the code each one cites and correct all of them in one
+  pass, in the files the task names; add a new requirement at the END of the
+  spec. A finding you think is wrong: change nothing for it and say why.
+  Report one line per finding (its first cell and what you changed), and
+  every requirement or screen you added or renamed.
 - **Question tasks**: when the task says to write nothing, write no file.
   Read what it names and answer the question in a few short paragraphs, with
   path:line for every claim, and "not found" where the code does not say.

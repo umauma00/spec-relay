@@ -25,6 +25,8 @@ scripts/status.mjs             進捗の計算（TODO リスト・チャット�
 scripts/finish.mjs             仕上げの工程（開始の確認、残りものの収集と下書き、全体のチェックの実行と記録、移行先のハッシュ、仕上げの gate）
 scripts/metrics.mjs            工程ごとにかかった時間の記録と集計
 scripts/merge.mjs              サブエージェントが分担して書いた表を1つの成果物にまとめる
+scripts/wave.mjs               波の前後の見張り（gate.mjs guard と git status）と、終わった作業の部品のまとめを1回の命令で
+scripts/findings.mjs           1つの change の未解決の指摘（照合・箇所台帳・見直し・機能どうし・人の fix:）を1つのファイルに
 scripts/draft.mjs              ほかのファイルから決まる部分を書く（review.md の項目、照合に渡す R/S の番号、port の design.md の画面・シナリオ・元コードの表）
 scripts/verify.mjs             実装のテスト・境界チェック・比べ方を実行し、結果を記録する（port-done が読む）
 scripts/compare.mjs            比べ方 B1：元のプログラムから記録したケースと新しいコードの結果を1件ずつ比べる

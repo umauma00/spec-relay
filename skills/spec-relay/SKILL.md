@@ -144,8 +144,13 @@ need the reasoning behind a step.
 - **Work folder**: `openspec/spec-relay/work/<change>/`, scratch files that
   subagents write in parallel (table parts, survey evidence) before
   `merge.mjs` puts them into an artifact.
-- **Wave**: a set of subagent tasks you start together (see Working in
-  parallel).
+- **Wave**: the subagent tasks that run under one guard snapshot
+  (`wave.mjs start` to `wave.mjs end`). Where the host runs subagents in the
+  background, a wave is a pool: you start the next task as soon as one
+  returns, not when all have (see Working in parallel).
+- **Fix round**: one analyst task that corrects every open finding of a
+  change at once (`findings.mjs --write`), then one recheck of what it
+  changed.
 
 ## 0. Environment check and setup
 
@@ -204,14 +209,20 @@ stop halfway on something the machine or the host lacks.
 3. Otherwise ask, one question at a time: the source language (propose what you
    detect from the files), the target language, the source root, the target root,
    the language for artifacts (default: the person's language), how many
-   subagents may run at once (default 4; the Copilot CLI reference gives 2 on
-   Free, 4 on Pro, 8 on Max, 16 on Business and 32 on Enterprise or
-   usage-based billing, for the whole session), and which model the subagents
-   run on (default `session`, the model of this session; the checker may get
-   another model for a second opinion).
+   subagents may run at once, how many capabilities may be analyzed ahead of
+   the review, and which model the subagents run on (default `session`, the
+   model of this session; the checker may get another model for a second
+   opinion). For the number at once, ask which Copilot plan they have and
+   recommend its limit (the Copilot CLI reference gives 2 on Free, 4 on Pro, 8
+   on Max, 16 on Business and 32 on Enterprise or usage-based billing, for the
+   whole session; 4 when they do not know): this number sets how long every
+   check waits, and the AI credits are the same, since the same tasks run
+   either way. For the number ahead, recommend 2 below 8 at once and 3 from 8
+   on (more slots stand idle otherwise; more than 3 lets an analysis start
+   before the lessons of the reviews before it are written).
 4. Run `node "<kit>/scripts/setup.mjs" --target . --source-language "..."
    --target-language "..." --source-root "..." --target-root "..." --language ...
-   --parallel <n> --subagent-model "<model>"` (add `--checker-model "<model>"`
+   --parallel <n> --ahead <n> --subagent-model "<model>"` (add `--checker-model "<model>"`
    for a different checker model)
    without `--apply`, show the plan, and run it again with `--apply` after the
    person agrees. On a conflict, show it and ask how to resolve it; never
@@ -256,22 +267,39 @@ not wash out these instructions.
    session, their own subagents included), `ahead` (how many capabilities may
    be in analysis or waiting for review at once), `models` (the model of each
    role) and `nextToAnalyze` (the capabilities you may start analyzing now).
-   The person sets them in `openspec/config.yaml`.
-2. **Waves.** Start all independent tasks of a wave in one step (as
-   background subagents where the host offers that), at most `subagents` at
-   once, and wait for the whole wave before you start the next one. If the host
-   refuses to start a subagent because too many are running, wait for one to
-   finish and start it again; never count a refused task as done. If the host
-   runs subagents one after another, the result is the same, only slower.
-   Write "give this to the `spec-relay-analyst` agent", never a tool name.
+   The person sets them in `openspec/config.yaml`. When the person says the
+   work is slow, tell them these two numbers and what step 0 recommends for
+   their plan; they change the file themselves (never you), and the next
+   `status.mjs` run reads it.
+2. **A pool, not a barrier.** Keep `subagents` tasks running: as soon as one
+   returns and you have checked its report, start the next task whose inputs
+   are ready, from any capability, without waiting for the others. Start
+   tasks as background subagents (Copilot CLI and the Copilot app offer them;
+   read each result when it arrives). Where the host offers no background
+   subagents, start the ready tasks together, at most `subagents` at once,
+   and the next ones when those have returned: the result is the same, only
+   slower. A task is ready when every file it reads is final for it:
+   - Never start a task that writes a file while another task still reads
+     it, nor the other way round: the fix task of a capability starts only
+     after every check of that capability has returned (checkers of other
+     capabilities may run beside it), and never run an implementer and a
+     checker of the same port at once.
+   - The checks of one change (crosscheck, omission check, walkthrough,
+     consistency) read the same files and write their own parts: start them
+     all at once.
+   If the host refuses to start a subagent because too many are running,
+   wait for one to finish and start it again; never count a refused task as
+   done. Write "give this to the `spec-relay-analyst` agent", never a tool name.
    When `models` names a model for the role (not `session`), ask for that
    model when you delegate, through the delegation's model option where the
    host has one. If the host has no such option, or this session's model is
    Auto, the subagent runs on the session model: tell the person once.
-   Before the first wave, tell the person that subagents edit files: unless
-   they allow file edits for this repository for the session, every subagent
-   waits at a permission prompt, and in Copilot CLI declining one call cancels
-   the others started with it.
+   At the start of every session that will run subagents (a permission ends
+   with its session), tell the person that subagents edit files and
+   recommend allowing file edits for `openspec/` and the target root for this
+   session (docs/SETUP.md shows how in each host): otherwise every subagent
+   waits at a permission prompt while nobody watches, and in Copilot CLI
+   declining one call cancels the others started with it.
 3. **Subagents read and write; you route.** Each task names what to read
    (folders or files), the exact files to write, the schema file and artifact
    id to follow (`openspec/schemas/<schema>/schema.yaml`), and anything the
@@ -302,26 +330,40 @@ not wash out these instructions.
    Never give a subagent a path to write under the source root (when the
    source root is `.`, give only paths under `openspec/` and the target root),
    under `openspec/specs/`, `openspec/config.yaml` or the lessons.
-   Before every wave, run `node "<kit>/scripts/gate.mjs" guard --save
-   wave-<n>`: it saves the hashes of the files no subagent may write (every
-   active change's `review.md`, `questions.md`, `crosscheck.md`,
-   `walkthrough.md`, `verify.json` and `e2e-old.json`, every active port's `proposal.md` and `design.md`,
-   the finish change's `checks.md` and `leftovers.md`, `plan.md`, `lessons.md`,
-   the consistency ledger,
-   `openspec/specs/`, `openspec/config.yaml` and the source files). After the
-   wave, run `gate.mjs guard --compare wave-<n>`, which lists only the paths
-   that changed (exit code 1 then: read the lists). If the wave is still
-   running when you must write a guarded file yourself (a tick, a question, a
-   lesson, an archive), run `--compare` first: if that path already changed, a subagent
-   changed it; otherwise write, then `--save wave-<n>` again. For any change
-   you did not make, stop, tell the person what changed, and do not use that
-   wave's results until they decide. A `canvas` list in the result names the
-   `review.md` files the person changed in the canvas during the wave: those
-   are theirs, not a subagent's; read them again before you use them. If
-   `--save` prints `warnings`, tell the person which files are not guarded.
-   In a git repository, also compare `git status --porcelain
-   --untracked-files=all` before and after, for files outside those (such as
-   kit or host folders).
+   **The guard, one command per moment** (`node "<kit>/scripts/wave.mjs"`):
+   - `start wave-<n>` before the first task of a wave: it saves the hashes of
+     the files no subagent may write (every active change's `review.md`,
+     `questions.md`, `crosscheck.md`, `walkthrough.md`, `verify.json` and
+     `e2e-old.json`, every active port's `proposal.md` and `design.md`, the
+     finish change's `checks.md` and `leftovers.md`, `plan.md`, `lessons.md`,
+     the consistency ledger, `openspec/specs/`, `openspec/config.yaml` and
+     the source files) and, in a git repository, what git reports as changed.
+     If it prints `warnings`, tell the person which files are not guarded.
+   - `merge wave-<n> --into <artifact> --parts <part file>` (several
+     `--into`/`--parts` pairs in one call) each time tasks return while
+     others still run: it checks the guard, merges those tasks' part files
+     with `merge.mjs --clean` and takes the merged artifacts into the
+     snapshot. Name the part files the returned tasks wrote, never their
+     folder (another task may still be writing there; it refuses a folder).
+   - `check wave-<n>` right before you write a guarded file yourself while
+     tasks still run (a tick, a question, a lesson, an archive): a path that
+     already changed was changed by someone else. Then write, and run
+     `accept wave-<n> <path> [<path>...]` (a folder covers what is under it:
+     an archive moves the change folder and adds to `openspec/specs/`) so
+     the rest of the wave is compared from there.
+   - `end wave-<n> [--into ... --parts <file or folder> ...]` when every task
+     has returned: the last check and merges, and the snapshot is removed.
+   Each one prints `ok` and, when something changed that nobody assigned,
+   `changed`, `added`, `removed` (guarded files) and `outside` (paths git
+   now reports outside `openspec/changes/`, the work folder and the target
+   root, such as kit or host folders); it then merges and takes nothing.
+   For any change you did not make, stop, tell the person what changed (the
+   `next.person` sentence), and do not use those results until they decide.
+   A `canvas` list names the `review.md` files the person changed in the
+   canvas meanwhile: those are theirs, never a problem; read them again
+   before you use them. Start a new wave (a new snapshot) only after the
+   last one ended; `gate.mjs guard --save` and `--compare` still work as
+   before for a host where you prefer them.
 5. **Tables split across subagents** (inventory, crosscheck, coverage,
    walkthrough, the consistency ledger): each subagent
    writes its rows as a Markdown table to its own part file in the work folder
@@ -332,25 +374,50 @@ not wash out these instructions.
    rows one merge brings for an entry point, from all its parts together,
    replace all the rows that entry point had, so merge each wave on its own
    and a walk again writes all of them; merge lists under `dropped` the `gap`
-   and `vague` rows that are gone: confirm the spec now states each). The
+   and `vague` rows that are gone: confirm the spec now states each; a part
+   file holds whole entry points, so merging each part on its own as its
+   task returns keeps that). Merge with `wave.mjs merge` or `end` (above),
+   which run `merge.mjs` for you. The
    survey's crosscheck.md gets the code of each inventory row it judged
    (`<!-- row ... -->`) only through merge.mjs. If merge reports one
    `R<n>` with two names because a requirement was renamed on purpose, delete
    the old row from the artifact and merge again.
 6. **Mixed waves** are fine when no file is written twice: the implementer of
    one port, analysts of the next capabilities and a checker of another can
-   run together.
-7. **Ahead of the review, not further.** Start an extract change only for a
+   run together. Keep the pool full across capabilities: while one
+   capability's fix task runs, the checks of the next can.
+7. **Fix rounds, not one fix per row.** When the checks of a change have
+   returned, do not hand their findings to analysts one row at a time: each
+   such pair of tasks (a fix, then a recheck) costs a full round of waiting.
+   Run `node "<kit>/scripts/findings.mjs" --change <change> --write`: it
+   collects every open row (crosscheck rows not `confirmed`, coverage `gap`,
+   walkthrough `gap` and `vague`, consistency `conflict`, `duplicate`,
+   `term` and `unclear` of an extract, and the person's `fix:` notes not
+   answered yet) into `openspec/spec-relay/work/<change>/findings/<nn>.md`
+   and prints the counts and the path. First take out yourself what is not
+   the analyst's (move a row to questions.md and write `question Q<n>` when
+   only the person can decide; answer a fix whose new words you already know
+   and write `fixed:`), then run it. Give the file to ONE analyst (the
+   spec, screens, trace and source map of a capability are one writer's)
+   with the files it may change, and read only its report. Then recheck in
+   one go everything the fix touched, all at once: the checker for each
+   changed or added requirement and screen, the sites of coverage.md the
+   new requirements cover, the entry points whose behavior changed (walked
+   again), and the consistency links that `findings.mjs` lists under
+   `recheck` (stale after the spec changed). Run `findings.mjs` again on
+   the merged results: usually nothing is left; whatever is, is the next
+   round. In a port, the same list goes to the implementer.
+8. **Ahead of the review, not further.** Start an extract change only for a
    capability in `nextToAnalyze`. A longer queue only waits, and what the
    person finds in one review (a misread pattern, a glossary term, a wish about
    wording) should reach the next analyses before they are written: write it
    to the lessons first (see Lessons).
-8. **Pilot first.** Analyze the first capability (`platform`) on its own
+9. **Pilot first.** Analyze the first capability (`platform`) on its own
    (`nextToAnalyze` holds one capability until the first is reviewed), and
    write what its review taught to the lessons before later analysts start.
-9. Hand the person reviews of the same context one after another where the
+10. Hand the person reviews of the same context one after another where the
    order allows, because they share words and data.
-10. **What stays with you.** Talking with the person, the gates, ticks and
+11. **What stays with you.** Talking with the person, the gates, ticks and
    decisions in `review.md`, `questions.md`, `plan.md`, `lessons.md`, the
    port's proposal, design decisions and tasks, `impact.md`, the finish
    change's `checks.md` and `leftovers.md` (the flows and the classes you
@@ -362,8 +429,8 @@ not wash out these instructions.
    and a compaction loses what the person said. A change whose new text you
    already know, in one file (a word, a name, a line the person dictated),
    is faster done yourself than delegated. A single task is a wave of one:
-   save and compare the guard around it as around any wave.
-11. **Code questions.** When the person asks about the source code or the
+   run `wave.mjs start` and `end` around it as around any wave.
+12. **Code questions.** When the person asks about the source code or the
    new code (in the chat, a `[canvas]` question, a review item) and the
    answer needs more than a few files, give the question to one
    `spec-relay-analyst` as a question task: the question, the page or item
@@ -470,17 +537,22 @@ you assist. This gate is the point of the kit.
      Give anything that needs the source or other artifacts read (a
      scenario, a requirement, a trace row, a screen, a context's boundary,
      a table of the target design, a section of handover.md) to one
-     `spec-relay-analyst` with the item, the person's words from the fix
-     line, the files to change and the schema artifact, and read only its
-     report. Tell it to add a new requirement at the end of its spec file
+     `spec-relay-analyst`, all the open requests of the change in one task
+     (Working in parallel, Fix rounds): `findings.mjs --change <change>
+     --write` puts the person's words of every unanswered `fix:` line (and
+     any open check rows) in one file; give that file, the files to change
+     and the schema artifact, and read only its report. The person goes on
+     with the other items meanwhile: say so, and never make them wait for
+     one fix before they send the next. Tell it to add a new requirement at the end of its spec file
      and to report every requirement or screen it added or renamed, so that
      you untick those and run `draft.mjs review --update`. Never give it
      review.md, questions.md, impact.md, crosscheck.md, a port's proposal
      and design, or the finish change's checks.md and leftovers.md: they
      stay yours. In extract and amend, have the checker
      check the changed rows again, whoever changed them (in an extract, also
-     walk again the entry points whose behavior changed; in a survey, judge
-     the changed inventory rows again). Then write
+     walk again the entry points whose behavior changed, and compare again
+     the consistency links `findings.mjs` lists under `recheck`; in a
+     survey, judge the changed inventory rows again), all in one go. Then write
      `  - fixed: <what you changed, in one line>` right under that fix
      line, keep the item unticked, render again and ask the person to look
      again. When you think the request is wrong, do not change the
@@ -601,10 +673,12 @@ the domain, not the folders.
      `openspec/spec-relay/work/<change>/crosscheck/<nn>.md` to write; never
      the evidence files or the analysts' reports. Merge with `merge.mjs
      --into openspec/changes/<change>/crosscheck.md --parts
-     openspec/spec-relay/work/<change>/crosscheck --clean`. For every
-     `mismatch` or `unclear` row, have an analyst correct the inventory,
-     capabilities or context map and a new checker judge the row again (a
-     part file with a higher number), or, when only the person can decide
+     openspec/spec-relay/work/<change>/crosscheck --clean` (or `wave.mjs
+     merge` per part as tasks return). For the `mismatch` and `unclear`
+     rows, run a fix round (Working in parallel): one analyst corrects the
+     inventory, capabilities or context map for all of them from the
+     `findings.mjs --write` file, then checkers judge those rows again in
+     one go (part files with a higher number); or, when only the person can decide
      (whether a page is still used, where a feature belongs), write
      `question` as the verdict yourself and keep the evidence: the person
      decides those rows with item C2. Every row needs evidence, `confirmed`
@@ -749,15 +823,17 @@ waves.
    `openspec/spec-relay/work/extract-<capability>/crosscheck-<nn>.md`; merge
    them with `merge.mjs --into
    openspec/changes/extract-<capability>/crosscheck.md --parts
-   openspec/spec-relay/work/extract-<capability> --clean`. For every
-   `mismatch` and `unclear` row, have an analyst fix the spec, screens or trace
-   and a new checker check that row again (a part file with a higher number,
-   such as `crosscheck-02.md`, merged the same way), or move it to questions.md and write `question Q<n>` as its verdict
-   yourself. For every `incomplete` row, have an analyst add a scenario for
-   each behavior the checker names (or a requirement at the END of the spec),
-   then check that row again.
+   openspec/spec-relay/work/extract-<capability> --clean`. A `mismatch` or
+   `unclear` row is fixed in the fix round (item 7): the analyst fixes the
+   spec, screens or trace, and a new checker checks that row again (a part
+   file with a higher number, such as `crosscheck-02.md`, merged the same
+   way); or move it to questions.md and write `question Q<n>` as its verdict
+   yourself before the round. For an `incomplete` row, the analyst adds a
+   scenario for each behavior the checker names (or a requirement at the END
+   of the spec), then that row is checked again.
 4. **Omission check.** In the same wave as the crosscheck (both need only
-   trace.md, and the walkthrough of step 5 runs with them), run `node "<kit>/scripts/sites.mjs" --change
+   trace.md, and the walkthrough of step 5 and the consistency check of step
+   6 run with them), run `node "<kit>/scripts/sites.mjs" --change
    extract-<capability>`. It lists the sites of the source map's files in
    groups of 40 under `openspec/spec-relay/work/extract-<capability>/sites/`
    (`--per N` changes the size). Give each group to its own
@@ -771,13 +847,14 @@ waves.
    that no requirement's trace reaches: tell the person the count in your
    report. Merge with `merge.mjs --into
    openspec/changes/extract-<capability>/coverage.md --parts
-   openspec/spec-relay/work/extract-<capability>/coverage --clean`. For every
-   `gap`, have an analyst add the requirement it needs (and its trace) at
-   the END of the spec, so the R numbers the ledger already uses stay the
-   same; have a checker crosscheck the new requirement and judge that site
-   again (give it the site ids from the sites file, and have it write a part
-   file with a higher number, merged the same way); or move it to
-   questions.md and write `question Q<n>` as its verdict yourself. The gate
+   openspec/spec-relay/work/extract-<capability>/coverage --clean`. A `gap`
+   goes to the fix round (item 7): the analyst adds the requirement it needs
+   (and its trace) at the END of the spec, so the R numbers the ledger
+   already uses stay the same; then a checker crosschecks the new
+   requirement and judges that site again (give it the site ids from the
+   sites file, and have it write a part file with a higher number, merged
+   the same way); or move it to questions.md and write `question Q<n>` as
+   its verdict yourself. The gate
    also fails a `covered` row while a named requirement's trace reaches not
    every effect line of the site. Then decide per line with the checker's
    evidence: when a requirement's scenarios state what the line does, have
@@ -806,13 +883,13 @@ waves.
    from the entry point, so that what the trace missed shows up. Merge with
    `merge.mjs --into openspec/changes/extract-<capability>/walkthrough.md
    --parts openspec/spec-relay/work/extract-<capability>/walkthrough
-   --clean`. For every `gap` and `vague` row, have an analyst add the
-   requirement (with its trace) at the END of the spec or make the scenario
-   concrete, then a checker crosscheck that requirement and walk the entry
-   point again (merged on its own; its rows replace all of that entry point's
-   rows), and judge again any site of coverage.md the new
-   requirement covers; or move it to questions.md and write `question Q<n>`
-   as its verdict yourself. When a checker reports an entry point the source
+   --clean`. A `gap` or `vague` row goes to the fix round (item 7): the
+   analyst adds the requirement (with its trace) at the END of the spec or
+   makes the scenario concrete, then a checker crosschecks that requirement
+   and walks the entry point again (merged on its own; its rows replace all
+   of that entry point's rows), and judges again any site of coverage.md the
+   new requirement covers; or move it to questions.md and write `question
+   Q<n>` as its verdict yourself. When a checker reports an entry point the source
    map lacks, have the analyst add it under Entry points (the gate fails on
    a walked entry point the source map does not list, and on a listed one
    nobody walked). The gate also checks that each named scenario exists, so
@@ -825,7 +902,11 @@ waves.
    `- None (why)` under Entry points (definitions only), walkthrough.md keeps
    its empty table. A scenario renamed later breaks the rows
    that name it: walk those entry points again.
-6. **Consistency.** After the walkthrough is merged, run `node
+6. **Consistency.** The pair check below needs only the spec and the source
+   maps, so start it in the same wave as the crosscheck: it costs a second
+   look at the pairs when the fix round changes the spec (the rows go stale
+   and `findings.mjs` lists them under `recheck`), and saves waiting for
+   the walkthrough. After the walkthrough is merged, run `node
    "<kit>/scripts/consistency.mjs" check --change extract-<capability>` for
    the dependency problems: the walkthrough's `other capability` rows must
    be in source-map.md's Dependencies table, an entry point it says it uses
@@ -834,11 +915,13 @@ waves.
    misses is for the pair check below), every Database row's Use cell must
    say read, write, read / write, calls or fires, and a table it writes must
    be one the survey's context map (or the plan's `## Shared data`) lets its
-   context write. Have the analyst fix the source map. When the person
+   context write. The analyst fixes the source map (in the fix round, with
+   the rest, when one is due anyway). When the person
    must decide who owns a table, ask them and record the answer as a row of
    `## Shared data` in the plan (`| Data | Owner | Also written by |`,
    contexts by id).
-   Then run `node "<kit>/scripts/consistency.mjs" items --change
+   For the pair check (started with the crosscheck, as said above), run
+   `node "<kit>/scripts/consistency.mjs" items --change
    extract-<capability>`: it lists each link of this capability with the
    capabilities that have a baseline (an archived spec; another extract still
    under analysis is not compared, the later of the two meets the other at
@@ -861,9 +944,10 @@ waves.
    pair code is not the code of both specs as they are now. A `consistent`
    row holds only when its evidence names in quotes a requirement of each
    side (or says `<capability>: nothing` for a side that states nothing
-   about the topic). For every `conflict`, `duplicate` or `term`, have an
-   analyst correct this change's spec when it is the wrong side, then a
-   checker crosscheck the changed requirement and compare the pair again.
+   about the topic). A `conflict`, `duplicate` or `term` where this
+   change's spec is the wrong side goes to the fix round (item 7): the
+   analyst corrects the spec, then a checker crosschecks the changed
+   requirement and compares the pair again.
    When the other side (a baseline) is wrong, or for `unclear`, move it to
    questions.md and write `question extract-<capability> Q<n>` as its
    verdict yourself, keeping the `<!-- pair ... -->` code: the person
@@ -871,7 +955,18 @@ waves.
    holds only during this change's review (step 4 says what to do after the
    archive). Any later change to this spec makes its rows stale: compare
    those pairs again before the review ends.
-7. **Questions and review.** Write questions.md from the analysts' reported
+7. **Fix round.** When every check of steps 3 to 6 has returned and its
+   parts are merged, move what only the person can decide to questions.md
+   (as each step says), then run `node "<kit>/scripts/findings.mjs" --change
+   extract-<capability> --write` and give its file to one analyst with the
+   change's specs, screens.md, trace.md and source-map.md to correct
+   (Working in parallel, Fix rounds). From its report, recheck in one go:
+   crosscheck the requirements and screens it changed or added, judge again
+   the sites of coverage.md they cover, walk again the entry points whose
+   behavior changed, and compare again the links `findings.mjs` lists under
+   `recheck`. Run sites.mjs again first when the source map changed. Merge,
+   and run `findings.mjs` again: what is left is the next round.
+8. **Questions and review.** Write questions.md from the analysts' reported
    doubts and the rows moved to questions, each with the answer you recommend
    and why (`  - Recommended:` and `  - Why:` under it, as the schema says; ask
    the analyst who reported a doubt when the reason needs the code read
@@ -884,12 +979,12 @@ waves.
    check with the same code, and the person decides whether they may be left
    out. When the list changes later, run it again with `--update`: the new
    C1 words are unticked.
-8. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
+9. **Validate.** `node "<kit>/scripts/openspec.mjs" validate extract-<capability> --strict`. Have the
    analyst fix every error and warning. `gate.mjs review` also checks the
    coverage, so the person does not: source-map.md holds every file the plan
    assigns to the capability, and every requirement has a trace row whose
    paths exist.
-9. **Report** to the person: the number of requirements and screens, what the
+10. **Report** to the person: the number of requirements and screens, what the
    crosscheck found and fixed (`incomplete` rows are behavior the text left
    out), how many sites the omission check judged and the gaps it found and
    how they were resolved, how many entry points and behaviors the
@@ -1052,10 +1147,11 @@ Words); the finish step (step 6) lists it in the hand-over.
    openspec/spec-relay/work/port-<capability> --clean`; the merge stamps the
    file with the hash of the code it was checked on, and port-done fails once
    the code changes after it. Never run an implementer and a checker of the
-   same port in one wave. For every `mismatch`
-   and `unclear` row, give the row to the implementer to fix, run `verify.mjs`
-   again, then have a new checker check that row again (a part file with a
-   higher number) and merge it, so the stamp is the fixed code's. When the row
+   same port at once. Give all the `mismatch`
+   and `unclear` rows to the implementer in one task (`findings.mjs --change
+   port-<capability> --write` writes them to one file), run `verify.mjs`
+   again, then have new checkers check those rows again in one go (part
+   files with a higher number) and merge them, so the stamp is the fixed code's. When the row
    shows that the source code and the baseline spec disagree, stop and ask the
    person (step 5).
 8. **Done check.** Run `node "<kit>/scripts/gate.mjs" port-done --change
@@ -1213,8 +1309,8 @@ reads it and it approves nothing. See docs/GUIDE.md.
    its list of code files as init printed them, and give `routes.md` to one
    more writer (the routes task). One writer per guide file: for a module
    too large for one writer, give the rest of its files to a writer in the
-   next wave, to add to the same file. Save and compare the guard around the
-   wave as usual (it does not cover `guide/`; the hook, when on, refuses a
+   next wave, to add to the same file. Run `wave.mjs start` and `end` around
+   the wave as usual (it does not cover `guide/`; the hook, when on, refuses a
    subagent's write to `guide/qa/`).
 4. Run `node "<kit>/scripts/guide.mjs" stamp` (it writes the file's hash under
    each heading that has none), then `node "<kit>/scripts/guide.mjs" check`.
